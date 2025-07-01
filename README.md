@@ -42,7 +42,7 @@ Current development depends on the following Yambopy fork's branch:
 So this dependency must be installed after cloning that fork and switching to that branch (ase-bz). Then:
 
 ```
-pip install --editable .
+pip install --editable . --config-settings editable_mode=compat
 ```
 
 Finally, run as follows:
