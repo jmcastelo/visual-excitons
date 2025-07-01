@@ -1,4 +1,3 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtWidgets import QWidget, QTabWidget, QVBoxLayout
 from options import Options
 from style import DispersionStyle, AbsorptionStyle, BandStructureStyle
@@ -73,7 +72,7 @@ class MainWidget(QWidget):
         self.dispersionStyle.styleChanged.connect(self.styleDialog.dispersionStyleWidget.setWidgetsValues)
         #self.bandStructureStyle.styleChanged.connect(self.styleDialog.bandStructureStyleWidget.setWidgetsValues)
 
-        self.setWindowTitle('Visual Excitons');
+        self.setWindowTitle('Visual Excitons')
 
     def closeEvent(self, event):
         self.styleDialog.close()

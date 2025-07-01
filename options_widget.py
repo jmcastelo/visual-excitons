@@ -1,7 +1,5 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import Slot, Qt
-from PySide6.QtGui import QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QGroupBox, QTableWidget, QHeaderView, QTableWidgetItem, QGridLayout, QSizePolicy
+from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox
 from pathlib import Path
 
 
@@ -17,7 +15,7 @@ class OptionsWidget(QWidget):
 
         selectSaveDirButton = QPushButton('Select')
         selectSaveDirButton.clicked.connect(self.selectSaveDir)
-        selectSaveDirButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        selectSaveDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.saveDirEdit = QLineEdit()
         self.saveDirEdit.editingFinished.connect(self.editSaveDir)
@@ -30,12 +28,14 @@ class OptionsWidget(QWidget):
         self.saveLabel = QLabel('ns.db1 not found!')
         self.options.saveDirChanged.connect(self.setSaveLabel)
 
+        self.options.databaseFound.connect(self.onDatabaseFound)
+
         # Diago Dir widgets
         diagoDirLabel = QLabel('Diago Directory:')
 
         selectDiagoDirButton = QPushButton('Select')
         selectDiagoDirButton.clicked.connect(self.selectDiagoDir)
-        selectDiagoDirButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        selectDiagoDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.diagoDirEdit = QLineEdit()
         self.diagoDirEdit.editingFinished.connect(self.editDiagoDir)
@@ -50,7 +50,7 @@ class OptionsWidget(QWidget):
 
         # Dir group
         dirLayout = QVBoxLayout()
-        dirLayout.setAlignment(Qt.AlignTop)
+        dirLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         dirLayout.addLayout(saveLayout)
         dirLayout.addWidget(self.saveLabel)
         dirLayout.addLayout(diagoLayout)
@@ -59,7 +59,28 @@ class OptionsWidget(QWidget):
         dirGroupBox = QGroupBox("Directories")
         dirGroupBox.setLayout(dirLayout)
 
-        # Q-Path widgets
+        # BZ widgets
+        self.ibravComboBox = QComboBox()
+        self.ibravComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.ibravComboBox.addItems([str(ibrav) for ibrav in self.options.availableIbrav])
+        self.ibravComboBox.currentTextChanged.connect(self.getLatticeData)
+
+        self.ibravComboBox.setEnabled(False)
+        self.options.databaseFound.connect(self.setIbrav)
+
+        bzFormLayout = QFormLayout()
+        bzFormLayout.addRow('ibrav', self.ibravComboBox)
+
+        self.parameterLabels = {
+            'a': QLabel(),
+            'b': QLabel(),
+            'c': QLabel(),
+            'alpha': QLabel(),
+            'beta': QLabel(),
+            'gamma': QLabel()
+        }
+
+        """
         self.qPathPoints = 0
 
         self.qPathTableWidget = QTableWidget(self)
@@ -68,17 +89,39 @@ class OptionsWidget(QWidget):
         self.qPathTableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         self.initQPathTableWidget()
+        """
 
-        qPathLayout = QVBoxLayout()
-        qPathLayout.setAlignment(Qt.AlignTop)
-        qPathLayout.addWidget(self.qPathTableWidget)
+        qPathLayout = QGridLayout()
+        qPathLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        qPathLayout.addLayout(bzFormLayout, 0, 0)
+
+        col = 0
+        for param, label in self.parameterLabels.items():
+            formLayout = QFormLayout()
+            formLayout.addRow(param, label)
+            qPathLayout.addLayout(formLayout, 1, col)
+            col += 1
+
+        self.variantLabel = QLabel()
+        formLayout = QFormLayout()
+        formLayout.addRow('Variant', self.variantLabel)
+
+        qPathLayout.addLayout(formLayout, 0, 1)
+
+        self.qPathLineEdit = QLineEdit()
+        self.qPathLineEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
+
+        formLayout = QFormLayout()
+        formLayout.addRow('Path', self.qPathLineEdit)
+
+        qPathLayout.addLayout(formLayout, 0, 2, 1, 4)
 
         qPathGroupBox = QGroupBox("Q-Path")
         qPathGroupBox.setLayout(qPathLayout)
 
         # Main layout
         mainLayout = QGridLayout()
-        mainLayout.setAlignment(Qt.AlignTop)
+        mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         mainLayout.addWidget(dirGroupBox, 0, 0)
         mainLayout.addWidget(qPathGroupBox, 1, 0)
 
@@ -122,6 +165,56 @@ class OptionsWidget(QWidget):
         self.diagoDirEdit.setText(dir)
         self.diagoLabel.setText(text)
 
+    @Slot(bool)
+    def setIbrav(self, found):
+        if found:
+            ibrav = self.options.detectLatticeType()
+            if ibrav > 0:
+                self.ibravComboBox.setCurrentText(str(ibrav))
+            else:
+                msgBox = QMessageBox()
+                msgBox.setText('Warning')
+                msgBox.setInformativeText('Unable to detect Bravais lattice type')
+                msgBox.exec()
+
+                self.ibravComboBox.setCurrentIndex(0)
+
+            self.ibravComboBox.setEnabled(True)
+        else:
+            self.ibravComboBox.setEnabled(False)
+
+    @Slot(int)
+    def getLatticeData(self, ibrav):
+        try:
+            self.options.setLatticeData(int(ibrav))
+        except ValueError as error:
+            self.qPathLineEdit.clear()
+            self.variantLabel.clear()
+
+            msgBox = QMessageBox()
+            msgBox.setText('Error')
+            msgBox.setInformativeText(str(error))
+            msgBox.exec()
+        else:
+            self.qPathLineEdit.setText(self.options.defaultPath)
+            self.variantLabel.setText(self.options.variant)
+
+    @Slot(bool)
+    def onDatabaseFound(self, found):
+        if found:
+            self.variantLabel.setText(self.options.variant)
+            self.qPathLineEdit.setText(self.options.defaultPath)
+
+            for paramName, label in self.parameterLabels.items():
+                label.setText(f"{self.options.latticeParameters[paramName]}")
+        else:
+            self.variantLabel.clear()
+            self.qPathLineEdit.clear()
+
+            for param, label in self.parameterLabels.items():
+                label.clear()
+
+    """
     @Slot()
     def setQPLabel(self, dir, text):
         self.qpDirEdit.setText(dir)
@@ -209,3 +302,4 @@ class OptionsWidget(QWidget):
             self.options.updateQPointLabel(rowIndex, currentLineEdit.text())
         elif colIndex == 4:
             self.options.updateInterval(rowIndex, int(currentLineEdit.text()))
+    """

@@ -1,15 +1,17 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import QObject, Signal, Slot
-from yambopy import YamboLatticeDB, YamboSaveDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra
+from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra
 from yambopy.lattice import red_car, calculate_distances
-from abipy.core.skw import SkwInterpolator
+from yambopy.tools.skw import SkwInterpolator
 import numpy as np
+
 
 
 class PointData:
     def __init__(self, i, j):
         self.i = i
         self.j = j
+
+
 
 class Calculations(QObject):
     qPathReady = Signal(list, list)
@@ -50,8 +52,7 @@ class Calculations(QObject):
     @Slot()
     def getExcitonDispersion(self):
         self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
-        self.saveDB = YamboSaveDB.from_db_file(self.options.saveDir)
-        self.excitonDispersion = ExcitonDispersion(self.lattice, self.saveDB, self.options.nExcitons, self.options.diagoDir)
+        self.excitonDispersion = ExcitonDispersion(self.lattice, self.options.nExcitons, self.options.diagoDir)
 
         self.excitonDispersion.get_dispersion(self.options.qPath)
 

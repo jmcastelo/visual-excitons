@@ -1,8 +1,28 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import QObject, Signal
 from pathlib import PurePath, Path
-from qepy.lattice import Path as kPath
+from yambopy import ibrav_required_parameters, get_lattice_data, BrillouinZone
 from glob import glob
+import numpy as np
+from yambopy import YamboLatticeDB, BrillouinZone
+
+
+
+def get_angle_between(ai, aj):
+    return np.round(np.arccos(np.dot(ai, aj) / (np.linalg.norm(ai) * np.linalg.norm(aj))) * 180 / np.pi, 4)
+
+
+
+def get_cell_params(cell):
+    cell_params = {
+        'a': np.round(np.linalg.norm(cell[0,:]), 4),
+        'b': np.round(np.linalg.norm(cell[1,:]), 4),
+        'c': np.round(np.linalg.norm(cell[2,:]), 4),
+        'alpha': get_angle_between(cell[1,:], cell[2,:]),
+        'beta': get_angle_between(cell[0,:], cell[2,:]),
+        'gamma': get_angle_between(cell[0,:], cell[1,:])
+    }
+    return cell_params
+
 
 
 class Options(QObject):
@@ -10,15 +30,27 @@ class Options(QObject):
     saveDirChanged = Signal(str, str)
     diagoDirChanged = Signal(str, str)
 
+    # Database signal
+    databaseFound = Signal(bool)
+
     numQPointsChanged = Signal(int)
 
     def __init__(self):
         super().__init__()
 
-        # Q-Path
-        self.kList = [[[0.0, 0.0, 0.0], "Gamma"], [[0.0, 0.5, 0.0], "M"], [[0.3333333, 0.3333333, 0.0], "K"], [[0.0, 0.0, 0.0], "Gamma"]]
-        self.intervals = [50, 10, 50]
-        self.qPath = kPath(self.kList, self.intervals)
+        # Available ibrav
+        self.ibravParameters = ibrav_required_parameters()
+        self.availableIbrav = [ibrav for ibrav in list(self.ibravParameters.keys())]
+
+        # Lattice data
+        self.cell = []
+        self.latticeParameters = {}
+        self.variant =''
+        self.highSymmetryPoints = {}
+        self.defaultPath = ''
+
+        # Q-Path (yet undefined)
+        self.qBZ = None
 
         # Dispersion
         self.nExcitons = 6
@@ -36,8 +68,11 @@ class Options(QObject):
         if file.is_file():
             self.saveDir = dir
             self.saveDirChanged.emit(dir, "ns.db1 found")
+            self.setLatticeParameters()
+            self.databaseFound.emit(True)
         else:
             self.saveDirChanged.emit(dir, "ns.db1 not found!")
+            self.databaseFound.emit(False)
 
     def setDiagoDir(self, dir):
         files = glob(dir + '/ndb.BS_diago_Q*')
@@ -52,6 +87,27 @@ class Options(QObject):
         else:
             self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* not found!")
 
+    def setLatticeParameters(self):
+        lattice = YamboLatticeDB.from_db(self.saveDir + '/ns.db1', Expand=False)
+        self.cell = lattice.lat
+        self.latticeParameters = get_cell_params(self.cell)
+
+    def detectLatticeType(self):
+        for ibrav in self.availableIbrav:
+            try:
+                testCell, _, _, _ = get_lattice_data(ibrav, self.latticeParameters)
+            except ValueError as e:
+                continue
+
+            if np.allclose(self.cell, testCell, rtol=1e-5):
+                return ibrav
+
+        return -1
+
+    def setLatticeData(self, ibrav):
+        cell, self.variant, self.highSymmetryPoints, self.defaultPath = get_lattice_data(ibrav, self.latticeParameters)
+
+    """
     def updateQPointValue(self, index, component, value):
         self.kList[index][0][component] = value
         self.qPath = kPath(self.kList, self.intervals)
@@ -75,6 +131,7 @@ class Options(QObject):
         self.kList.pop(index)
         if index < len(self.intervals): self.intervals.pop(index)
         self.qPath = kPath(self.kList, self.intervals)
+    """
 
     def setNExcitons(self, n):
         if n < 1: n = 1
