@@ -1,11 +1,12 @@
 # visual-excitons
-Within the framework of Yambopy, this is a GUI to explore exciton properties visually.
+
+Within the framework of YamboPy, this is a GUI to explore exciton properties visually.
 
 UNDER DEVELOPMENT!
 
 ### Dependencies
 
-Yambopy:
+YamboPy:
 
 "Create automatic workflows for yambo and quantum espresso using python. Work directly with netCDF databases. Do pre/post-processing, data analysis and plotting for yambo and quantum espresso."
 
@@ -35,7 +36,13 @@ source .venv/bin/activate
 pip install pyside6 pyqtgraph
 ```
 
-Current development depends on the following Yambopy fork's branch:
+Note that depending on the pyqtgraph version, you may need to install specific version 6.9.0 or 6.8.3 of pyside6. On this issue, see this [question](https://stackoverflow.com/questions/79678479/pyqtgraph-not-working-on-example-in-pythonguis-website-pyside6-with-pyqtgraph).
+
+```
+pip install --force-reinstall -v "pyside6==6.9.0"
+```
+
+Current development depends on the following YamboPy fork's branch:
 
 - https://github.com/jmcastelo/yambopy/tree/ase-bz
 
@@ -44,6 +51,8 @@ So this dependency must be installed after cloning that fork and switching to th
 ```
 pip install --editable . --config-settings editable_mode=compat
 ```
+
+The last option of the previous command is useful for some IDEs to detect YamboPy's package, as noted [here](https://stackoverflow.com/questions/76301782/why-are-pycharm-and-pylance-not-detecting-packages-installed-in-editable-mode).
 
 Finally, run as follows:
 ```
