@@ -1,6 +1,5 @@
-# This Python file uses the following encoding: utf-8
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import QWidget, QGridLayout, QVBoxLayout, QSplitter
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter
 from dispersion_widget import DispersionWidget
 from band_structure_widget import BandStructureWidget
 from absorption_widget import AbsorptionWidget
@@ -63,17 +62,17 @@ class GraphsWidget(QWidget):
         # Splitters
 
         vSplitter = QSplitter()
-        vSplitter.setOrientation(Qt.Vertical)
+        vSplitter.setOrientation(Qt.Orientation.Vertical)
         vSplitter.addWidget(dispersionWidget)
         vSplitter.addWidget(bandStructureWidget)
 
         hSplitter = QSplitter()
-        hSplitter.setOrientation(Qt.Horizontal)
+        hSplitter.setOrientation(Qt.Orientation.Horizontal)
         hSplitter.addWidget(vSplitter)
         hSplitter.addWidget(absorptionWidget)
 
         v2Splitter = QSplitter()
-        v2Splitter.setOrientation(Qt.Vertical)
+        v2Splitter.setOrientation(Qt.Orientation.Vertical)
         v2Splitter.addWidget(hSplitter)
         v2Splitter.addWidget(self.parametersWidget)
         v2Splitter.setStretchFactor(0, 2)

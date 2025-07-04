@@ -1,7 +1,6 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QDoubleSpinBox, QHBoxLayout, QVBoxLayout, QGroupBox, QGridLayout, QSizePolicy
+from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QGroupBox, QGridLayout, QSizePolicy
 
 
 class ParametersWidget(QWidget):
@@ -23,10 +22,10 @@ class ParametersWidget(QWidget):
         self.nExcitonsLineEdit.setValidator(QIntValidator())
         self.nExcitonsLineEdit.setText(str(self.options.nExcitons))
         self.nExcitonsLineEdit.editingFinished.connect(self.updateNExcitons)
-        self.nExcitonsLineEdit.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.nExcitonsLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.calculateDispersionButton = QPushButton("Compute Dispersion")
-        self.calculateDispersionButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.calculateDispersionButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         dispersionLayout = QGridLayout()
         dispersionLayout.addWidget(nExcitonsLabel, 0, 0)
@@ -46,22 +45,22 @@ class ParametersWidget(QWidget):
         self.energyMinLineEdit.setValidator(QDoubleValidator())
         self.energyMinLineEdit.setText(f"{self.options.energyMin}")
         self.energyMinLineEdit.editingFinished.connect(self.updateEnergyMin)
-        self.energyMinLineEdit.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.energyMinLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.energyMaxLineEdit = QLineEdit()
         self.energyMaxLineEdit.setValidator(QDoubleValidator())
         self.energyMaxLineEdit.setText(f"{self.options.energyMax}")
         self.energyMaxLineEdit.editingFinished.connect(self.updateEnergyMax)
-        self.energyMaxLineEdit.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.energyMaxLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.energyStepLineEdit = QLineEdit()
         self.energyStepLineEdit.setValidator(QDoubleValidator())
         self.energyStepLineEdit.setText(f"{self.options.energyStep}")
         self.energyStepLineEdit.editingFinished.connect(self.updateEnergyStep)
-        self.energyStepLineEdit.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.energyStepLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         absorptionGridLayout = QGridLayout()
-        absorptionGridLayout.setAlignment(Qt.AlignTop)
+        absorptionGridLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         absorptionGridLayout.addWidget(energyMinLabel, 0, 0)
         absorptionGridLayout.addWidget(energyMaxLabel, 1, 0)
         absorptionGridLayout.addWidget(energyStepLabel, 2, 0)
@@ -80,15 +79,15 @@ class ParametersWidget(QWidget):
         self.excMinIntensityLineEdit.setValidator(QDoubleValidator())
         self.excMinIntensityLineEdit.setText(f"{self.options.excMinIntensity}")
         self.excMinIntensityLineEdit.editingFinished.connect(self.updateExcMinIntensity)
-        self.excMinIntensityLineEdit.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.excMinIntensityLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.showLabelsButton = QPushButton("Show Labels")
         self.showLabelsButton.setCheckable(True)
         self.showLabelsButton.setChecked(False)
-        self.showLabelsButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.showLabelsButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         excitonsGridLayout = QGridLayout()
-        excitonsGridLayout.setAlignment(Qt.AlignTop)
+        excitonsGridLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         excitonsGridLayout.addWidget(excMinIntensityLabel, 0, 0)
         excitonsGridLayout.addWidget(self.excMinIntensityLineEdit, 0, 1)
         excitonsGridLayout.addWidget(self.showLabelsButton, 2, 0, 1, 2)
@@ -101,10 +100,10 @@ class ParametersWidget(QWidget):
         toggleDialogButton = QPushButton("Show Style Dialog")
         toggleDialogButton.setCheckable(True)
         toggleDialogButton.clicked.connect(self.toggleStyleDialog)
-        toggleDialogButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        toggleDialogButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         styleLayout = QVBoxLayout()
-        styleLayout.setAlignment(Qt.AlignTop)
+        styleLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         styleLayout.addWidget(toggleDialogButton)
 
         styleGroupBox = QGroupBox("Style")
@@ -113,7 +112,7 @@ class ParametersWidget(QWidget):
         # Main layout
 
         mainLayout = QGridLayout()
-        mainLayout.setAlignment(Qt.AlignTop)
+        mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         mainLayout.addWidget(dispersionGroupBox, 2, 0)
         mainLayout.addWidget(absorptionGroupBox, 2, 1)
         mainLayout.addWidget(excitonsGroupBox, 2, 2)

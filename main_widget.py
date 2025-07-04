@@ -3,9 +3,6 @@ from options import Options
 from style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from calculations import Calculations
 from options_widget import OptionsWidget
-from dispersion_widget import DispersionWidget
-from band_structure_widget import BandStructureWidget
-from absorption_widget import AbsorptionWidget
 from graphs_widget import GraphsWidget
 from style_widget import StyleDialog
 

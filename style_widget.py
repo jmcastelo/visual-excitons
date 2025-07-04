@@ -1,7 +1,6 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtWidgets import QDialog, QColorDialog, QWidget, QLabel, QComboBox, QGroupBox, QRadioButton, QPushButton, QSpinBox, QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QGridLayout, QStackedLayout, QSizePolicy, QTabWidget, QFontDialog
-from style import CurveStyle
+from style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 
 
 class ApplyCurveStyleWidget(QWidget):
@@ -29,7 +28,7 @@ class ApplyCurveStyleWidget(QWidget):
         styleLayout.addWidget(singleCurveRadio)
 
         styleGroupBox = QGroupBox("Apply Changes to:")
-        styleGroupBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        styleGroupBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         styleGroupBox.setLayout(styleLayout)
 
         mainLayout = QVBoxLayout()
@@ -68,7 +67,7 @@ class ApplyGraphStyleWidget(QWidget):
         styleLayout.addWidget(self.singleGraphRadio)
 
         styleGroupBox = QGroupBox("Apply Changes to:")
-        styleGroupBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        styleGroupBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         styleGroupBox.setLayout(styleLayout)
 
         mainLayout = QVBoxLayout()
@@ -110,7 +109,7 @@ class CurveStyleWidget(QWidget):
 
         lineColorButton = QPushButton("Select")
         lineColorButton.clicked.connect(self.lineColorDialog.show)
-        lineColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        lineColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Line width widgets
 
@@ -120,7 +119,7 @@ class CurveStyleWidget(QWidget):
         self.lineWidthSpinBox.setRange(1, 7)
         self.lineWidthSpinBox.setValue(1)
         self.lineWidthSpinBox.valueChanged.connect(self.style.curveStyle.setCurveWidth)
-        self.lineWidthSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.lineWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Gradient style widgets
 
@@ -134,11 +133,11 @@ class CurveStyleWidget(QWidget):
 
         startColorButton = QPushButton("Start Color")
         startColorButton.clicked.connect(self.startColorDialog.show)
-        startColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        startColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         endColorButton = QPushButton("End Color")
         endColorButton.clicked.connect(self.endColorDialog.show)
-        endColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        endColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         gradientLayout = QHBoxLayout()
         gradientLayout.addWidget(startColorButton)
@@ -180,7 +179,7 @@ class CurveStyleWidget(QWidget):
         else:
             pen = None
 
-        if pen != None:
+        if pen is not None:
             # Line style
             penStyles = [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine, Qt.PenStyle.DashDotLine, Qt.PenStyle.DashDotDotLine]
             styleIndex = penStyles.index(pen.style())
@@ -228,7 +227,7 @@ class PointStyleWidget(QWidget):
 
         self.symbolStyleGradientButton = QPushButton('Apply')
         self.symbolStyleGradientButton.clicked.connect(self.style.pointStyle.setSymbolGradient)
-        self.symbolStyleGradientButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.symbolStyleGradientButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Symbol size
 
@@ -238,7 +237,7 @@ class PointStyleWidget(QWidget):
         self.symbolSizeSpinBox.setRange(0, 500)
         self.symbolSizeSpinBox.setValue(6)
         self.symbolSizeSpinBox.valueChanged.connect(self.style.pointStyle.setPointSize)
-        self.symbolSizeSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.symbolSizeSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Main layout
 
@@ -249,7 +248,7 @@ class PointStyleWidget(QWidget):
         mainLayout.addWidget(self.symbolStyleGradientLabel, 1, 0)
         mainLayout.addWidget(self.symbolStyleGradientButton, 1, 1)
         mainLayout.addWidget(symbolSizeLabel, 2, 0)
-        mainLayout.addWidget(self.symbolSizeSpinBox, 2, 1);
+        mainLayout.addWidget(self.symbolSizeSpinBox, 2, 1)
 
         self.setLayout(mainLayout)
 
@@ -257,12 +256,12 @@ class PointStyleWidget(QWidget):
     def setWidgetsValues(self):
         symbolIndex = self.style.pointStyle.currentPointSymbolIndex()
 
-        if symbolIndex != None:
+        if symbolIndex is not None:
             self.symbolStyleComboBox.setCurrentIndex(symbolIndex)
 
         size = self.style.pointStyle.currentPointSize()
 
-        if size != None:
+        if size is not None:
             self.symbolSizeSpinBox.setValue(size)
 
     @Slot()
@@ -292,7 +291,7 @@ class LegendStyleWidget(QWidget):
 
         textColorButton = QPushButton('Select')
         textColorButton.clicked.connect(self.textColorDialog.show)
-        textColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        textColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Text size widgets
 
@@ -302,7 +301,7 @@ class LegendStyleWidget(QWidget):
         textSizeSpinBox.setRange(1, 100)
         textSizeSpinBox.setValue(8)
         textSizeSpinBox.valueChanged.connect(self.style.legendStyle.setTextSize)
-        textSizeSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        textSizeSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Background color widgets
 
@@ -314,7 +313,7 @@ class LegendStyleWidget(QWidget):
 
         backgroundColorButton = QPushButton('Select')
         backgroundColorButton.clicked.connect(self.backgroundColorDialog.show)
-        backgroundColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        backgroundColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Border style widgets
 
@@ -333,7 +332,7 @@ class LegendStyleWidget(QWidget):
         borderWidthSpinBox.setRange(0, 7)
         borderWidthSpinBox.setValue(0)
         borderWidthSpinBox.valueChanged.connect(self.style.legendStyle.setBorderWidth)
-        borderWidthSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        borderWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Border color widgets
 
@@ -345,7 +344,7 @@ class LegendStyleWidget(QWidget):
 
         borderColorButton = QPushButton('Select')
         borderColorButton.clicked.connect(self.borderColorDialog.show)
-        borderColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        borderColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Offset X widgets
 
@@ -355,7 +354,7 @@ class LegendStyleWidget(QWidget):
         offsetXSpinBox.setRange(0, 1000)
         offsetXSpinBox.setValue(30)
         offsetXSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetX)
-        offsetXSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        offsetXSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Offset Y widgets
 
@@ -365,7 +364,7 @@ class LegendStyleWidget(QWidget):
         offsetYSpinBox.setRange(0, 1000)
         offsetYSpinBox.setValue(30)
         offsetYSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetY)
-        offsetYSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        offsetYSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Main layout
 
@@ -419,7 +418,7 @@ class AxesStyleWidget(QWidget):
         for element in self.elements:
             self.elementsComboBox.addItem(element.name)
         self.elementsComboBox.currentIndexChanged.connect(self.selectElement)
-        self.elementsComboBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.elementsComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Color and font dialogs
 
@@ -429,13 +428,13 @@ class AxesStyleWidget(QWidget):
         # Color button
 
         self.colorButton = QPushButton('Color')
-        self.colorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.colorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.colorButton.clicked.connect(self.colorDialog.show)
 
         # Font button
 
         self.fontButton = QPushButton('Font')
-        self.fontButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.fontButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.fontButton.clicked.connect(self.fontDialog.show)
 
         # Axes pen width widgets
@@ -446,7 +445,7 @@ class AxesStyleWidget(QWidget):
         axesPenWidthSpinBox.setRange(1, 10)
         axesPenWidthSpinBox.setValue(1)
         axesPenWidthSpinBox.valueChanged.connect(self.style.axesStyle.setAxesWidth)
-        axesPenWidthSpinBox.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        axesPenWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         mainLayout = QGridLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
@@ -523,7 +522,7 @@ class FillStyleWidget(QWidget):
 
         weightsColorButton = QPushButton('Select')
         weightsColorButton.clicked.connect(self.weightsColorDialog.show)
-        weightsColorButton.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        weightsColorButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Weight factor widgets
 
@@ -534,7 +533,7 @@ class FillStyleWidget(QWidget):
         weightFactorSpin.setMaximum(1000.0)
         weightFactorSpin.setValue(1.0)
         weightFactorSpin.valueChanged.connect(self.style.weightFactorChanged)
-        weightFactorSpin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        weightFactorSpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         mainLayout = QGridLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
@@ -581,7 +580,7 @@ class BandStructureStyleWidget(QWidget):
         mainTabWidget.addTab(self.fillStyleWidget, 'Fill')
         mainTabWidget.addTab(self.axesStyleWidget, 'Axes')
         mainTabWidget.currentChanged.connect(self.setApplyStyleWidget)
-        mainTabWidget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        mainTabWidget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.stackedLayout = QStackedLayout()
         self.stackedLayout.addWidget(applyCurveStyleWidget)
@@ -669,7 +668,7 @@ class DispersionStyleWidget(QWidget):
         mainTabWidget.addTab(self.pointStyleWidget, 'Symbols')
         mainTabWidget.addTab(self.axesStyleWidget, 'Axes')
         mainTabWidget.currentChanged.connect(self.setApplyStyleWidget)
-        mainTabWidget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        mainTabWidget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.stackedLayout = QStackedLayout()
         self.stackedLayout.addWidget(applyCurveStyleWidget)
@@ -755,7 +754,7 @@ class AbsorptionStyleWidget(QWidget):
         mainTabWidget.addTab(self.axesStyleWidget, 'Axes')
         mainTabWidget.addTab(self.legendStyleWidget, 'Legend')
         mainTabWidget.currentChanged.connect(self.setApplyStyleWidget)
-        mainTabWidget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        mainTabWidget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         self.stackedLayout = QStackedLayout()
         self.stackedLayout.addWidget(applyCurveStyleWidget)
@@ -811,7 +810,7 @@ class AbsorptionStyleWidget(QWidget):
 
 
 class StyleDialog(QDialog):
-    def __init__(self, dispersionStyle, absorptionStyle, bandStructureStyle):
+    def __init__(self, dispersionStyle: DispersionStyle, absorptionStyle: AbsorptionStyle, bandStructureStyle: BandStructureStyle):
         QDialog.__init__(self)
 
         # Graph style widgets
@@ -836,7 +835,7 @@ class StyleDialog(QDialog):
         graphSelector.addItems(["Dispersion", "Absorption", "Band Structure"])
         graphSelector.setCurrentIndex(0)
         graphSelector.currentIndexChanged.connect(self.switchStyleWidget)
-        graphSelector.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        graphSelector.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(graphSelector)

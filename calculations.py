@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Signal, Slot
 from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra
-from yambopy.lattice import red_car, calculate_distances
+from yambopy.lattice import calculate_distances, red_car
 from yambopy.tools.skw import SkwInterpolator
 import numpy as np
 
@@ -54,24 +54,24 @@ class Calculations(QObject):
         self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
         self.excitonDispersion = ExcitonDispersion(self.lattice, self.options.nExcitons, self.options.diagoDir)
 
-        self.excitonDispersion.get_dispersion(self.options.qPath)
+        collinear_qpoints, indices, collinear_distances = self.options.qBZ.get_collinear_kpoints(self.excitonDispersion.car_qpoints, self.lattice.sym_car, True)
+        energies = self.excitonDispersion.exc_energies[indices]
 
-        self.dispersionData = self.excitonDispersion.get_data()
+        x = collinear_distances
+        y = energies
 
-        x, y = self.prepareDispersionData(self.dispersionData['qpoints_car'], self.dispersionData['energies'])
-
-        self.dispPoints = [[[x[i], y[j][i]] for i in range(len(x))] for j in range(len(y))]
-        self.dispPointsData = [[PointData(i, j + 1) for i in range(len(x))] for j in range(len(y))]
+        self.dispPoints = [[[x[i], y[i][j]] for i in range(len(x))] for j in range(y.shape[1])]
+        self.dispPointsData = [[PointData(i, j + 1) for i in range(len(x))] for j in range(y.shape[1])]
 
         if self.options.nQpoints > 1:
-            self.dispXInter, self.dispYInter = self.interpolateDispersion()
+            self.dispXInter, self.dispYInter = self.excitonDispersion.interpolate_dispersion(self.options.qBZ)
         else:
             self.dispXInter = []
             self.dispYInter = []
 
         self.excAbsData = []
 
-        self.getQPathCartesian()
+        self.qPathReady.emit(self.options.qBZ.special_kpoints_distances(merge_sections=True), self.options.qBZ.path_labels_list(merge_sections=True))
 
         xRange = (min(x), max(x))
         yRange = (np.array(y).min(), np.array(y).max())
@@ -82,11 +82,6 @@ class Calculations(QObject):
 
         self.excitonBandStructureClear.emit()
         self.excitonAbsorptionClear.emit()
-
-    def prepareDispersionData(self, x, y):
-        xReady = calculate_distances(x)
-        yReady = np.transpose(y)
-        return xReady, yReady
 
     def interpolateDispersion(self):
         lpratio = 10
@@ -107,16 +102,11 @@ class Calculations(QObject):
         symrel = [sym for sym, trev in zip(self.lattice.sym_rec_red, self.lattice.time_rev_list) if trev == False ]
         time_rev = False
 
-        skw = SkwInterpolator(lpratio, ibz_kpoints, ibz_energies[na, :, :], fermie, nelect, cell, symrel, time_rev, verbose = False)
+        skw = SkwInterpolator(lpratio, ibz_kpoints, ibz_energies[na, :, :], fermie, nelect, cell, symrel, time_rev, verbose=False)
 
-        kpoints_path = self.options.qPath.get_klist()[:, :3]
+        energies = skw.interp_kpts(self.options.qBZ.kpoints()).eigens
 
-        energies = skw.interp_kpts(kpoints_path).eigens
-
-        kpoints_path_car = red_car(kpoints_path, self.lattice.rlat)
-
-        x, y = self.prepareDispersionData(kpoints_path_car, energies[0])
-        return x, y
+        return self.options.qBZ.kpoints_distances(), np.transpose(energies[0])
 
     @Slot()
     def emitExcitonDispersionReady(self):
@@ -201,12 +191,14 @@ class Calculations(QObject):
         return -1
 
     def getQPathCartesian(self):
-        qPathCar = red_car(self.options.qPath.kpoints, self.lattice.rlat)
+        # qPathCar = red_car(self.options.qPath.kpoints, self.lattice.rlat)
 
-        x = calculate_distances(qPathCar)
-        labels = self.options.qPath.klabels
+        # x = calculate_distances(qPathCar)
+        # labels = self.options.qPath.klabels
 
-        self.qPathReady.emit(x, labels)
+        # self.qPathReady.emit(x, labels)
+
+        self.qPathReady.emit(self.options.qBZ.special_kpoints_distances(merge_sections=True), self.options.qBZ.path_labels_list(merge_sections=True))
 
     @Slot()
     def getExcitonBandStructure(self, points, dummy):

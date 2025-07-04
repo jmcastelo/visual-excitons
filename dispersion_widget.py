@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
+import numpy as np
 
 
 class DispersionWidget(pg.PlotWidget):
@@ -58,7 +59,7 @@ class DispersionWidget(pg.PlotWidget):
         pointSizes = self.style.pointStyle.pointSizes
 
         for i in range(len(yInter)):
-            dataItem = pg.PlotDataItem(xInter, yInter[i], pen = curvePens[i], symbol = None)
+            dataItem = pg.PlotDataItem(x=xInter, y=yInter[i], pen=curvePens[i], symbol=None)
             dataItem.curve.setClickable(True)
             dataItem.sigClicked.connect(self.curveSelected)
 
@@ -71,13 +72,13 @@ class DispersionWidget(pg.PlotWidget):
                 self.addItem(line)
 
         for i in range(len(points)):
-            scatterPlotItem = pg.ScatterPlotItem(pos = points[i], data = pointsData[i], symbol = pointSymbols[i], pxMode = True, size = pointSizes[i])
+            scatterPlotItem = pg.ScatterPlotItem(pos=points[i], data=pointsData[i], symbol=pointSymbols[i], pxMode=True, size=pointSizes[i])
             scatterPlotItem.sigClicked.connect(self.getSelectedQPoints)
             self.addItem(scatterPlotItem)
 
     @Slot()
     def getSelectedQPoints(self, item, points, ev):
-        self.qPointSelected.emit(points, ev.modifiers() == Qt.ControlModifier)
+        self.qPointSelected.emit(points, ev.modifiers() == Qt.KeyboardModifier.ControlModifier)
 
     @Slot()
     def curveSelected(self, item, ev):
@@ -89,7 +90,9 @@ class DispersionWidget(pg.PlotWidget):
 
     @Slot()
     def setXYRange(self, xRange, yRange):
-        self.setRange(xRange = xRange, yRange = yRange, disableAutoRange = False)
+        # self.setRange(xRange=xRange, yRange=yRange, disableAutoRange=False)
+        self.setXRange(xRange[0], xRange[1])
+        self.setYRange(yRange[0], yRange[1])
 
     @Slot()
     def setXAxis(self, x, labels):
@@ -97,7 +100,7 @@ class DispersionWidget(pg.PlotWidget):
             self.getAxis('bottom').setTicks([list(zip(x, labels))])
             self.getAxis('bottom').setGrid(128)
         else:
-            self.getAxis('bottom').setTicks([[(0.0, 'Gamma')]])
+            self.getAxis('bottom').setTicks([[(0.0, 'G')]])
 
     @Slot()
     def setAxesColor(self, color):

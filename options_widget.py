@@ -1,5 +1,5 @@
 from PySide6.QtCore import Slot, Qt
-from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox
+from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox, QSpinBox, QDoubleSpinBox
 from pathlib import Path
 
 
@@ -60,6 +60,11 @@ class OptionsWidget(QWidget):
         dirGroupBox.setLayout(dirLayout)
 
         # BZ widgets
+
+        qPathLayout = QGridLayout()
+        qPathLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignVCenter)
+
+        # ibrav
         self.ibravComboBox = QComboBox()
         self.ibravComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.ibravComboBox.addItems([str(ibrav) for ibrav in self.options.availableIbrav])
@@ -70,6 +75,7 @@ class OptionsWidget(QWidget):
 
         bzFormLayout = QFormLayout()
         bzFormLayout.addRow('ibrav', self.ibravComboBox)
+        qPathLayout.addLayout(bzFormLayout, 0, 0)
 
         self.parameterLabels = {
             'a': QLabel(),
@@ -91,10 +97,6 @@ class OptionsWidget(QWidget):
         self.initQPathTableWidget()
         """
 
-        qPathLayout = QGridLayout()
-        qPathLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        qPathLayout.addLayout(bzFormLayout, 0, 0)
-
         col = 0
         for param, label in self.parameterLabels.items():
             formLayout = QFormLayout()
@@ -102,19 +104,52 @@ class OptionsWidget(QWidget):
             qPathLayout.addLayout(formLayout, 1, col)
             col += 1
 
+        # Variant
         self.variantLabel = QLabel()
         formLayout = QFormLayout()
         formLayout.addRow('Variant', self.variantLabel)
 
         qPathLayout.addLayout(formLayout, 0, 1)
 
+        # Path
         self.qPathLineEdit = QLineEdit()
         self.qPathLineEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
 
         formLayout = QFormLayout()
         formLayout.addRow('Path', self.qPathLineEdit)
+        qPathLayout.addLayout(formLayout, 0, 2, 1, 3)
 
-        qPathLayout.addLayout(formLayout, 0, 2, 1, 4)
+        # Interpolation
+        self.numPointsSpin = QSpinBox()
+        self.numPointsSpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.numPointsSpin.setMinimum(0)
+        self.numPointsSpin.setMaximum(999999)
+        self.numPointsSpin.setValue(100)
+
+        self.densitySpin = QDoubleSpinBox()
+        self.densitySpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.densitySpin.setMinimum(0)
+        self.densitySpin.setMaximum(9999)
+        self.densitySpin.setSingleStep(0.1)
+        self.densitySpin.setValue(10.0)
+        self.densitySpin.setVisible(False)
+
+        self.interpolationComboBox = QComboBox()
+        self.interpolationComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.interpolationComboBox.addItems(['Number of points', 'Density'])
+
+        self.interpolationLayout = QHBoxLayout()
+        self.interpolationLayout.addWidget(self.interpolationComboBox)
+        self.interpolationLayout.addWidget(self.numPointsSpin)
+        self.interpolationLayout.addWidget(self.densitySpin)
+        self.interpolationComboBox.currentIndexChanged.connect(self.updateInterpolationEdit)
+        qPathLayout.addLayout(self.interpolationLayout, 0, 5)
+
+        # Set path
+        self.setPathButton = QPushButton('Set Q-Path')
+        self.setPathButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.setPathButton.clicked.connect(self.setBrillouinZone)
+        qPathLayout.addWidget(self.setPathButton, 2, 0)
 
         qPathGroupBox = QGroupBox("Q-Path")
         qPathGroupBox.setLayout(qPathLayout)
@@ -129,17 +164,17 @@ class OptionsWidget(QWidget):
 
     @Slot()
     def selectSaveDir(self):
-        dir = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.saveDir, QFileDialog.ShowDirsOnly)
-        if dir != "":
-            self.options.setSaveDir(dir)
-            self.saveDirEdit.setText(dir)
+        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.saveDir, QFileDialog.Option.ShowDirsOnly)
+        if directory != '':
+            self.options.setSaveDir(directory)
+            self.saveDirEdit.setText(directory)
 
     @Slot()
     def selectDiagoDir(self):
-        dir = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.diagoDir, QFileDialog.ShowDirsOnly)
-        if dir != "":
-            self.options.setDiagoDir(dir)
-            self.diagoDirEdit.setText(dir)
+        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
+        if directory != '':
+            self.options.setDiagoDir(directory)
+            self.diagoDirEdit.setText(directory)
 
     @Slot()
     def editSaveDir(self):
@@ -190,6 +225,8 @@ class OptionsWidget(QWidget):
         except ValueError as error:
             self.qPathLineEdit.clear()
             self.variantLabel.clear()
+            self.options.setIbrav(-1)
+            self.setPathButton.setEnabled(False)
 
             msgBox = QMessageBox()
             msgBox.setText('Error')
@@ -198,6 +235,8 @@ class OptionsWidget(QWidget):
         else:
             self.qPathLineEdit.setText(self.options.defaultPath)
             self.variantLabel.setText(self.options.variant)
+            self.options.setIbrav(int(ibrav))
+            self.setPathButton.setEnabled(True)
 
     @Slot(bool)
     def onDatabaseFound(self, found):
@@ -213,6 +252,30 @@ class OptionsWidget(QWidget):
 
             for param, label in self.parameterLabels.items():
                 label.clear()
+
+    @Slot(int)
+    def updateInterpolationEdit(self, index):
+        if index == 0:
+            self.numPointsSpin.setVisible(True)
+            self.densitySpin.setVisible(False)
+        elif index == 1:
+            self.numPointsSpin.setVisible(False)
+            self.densitySpin.setVisible(True)
+
+    @Slot()
+    def setBrillouinZone(self):
+        try:
+            if self.interpolationComboBox.currentIndex() == 0:
+                self.options.setBrillouinZone(path=self.qPathLineEdit.text(), npoints=self.numPointsSpin.value())
+            elif self.interpolationComboBox.currentIndex() == 1:
+                self.options.setBrillouinZone(path=self.qPathLineEdit.text(), density=self.densitySpin.value())
+        except ValueError as error:
+            msgBox = QMessageBox()
+            msgBox.setText('Error')
+            msgBox.setInformativeText(str(error))
+            msgBox.exec()
+        else:
+            self.qPathLineEdit.setText(self.options.getPathString())
 
     """
     @Slot()

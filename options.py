@@ -1,9 +1,8 @@
 from PySide6.QtCore import QObject, Signal
 from pathlib import PurePath, Path
-from yambopy import ibrav_required_parameters, get_lattice_data, BrillouinZone
+from yambopy import ibrav_required_parameters, get_lattice_data, YamboLatticeDB, BrillouinZone
 from glob import glob
 import numpy as np
-from yambopy import YamboLatticeDB, BrillouinZone
 
 
 
@@ -38,7 +37,8 @@ class Options(QObject):
     def __init__(self):
         super().__init__()
 
-        # Available ibrav
+        # ibrav
+        self.ibrav = -1
         self.ibravParameters = ibrav_required_parameters()
         self.availableIbrav = [ibrav for ibrav in list(self.ibravParameters.keys())]
 
@@ -47,6 +47,7 @@ class Options(QObject):
         self.latticeParameters = {}
         self.variant =''
         self.highSymmetryPoints = {}
+        self.availableHighSymmetryPoints = []
         self.defaultPath = ''
 
         # Q-Path (yet undefined)
@@ -81,7 +82,7 @@ class Options(QObject):
         if self.nQpoints > 0 :
             self.diagoDir = dir
             self.parentDir = Path(dir).parent.absolute()
-            self.jobString = PurePath(self.diagoDir).name;
+            self.jobString = PurePath(self.diagoDir).name
             self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* found - (" + str(self.nQpoints) + " Q-Points)")
             self.numQPointsChanged.emit(self.nQpoints)
         else:
@@ -106,7 +107,16 @@ class Options(QObject):
 
     def setLatticeData(self, ibrav):
         cell, self.variant, self.highSymmetryPoints, self.defaultPath = get_lattice_data(ibrav, self.latticeParameters)
+        self.availableHighSymmetryPoints = [label for label in self.highSymmetryPoints.keys()]
 
+    def setIbrav(self, i):
+        self.ibrav = i
+
+    def setBrillouinZone(self, path: str = None, npoints: int = None, density: float = None):
+        self.qBZ = BrillouinZone(ibrav=self.ibrav, parameters=self.latticeParameters, path_string=path, npoints=npoints, density=density)
+
+    def getPathString(self):
+        return self.qBZ.path_string
     """
     def updateQPointValue(self, index, component, value):
         self.kList[index][0][component] = value

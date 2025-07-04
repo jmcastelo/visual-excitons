@@ -1,4 +1,3 @@
-# This Python file uses the following encoding: utf-8
 from PySide6.QtCore import QObject, Signal, Slot, Qt
 from PySide6.QtGui import QColor, QFont
 import pyqtgraph as pg
