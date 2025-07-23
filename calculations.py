@@ -57,6 +57,8 @@ class Calculations(QObject):
         collinear_qpoints, indices, collinear_distances = self.options.qBZ.get_collinear_kpoints(self.excitonDispersion.car_qpoints, self.lattice.sym_car, True)
         energies = self.excitonDispersion.exc_energies[indices]
 
+        self.qIndices = indices
+
         x = collinear_distances
         y = energies
 
@@ -113,7 +115,8 @@ class Calculations(QObject):
         self.excitonDispersionReady.emit(self.dispPoints, self.dispPointsData, self.dispXInter, self.dispYInter)
 
     def computeAbsorptionSpectrum(self, index):
-        qPointIndex = self.dispersionData['qindices'][index]
+        # qPointIndex = self.dispersionData['qindices'][index]
+        qPointIndex = self.qIndices[index]
 
         filename = "ndb.BS_diago_Q%d"%(qPointIndex + 1)
 
@@ -121,7 +124,8 @@ class Calculations(QObject):
 
         energyRange, epsilon = excitonDB.get_chi(estep = self.options.energyStep, emin = self.options.energyMin, emax = self.options.energyMax)
 
-        excitonAbsorption = YamboBSEAbsorptionSpectra(excitonDB, qpt = qPointIndex + 1, path = self.options.parentDir, job_string = self.options.jobString, save = self.options.saveDir)
+        # excitonAbsorption = YamboBSEAbsorptionSpectra(excitonDB, qpt = qPointIndex + 1, path = self.options.parentDir, job_string = self.options.jobString, save = self.options.saveDir)
+        excitonAbsorption = YamboBSEAbsorptionSpectra(excitonDB)
 
         allExcitons = excitonAbsorption.get_excitons(min_intensity = 0.0, max_energy = self.options.energyMax)
         allExcitons = np.array(allExcitons).real
@@ -144,7 +148,8 @@ class Calculations(QObject):
     @Slot()
     def computeQPointAbsorptionSpectrum(self, points, toggleCurve):
         index = points[0].data().i
-        qPointIndex = self.dispersionData['qindices'][index]
+        # qPointIndex = self.dispersionData['qindices'][index]
+        qPointIndex = self.qIndices[index]
 
         curveIndex = self.absorptionCurveIndex(qPointIndex)
 
