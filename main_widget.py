@@ -47,10 +47,9 @@ class MainWidget(QWidget):
         self.tabWidget.addTab(self.optionsWidget, 'Options')
         self.tabWidget.addTab(self.graphsWidget, 'Graphs')
 
-        self.options.setSaveDir('/home/jmcastelo/users/jorge/calcs/save')
-        self.options.setDiagoDir('/home/jmcastelo/users/jorge/calcs/diagos')
-        #self.options.setSaveDir("/home/jmcastelo/yambopy-tutorial/run_calculations/bse/SAVE")
-        #self.options.setDiagoDir("/home/jmcastelo/yambopy-tutorial/run_calculations/bse/yambo")
+        self.options.setSaveDir('./test-datafiles/save')
+        self.options.setDiagoDir('./test-datafiles/diagos')
+        self.options.setQPDir('./test-datafiles/qp')
 
         mainVLayout = QVBoxLayout()
         mainVLayout.addWidget(self.tabWidget)

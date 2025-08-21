@@ -1,5 +1,6 @@
 from PySide6.QtCore import Slot, Qt
-from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox, QSpinBox, QDoubleSpinBox
+from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox, QSpinBox, QDoubleSpinBox
 from pathlib import Path
 
 
@@ -48,6 +49,24 @@ class OptionsWidget(QWidget):
         self.diagoLabel = QLabel('ndb.BS_diago_Q* not found!')
         self.options.diagoDirChanged.connect(self.setDiagoLabel)
 
+        # QP Dir widgets
+        qpDirLabel = QLabel('QP Directory:')
+
+        selectQPDirButton = QPushButton('Select')
+        selectQPDirButton.clicked.connect(self.selectQPDir)
+        selectQPDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+
+        self.qpDirEdit = QLineEdit()
+        self.qpDirEdit.editingFinished.connect(self.editQPDir)
+
+        qpLayout = QHBoxLayout()
+        qpLayout.addWidget(qpDirLabel)
+        qpLayout.addWidget(self.qpDirEdit)
+        qpLayout.addWidget(selectQPDirButton)
+
+        self.qpLabel = QLabel('ndb.QP not found!')
+        self.options.qpDirChanged.connect(self.setQPLabel)
+
         # Dir group
         dirLayout = QVBoxLayout()
         dirLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -55,6 +74,8 @@ class OptionsWidget(QWidget):
         dirLayout.addWidget(self.saveLabel)
         dirLayout.addLayout(diagoLayout)
         dirLayout.addWidget(self.diagoLabel)
+        dirLayout.addLayout(qpLayout)
+        dirLayout.addWidget(self.qpLabel)
 
         dirGroupBox = QGroupBox("Directories")
         dirGroupBox.setLayout(dirLayout)
@@ -177,6 +198,13 @@ class OptionsWidget(QWidget):
             self.diagoDirEdit.setText(directory)
 
     @Slot()
+    def selectQPDir(self):
+        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
+        if directory != '':
+            self.options.setQPDir(directory)
+            self.qpDirEdit.setText(directory)
+
+    @Slot()
     def editSaveDir(self):
         if Path(self.saveDirEdit.text()).is_dir():
             self.options.setSaveDir(self.saveDirEdit.text())
@@ -191,6 +219,13 @@ class OptionsWidget(QWidget):
             self.diagoDirEdit.setText(self.options.diagoDir)
 
     @Slot()
+    def editQPDir(self):
+        if Path(self.qpDirEdit.text()).is_dir():
+            self.options.setQPDir(self.qpDirEdit.text())
+        else:
+            self.qpDirEdit.setText(self.options.qpDir)
+
+    @Slot()
     def setSaveLabel(self, dir, text):
         self.saveDirEdit.setText(dir)
         self.saveLabel.setText(text)
@@ -199,6 +234,11 @@ class OptionsWidget(QWidget):
     def setDiagoLabel(self, dir, text):
         self.diagoDirEdit.setText(dir)
         self.diagoLabel.setText(text)
+
+    @Slot()
+    def setQPLabel(self, dir, text):
+        self.qpDirEdit.setText(dir)
+        self.qpLabel.setText(text)
 
     @Slot(bool)
     def setIbrav(self, found):

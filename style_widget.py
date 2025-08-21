@@ -1,5 +1,7 @@
 from PySide6.QtCore import Signal, Slot, Qt
-from PySide6.QtWidgets import QDialog, QColorDialog, QWidget, QLabel, QComboBox, QGroupBox, QRadioButton, QPushButton, QSpinBox, QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QGridLayout, QStackedLayout, QSizePolicy, QTabWidget, QFontDialog
+from PySide6.QtWidgets import QDialog, QColorDialog, QWidget, QLabel, QComboBox, QGroupBox, QRadioButton
+from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QGridLayout
+from PySide6.QtWidgets import QStackedLayout, QSizePolicy, QTabWidget, QFontDialog
 from style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 
 

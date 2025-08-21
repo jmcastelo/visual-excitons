@@ -28,6 +28,7 @@ class Options(QObject):
     # Dir signals
     saveDirChanged = Signal(str, str)
     diagoDirChanged = Signal(str, str)
+    qpDirChanged = Signal(str, str)
 
     # Database signal
     databaseFound = Signal(bool)
@@ -87,6 +88,14 @@ class Options(QObject):
             self.numQPointsChanged.emit(self.nQpoints)
         else:
             self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* not found!")
+
+    def setQPDir(self, dir):
+        file = Path(dir + '/ndb.QP')
+        if file.is_file():
+            self.qpDir = dir
+            self.qpDirChanged.emit(dir, "ndb.QP found")
+        else:
+            self.qpDirChanged.emit(dir, "ndb.QP not found!")
 
     def setLatticeParameters(self):
         lattice = YamboLatticeDB.from_db(self.saveDir + '/ns.db1', Expand=False)

@@ -1,5 +1,5 @@
 from PySide6.QtCore import QObject, Signal, Slot
-from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra
+from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra, YamboQPDB
 from yambopy.lattice import calculate_distances, red_car
 from yambopy.tools.skw import SkwInterpolator
 import numpy as np
@@ -54,7 +54,7 @@ class Calculations(QObject):
         self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
         self.excitonDispersion = ExcitonDispersion(self.lattice, self.options.nExcitons, self.options.diagoDir)
 
-        collinear_qpoints, indices, collinear_distances = self.options.qBZ.get_collinear_kpoints(self.excitonDispersion.car_qpoints, self.lattice.sym_car, True)
+        self.collinear_qpoints, indices, collinear_distances = self.options.qBZ.get_collinear_kpoints(self.excitonDispersion.car_qpoints, self.lattice.sym_car, True)
         energies = self.excitonDispersion.exc_energies[indices]
 
         self.qIndices = indices
@@ -207,12 +207,13 @@ class Calculations(QObject):
 
     @Slot()
     def getExcitonBandStructure(self, points, dummy):
-        if (self.dispersionData['qpoints_car'][points[0].data().i] == [0.0, 0.0, 0.0]).all():
-            excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename = 'ndb.BS_diago_Q1', folder = self.options.diagoDir)
+        if np.all(self.collinear_qpoints[points[0].data().i] == [0.0, 0.0, 0.0]):
+            excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename='ndb.BS_diago_Q1', folder=self.options.diagoDir)
+            qpDB = YamboQPDB.from_db(folder=self.options.qpDir)
 
             excitonIndices = tuple(point.data().j for point in points)
 
-            excitonBands = excitonDB.interpolate(energies = self.saveDB, excitons = excitonIndices, path = self.options.qPath, lpratio = 10, verbose = False)
+            excitonBands = excitonDB.interpolate(energies=qpDB, excitons=excitonIndices, bz=self.options.qBZ, lpratio=10, verbose=False)
 
             self.k = calculate_distances(red_car(excitonBands.kpoints, self.lattice.rlat))
             self.bands = np.transpose(excitonBands.bands)
