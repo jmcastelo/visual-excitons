@@ -6,6 +6,8 @@ Within the framework of YamboPy, this is a GUI to explore exciton properties vis
 
 ## Dependencies
 
+Visual Excitons depends on YamboPy for data calculations, on PySide6 for GUI elements, and on PyQtGraph for visualization, which requires PyOpenGL for OpenGL based 3D plots.
+
 ### YamboPy
 
 "Create automatic workflows for yambo and quantum espresso using python. Work directly with netCDF databases. Do pre/post-processing, data analysis and plotting for yambo and quantum espresso."
@@ -31,7 +33,7 @@ Within the framework of YamboPy, this is a GUI to explore exciton properties vis
 Clone this repository, for example in `~/visual-excitons`:
 
 ```
-git clone https://lynx.uv.es/forgejo/jmcastelo/visual-excitons.git ~/visual-excitons
+git clone https://github.com/jmcastelo/visual-excitons.git ~/visual-excitons
 ```
 
 Create virtual environment, activate it and install dependencies:
@@ -40,7 +42,7 @@ Create virtual environment, activate it and install dependencies:
 cd ~/visual-excitons
 python -m venv .venv
 source .venv/bin/activate
-pip install pyside6 pyqtgraph
+pip install pyside6 pyqtgraph pyopengl
 ```
 
 Note that depending on the PyQtGraph version, you may need to install specific version 6.9.0 or 6.8.3 of PySide6. On this issue, see this [question](https://stackoverflow.com/questions/79678479/pyqtgraph-not-working-on-example-in-pythonguis-website-pyside6-with-pyqtgraph). Current versions (as of 01.2025) do **not** need this downgrade.
@@ -88,7 +90,7 @@ python visual_excitons/main.py
 
 ## Usage instructions
 
-Visual Excitons provides the user with two tabs: `Options` and `Graphs`.
+Visual Excitons provides the user with three tabs: `Options`, `2D Graphs` and `3D Graphs`.
 
 ### Options
 
@@ -106,9 +108,9 @@ Also, you can choose a Q-path different from the default one, consistent with yo
 
 #### Default datasets
 
-By default, and for testing purposes, data files corresponding to a `BiI3` calculation (included in the repository) are selected, the Q-path of which must be chosen as `LGZF` instead of the default one.
+By default, and for testing purposes, data files corresponding to a `BiI3` calculation (not included in the repository) are selected, the Q-path of which must be chosen as `LGZF` instead of the default one.
 
-### Graphs
+### 2D Graphs
 
 This tab contains three customizable plots for the excitons, and several options and actions widgets. They are arranged on regions of the tab which can be resized and hidden by dragging the handle on the borders between regions.
 
@@ -136,7 +138,12 @@ Thanks to PyQtGraph, you can explore the 2D graphs using the mouse. Left-clickin
 - **Plot Options**: feel free to explore them!
 - **Export**: allows exporting the plot to different formats (CSV, HDF5, Image File, Matplotlib Window or SVG).
 
+### 3D Graphs
+
+Currently under active development, this tabs plots 3D visualizations of the probability density of the wave function of excitons. Several types of plots are being developed: isosurfaces and volumetric graphs.
+
 ## Future features
 
 - Save and load configurations to disk.
 - Finite-Q band structure plots.
+- Expand the tool to include electronic band structure plots.
