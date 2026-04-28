@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QWidget, QPushButton, QSizePolicy, QVBoxLayout, QSpinBox, QLineEdit, QFormLayout
-from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout
+from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox
 
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
@@ -21,6 +21,8 @@ class Parameters3DWidget(QWidget):
         self.options = options
         self.calculations = calculations
 
+        # Calculation parameters
+
         # Exciton index selector
 
         self.excitonIndexSpinBox = QSpinBox(minimum=1, maximum=10)
@@ -34,9 +36,7 @@ class Parameters3DWidget(QWidget):
         self.particleTypeComboBox.addItems(['Hole', 'Electron'])
         self.particleTypeComboBox.currentIndexChanged.connect(self.updateParticlePositionWidgets)
 
-        # Particle position
-
-        position = self.options.particlePosition()
+        # Particle position widgets
 
         self.xParticlePosLineEdit = QLineEdit()
         self.xParticlePosLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
@@ -60,7 +60,7 @@ class Parameters3DWidget(QWidget):
         particleLayout.addWidget(self.yParticlePosLineEdit)
         particleLayout.addWidget(self.zParticlePosLineEdit)
 
-        # Supercell
+        # Supercell widgets
 
         self.xSupercellSpinBox = QSpinBox(minimum=1, maximum=999)
         self.xSupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
@@ -93,6 +93,7 @@ class Parameters3DWidget(QWidget):
         # Wavefunction form layout
 
         wfFormLayout = QFormLayout()
+        wfFormLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         wfFormLayout.addRow('Exciton index:', self.excitonIndexSpinBox)
         wfFormLayout.addRow('Fixed particle type:', self.particleTypeComboBox)
         wfFormLayout.addRow('Particle position [X,Y,Z]:', particleLayout)
@@ -104,6 +105,18 @@ class Parameters3DWidget(QWidget):
         computeWfButton = QPushButton('Compute WF')
         computeWfButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         computeWfButton.clicked.connect(self.computeWf)
+
+        # Layout and groupbox
+
+        calcParamsLayout = QVBoxLayout()
+        calcParamsLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        calcParamsLayout.addLayout(wfFormLayout)
+        calcParamsLayout.addWidget(computeWfButton)
+
+        calcParamsGroupBox = QGroupBox('Calculation parameters')
+        calcParamsGroupBox.setLayout(calcParamsLayout)
+
+        # Visual parameters
 
         # Representation type
 
@@ -151,17 +164,24 @@ class Parameters3DWidget(QWidget):
         # Plot form layout
 
         plotFormLayout = QFormLayout()
+        plotFormLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         plotFormLayout.addRow('Plot type:', self.plotTypeComboBox)
         plotFormLayout.addRow('Iso level:', isoLevelSlider)
         plotFormLayout.addRow('Number of levels:', numIsoLevelsSpinBox)
         plotFormLayout.addRow('Isosurface opacity:', opacitySlider)
         plotFormLayout.addRow('Slices per voxel:', sliceDensitySpinBox)
 
+        # Groupbox
+
+        plotParamsGroupBox = QGroupBox('Plot parameters')
+        plotParamsGroupBox.setLayout(plotFormLayout)
+
+        # Main layout
+
         mainLayout = QVBoxLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        mainLayout.addLayout(wfFormLayout)
-        mainLayout.addWidget(computeWfButton)
-        mainLayout.addLayout(plotFormLayout)
+        mainLayout.addWidget(calcParamsGroupBox)
+        mainLayout.addWidget(plotParamsGroupBox)
 
         self.setLayout(mainLayout)
 
