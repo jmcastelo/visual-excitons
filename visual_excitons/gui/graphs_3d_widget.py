@@ -82,19 +82,21 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def plotLattice(self):
         self.excitonWfWidget.clearLatticeItems()
+        self.excitonWfWidget.clearAtomNamesItems()
         self.excitonWfWidget.clearLatticeBoundaryItems()
 
         ucell = self.calculations.unitCell()
+
+        self.excitonWfWidget.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
+
         supercell = self.options.supercell()
 
         for i in range(supercell[0]):
             for j in range(supercell[1]):
                 for k in range(supercell[2]):
                     offset = ucell['base_lattice_vectors'][0] * i + ucell['base_lattice_vectors'][1] * j + ucell['base_lattice_vectors'][2] * k
-                    self.excitonWfWidget.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset)
                     self.excitonWfWidget.plotUnitCellBoundaries(ucell['base_lattice_vectors'], offset)
-
-        self.excitonWfWidget.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
+                    self.excitonWfWidget.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset)
 
     @Slot()
     def translateFixedParticle(self):

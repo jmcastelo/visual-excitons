@@ -73,7 +73,7 @@ class Options(QObject):
         self.partType = 'h'
         self.holePos = [0.0, 0.0, 0.0]
         self.electronPos = [0.0, 0.0, 0.0]
-        self.wfCutoffRy = 20
+        self.wfCutoffRy = 10
         self.scell = [1, 1, 1]
         self.wfIsoLevel = 0.5
         self.numWfIsoLevels = 10
