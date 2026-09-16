@@ -29,6 +29,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
+        self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
 
         hSplitter = QSplitter()
         hSplitter.setOrientation(Qt.Orientation.Horizontal)
@@ -66,12 +67,12 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def plotWfIso(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIso(self.calculations.probabilityDensity(), self.options.isoLevel(), self.calculations.tr4x4.tolist())
+            self.excitonWfWidget.plotWfIso(self.calculations.probabilityDensity(), self.options.isoLevel(), self.calculations.tr4x4.tolist(), self.options.opacity())
 
     @Slot()
     def plotWfIsoSet(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIsoSet(self.calculations.probabilityDensity(), self.options.numIsoLevels(), self.calculations.tr4x4.tolist())
+            self.excitonWfWidget.plotWfIsoSet(self.calculations.probabilityDensity(), self.options.numIsoLevels(), self.calculations.tr4x4.tolist(), self.options.opacity())
 
     @Slot()
     def plotWfVol(self):

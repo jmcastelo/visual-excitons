@@ -157,7 +157,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.atomNameItems.clear()
 
     @Slot(list, float, list)
-    def plotWfIso(self, wf, level, transform):
+    def plotWfIso(self, wf, level, transform, opacity):
         self.wfIsoVertices, self.wfIsoFaces = pg.isosurface(wf, level)
 
         color = self.colormap.mapToQColor(level)
@@ -167,7 +167,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.clearWfMeshItem()
 
         self.wfMeshItem = gl.GLMeshItem(meshdata=self.wfIsoMeshData, shader='shaded', smooth=True, computeNormals=True)
-        self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), 0.5))
+        self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
         self.wfMeshItem.setGLOptions(self.isoGlOptions)
         self.wfMeshItem.setDepthValue(1)
         self.wfMeshItem.setTransform(pg.Transform3D(transform))
@@ -177,7 +177,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.onCameraChanged()
 
     @Slot(list, int, list)
-    def plotWfIsoSet(self, wf, numLevels, transform):
+    def plotWfIsoSet(self, wf, numLevels, transform, opacity):
         self.clearWfMeshItemSet()
 
         for level in np.linspace(0.01, 0.99, numLevels):
@@ -187,7 +187,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.wfIsoVerticesSet = np.concatenate((self.wfIsoVerticesSet, verts), axis=0)
 
             color = self.colormap.mapToQColor(level)
-            color.setAlphaF(0.5)
+            color.setAlphaF(opacity)
             colors = np.full(shape=(len(verts), 4), fill_value=[color.redF(), color.greenF(), color.blueF(), color.alphaF()], dtype=np.float32)
             self.wfIsoColorsSet = np.concatenate((self.wfIsoColorsSet, colors), axis=0)
 
@@ -319,7 +319,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
         return faces[order]
 
     def mouseMoveEvent(self, ev):
-        self.onCameraChanged()
+        # self.onCameraChanged()
         super().mouseMoveEvent(ev)
         self.update()
 
@@ -328,7 +328,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
     #     self.onCameraChanged()
 
     def wheelEvent(self, ev):
-        self.onCameraChanged()
+        # self.onCameraChanged()
         super().wheelEvent(ev)
         self.update()
 
@@ -368,13 +368,16 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.removeItem(self.axisItem)
         self.addItem(self.axisItem)
 
-    @Slot(float)
-    def setOpacity(self, opacity: float):
-        if self.wfMeshItemSet is not None and self.wfMeshItemSet.visible():
+    @Slot(float, float)
+    def setOpacity(self, opacity: float, level: float):
+        if self.wfMeshItemSet is not None:
             self.wfIsoColorsSet[:,3] = opacity
             self.wfIsoMeshDataSet.setVertexColors(self.wfIsoColorsSet)
             self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
             # self.update()
+        if self.wfMeshItem is not None:
+            color = self.colormap.mapToQColor(level)
+            self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
 
     @Slot()
     def centerView(self):
@@ -398,3 +401,13 @@ class ExcitonWfWidget(gl.GLViewWidget):
                     coords.append(world_coords[:3])
         center = pg.Vector(np.mean(coords, axis=0))
         self.setCameraParams(center=center)
+
+    @Slot(Qt.CheckState)
+    def viewLattice(self, state):
+        visible = (state == Qt.CheckState.Checked)
+        for item in self.baseLatticeItems:
+            item.setVisible(visible)
+        for item in self.latticeItems:
+            item.setVisible(visible)
+        for item in self.atomNameItems:
+            item.setVisible(visible)

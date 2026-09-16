@@ -76,7 +76,7 @@ class Options(QObject):
         self.scell = [1, 1, 1]
         self.wfIsoLevel = 0.5
         self.numWfIsoLevels = 10
-        self.wfIsoOpacity = 0.75
+        self.wfIsoOpacity = 0.1
         self.volSliceDensity = 5
 
     def setSaveDir(self, dir):

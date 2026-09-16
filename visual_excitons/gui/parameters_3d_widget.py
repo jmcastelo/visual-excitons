@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QWidget, QPushButton, QSizePolicy, QVBoxLayout, QSpinBox, QLineEdit, QFormLayout
-from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox
+from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox
 
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
@@ -13,8 +13,9 @@ class Parameters3DWidget(QWidget):
     isoLevelChanged = Signal()
     numIsoLevelsChanged = Signal()
     sliceDensityChanged = Signal()
-    opacityChanged = Signal(float)
+    opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
+    viewLatticeChanged = Signal(Qt.CheckState)
 
     def __init__(self, options: Options, calculations: Calculations):
         QWidget.__init__(self)
@@ -183,10 +184,16 @@ class Parameters3DWidget(QWidget):
         centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         centerViewButton.clicked.connect(self.centerViewClicked)
 
+        viewLatticeCheckBox = QCheckBox('View lattice')
+        viewLatticeCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        viewLatticeCheckBox.setCheckState(Qt.CheckState.Checked)
+        viewLatticeCheckBox.checkStateChanged.connect(self.viewLatticeChanged)
+
         # View layout
 
         viewLayout = QVBoxLayout()
         viewLayout.addWidget(centerViewButton)
+        viewLayout.addWidget(viewLatticeCheckBox)
 
         # Groupbox
 
@@ -254,7 +261,7 @@ class Parameters3DWidget(QWidget):
     @Slot(int)
     def setOpacity(self, tick: int):
         self.options.setOpacity(float(tick / self.opacityTickMax))
-        self.opacityChanged.emit(self.options.opacity())
+        self.opacityChanged.emit(self.options.opacity(), self.options.wfIsoLevel)
 
     @Slot(int)
     def setSliceDensity(self, density):
