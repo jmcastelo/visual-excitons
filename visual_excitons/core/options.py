@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Signal, Slot
 from pathlib import PurePath, Path
-from yambopy import ibrav_required_parameters, get_lattice_data, YamboLatticeDB, BrillouinZone
+from yambopy import IBRAV_REQUIRED_PARAMETERS, get_lattice_data, YamboLatticeDB, BrillouinZone
 from glob import glob
 import numpy as np
 
@@ -40,8 +40,7 @@ class Options(QObject):
 
         # ibrav
         self.ibrav = -1
-        self.ibravParameters = ibrav_required_parameters()
-        self.availableIbrav = [ibrav for ibrav in list(self.ibravParameters.keys())]
+        self.availableIbrav = [ibrav for ibrav in list(IBRAV_REQUIRED_PARAMETERS.keys())]
 
         # Lattice data
         self.cell = []

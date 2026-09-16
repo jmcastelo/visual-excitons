@@ -65,13 +65,9 @@ class Calculations(QObject):
         self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
         self.excitonDispersion = ExcitonDispersion(self.lattice, self.options.nExcitons, self.options.diagoDir)
 
-        self.collinear_qpoints, indices, collinear_distances = self.options.qBZ.get_collinear_kpoints(self.excitonDispersion.car_qpoints, self.lattice.sym_car, True)
-        energies = self.excitonDispersion.exc_energies[indices]
+        self.collinear_qpoints, self.qIndices, x = self.options.qBZ.find_collinear_grid(self.lattice)
 
-        self.qIndices = indices
-
-        x = collinear_distances
-        y = energies
+        y = self.excitonDispersion.exc_energies[self.qIndices]
 
         self.dispPoints = [[[x[i], y[i][j]] for i in range(len(x))] for j in range(y.shape[1])]
         self.dispPointsData = [[PointData(i, j + 1) for i in range(len(x))] for j in range(y.shape[1])]
@@ -232,7 +228,7 @@ class Calculations(QObject):
 
             excitonIndices = tuple(point.data().j for point in points)
 
-            excitonBands = excitonDB.interpolate(energies=energies, excitons=excitonIndices, bz=self.options.qBZ, lpratio=10, verbose=False)
+            excitonBands = excitonDB.interpolate(energies=energies, excitons=excitonIndices, bz=self.options.qBZ, lpratio=5, verbose=True)
 
             # self.k = calculate_distances(red_car(excitonBands.kpoints, self.lattice.rlat))
             self.k = self.options.qBZ.kpoints_distances()

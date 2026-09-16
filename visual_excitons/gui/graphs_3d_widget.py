@@ -28,6 +28,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
+        self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
 
         hSplitter = QSplitter()
         hSplitter.setOrientation(Qt.Orientation.Horizontal)
@@ -51,8 +52,6 @@ class Graphs3DWidget(QWidget):
             self.plotWfIsoSet()
         elif self.parameters3DWidget.plotType() == 2:
             self.plotWfVol()
-
-        # self.excitonWfWidget.plotSupercellAtoms(self.calculations.wfAtomPositions)
 
     @Slot(int)
     def plotWfIfMissing(self, index: int):

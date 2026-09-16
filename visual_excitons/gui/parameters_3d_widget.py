@@ -14,6 +14,7 @@ class Parameters3DWidget(QWidget):
     numIsoLevelsChanged = Signal()
     sliceDensityChanged = Signal()
     opacityChanged = Signal(float)
+    centerViewClicked = Signal()
 
     def __init__(self, options: Options, calculations: Calculations):
         QWidget.__init__(self)
@@ -116,7 +117,7 @@ class Parameters3DWidget(QWidget):
         calcParamsGroupBox = QGroupBox('Calculation parameters')
         calcParamsGroupBox.setLayout(calcParamsLayout)
 
-        # Visual parameters
+        # Plot parameters
 
         # Representation type
 
@@ -176,12 +177,29 @@ class Parameters3DWidget(QWidget):
         plotParamsGroupBox = QGroupBox('Plot parameters')
         plotParamsGroupBox.setLayout(plotFormLayout)
 
+        # View parameters
+
+        centerViewButton = QPushButton('Center view')
+        centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        centerViewButton.clicked.connect(self.centerViewClicked)
+
+        # View layout
+
+        viewLayout = QVBoxLayout()
+        viewLayout.addWidget(centerViewButton)
+
+        # Groupbox
+
+        viewParamsGroupBox = QGroupBox('View')
+        viewParamsGroupBox.setLayout(viewLayout)
+
         # Main layout
 
         mainLayout = QVBoxLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         mainLayout.addWidget(calcParamsGroupBox)
         mainLayout.addWidget(plotParamsGroupBox)
+        mainLayout.addWidget(viewParamsGroupBox)
 
         self.setLayout(mainLayout)
 

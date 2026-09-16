@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt, Slot
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from OpenGL import GL
 
@@ -23,29 +24,39 @@ class ExcitonWfWidget(gl.GLViewWidget):
         # self.shader = 'edgeHilight'
         # self.shader = 'heightColor'
 
-        self.glOptions = 'opaque'
+        # self.glOptions = 'opaque'
         # self.glOptions = 'additive'
         # self.glOptions = 'translucent'
+        self.glOptions = {
+            GL.GL_DEPTH_TEST: True,
+            'glDepthMask': (GL.GL_TRUE,),
+            GL.GL_CULL_FACE: False,
+            GL.GL_BLEND: False
+        }
         self.isoGlOptions = {
-            GL.GL_DEPTH_TEST: False,
+            GL.GL_DEPTH_TEST: True,
+            'glDepthMask': (GL.GL_FALSE,),
             GL.GL_CULL_FACE: False,
             GL.GL_BLEND: True,
-            # 'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA),
+            'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA),
             # 'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
-            'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
+            # 'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_SRC_ALPHA, GL.GL_DST_ALPHA),
+            # 'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             # 'glBlendEquationSeparate': (GL.GL_FUNC_ADD, GL.GL_FUNC_ADD)
         }
 
-        self.setCameraPosition(distance=50)
-        self.setBackgroundColor('w')
-        self.setUpdatesEnabled(True)
+        self.setCameraPosition(distance=75)
+        self.setBackgroundColor((255, 255, 255, 255))
+        self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.NoPartialUpdate)
 
         self.wfIsoVertices = None
         self.wfIsoFaces = None
+        self.wfIsoMeshData = None
 
         self.wfIsoVerticesSet = np.empty((0, 3), dtype=float)
         self.wfIsoFacesSet = np.empty((0, 3), dtype=int)
-        self.wfIsoColorsSet = np.empty((0, 4), dtype=np.float32)
+        self.wfIsoColorsSet = np.empty((0, 4), dtype=float)
+        self.wfIsoMeshDataSet = None
 
         self.wfMeshItem = None
         self.wfMeshItemSet = None
@@ -57,7 +68,10 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.atomNameItems = []
         self.fixedParticleItem = None
 
+        self.axisItem = None
+
         self.plotFixedParticle()
+        self.plotAxes()
 
     def itemExists(self, index: int):
         if index == 0:
@@ -105,6 +119,10 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.removeItem(self.wfMeshItemSet)
             self.wfMeshItemSet = None
 
+            self.wfIsoVerticesSet = np.empty((0, 3), dtype=float)
+            self.wfIsoFacesSet = np.empty((0, 3), dtype=int)
+            self.wfIsoColorsSet = np.empty((0, 4), dtype=float)
+
     # def clearWfMeshItemSet(self):
     #     if len(self.wfMeshItemSet) > 0:
     #         for item in self.wfMeshItemSet:
@@ -143,17 +161,15 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.wfIsoVertices, self.wfIsoFaces = pg.isosurface(wf, level)
 
         color = self.colormap.mapToQColor(level)
-        # colors = np.full(shape=(len(verts), 4), fill_value=[color.redF(), color.greenF(), color.blueF(), opacity], dtype=np.float32)
 
-        # meshdata = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
-        meshdata = gl.MeshData(vertexes=self.wfIsoVertices, faces=self.wfIsoFaces)
+        self.wfIsoMeshData = gl.MeshData(vertexes=self.wfIsoVertices, faces=self.wfIsoFaces)
 
         self.clearWfMeshItem()
 
-        # self.wfMeshItem = gl.GLMeshItem(meshdata=meshdata, smooth=True, computeNormals=True, shader=self.shader, glOptions=self.glOptions)
-        self.wfMeshItem = gl.GLMeshItem(meshdata=meshdata, smooth=True, shader='balloon', glOptions=self.isoGlOptions, drawEdges=False)
+        self.wfMeshItem = gl.GLMeshItem(meshdata=self.wfIsoMeshData, shader='shaded', smooth=True, computeNormals=True)
         self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), 0.5))
-
+        self.wfMeshItem.setGLOptions(self.isoGlOptions)
+        self.wfMeshItem.setDepthValue(1)
         self.wfMeshItem.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItem)
@@ -163,8 +179,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
     @Slot(list, int, list)
     def plotWfIsoSet(self, wf, numLevels, transform):
         self.clearWfMeshItemSet()
-
-        tr = pg.Transform3D(transform)
 
         for level in np.linspace(0.01, 0.99, numLevels):
             verts, faces = pg.isosurface(wf, level)
@@ -177,14 +191,12 @@ class ExcitonWfWidget(gl.GLViewWidget):
             colors = np.full(shape=(len(verts), 4), fill_value=[color.redF(), color.greenF(), color.blueF(), color.alphaF()], dtype=np.float32)
             self.wfIsoColorsSet = np.concatenate((self.wfIsoColorsSet, colors), axis=0)
 
-        meshdata = gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
+        self.wfIsoMeshDataSet = gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
 
-        self.wfMeshItemSet = gl.GLMeshItem(meshdata=meshdata, shader=None, glOptions=self.isoGlOptions, smooth=True, computeNormals=True)
-        # meshItem.setColor((color.redF(), color.greenF(), color.blueF(), color.alphaF()))
-        self.wfMeshItemSet.setTransform(tr)
-
-        # self.wfMeshItemSet.append(meshItem)
-        # self.wfIsoColorsSet.append(color)
+        self.wfMeshItemSet = gl.GLMeshItem(meshdata=self.wfIsoMeshDataSet, shader='balloon', smooth=True, computeNormals=True)
+        self.wfMeshItemSet.setGLOptions(self.isoGlOptions)
+        self.wfMeshItemSet.setDepthValue(1)
+        self.wfMeshItemSet.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItemSet)
 
@@ -206,44 +218,40 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.wfVolItem.setTransform(pg.Transform3D(transform))
         self.addItem(self.wfVolItem)
 
-
-
     def plotBaseLatticeVectors(self, baseVectors):
         self.clearBaseLatticeItems()
 
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=(1.0, 0.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=(0.0, 1.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=(0.0, 0.0, 1.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions='opaque'))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=(1.0, 0.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=(0.0, 1.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=(0.0, 0.0, 1.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
 
         self.addItem(self.baseLatticeItems[0])
         self.addItem(self.baseLatticeItems[1])
         self.addItem(self.baseLatticeItems[2])
 
-
-
     def plotUnitCellBoundaries(self, baseVectors, offset):
         color = (0.5, 0.5, 0.5, 1.0)
 
         ucellBoundaries = []
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
 
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
 
         apex = baseVectors[0] + baseVectors[1] + baseVectors[2]
 
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions='opaque'))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
 
         for item in ucellBoundaries:
             self.latticeBoundaryItems.append(item)
@@ -260,7 +268,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
             position = offset + atomicPositions[i]
 
-            meshItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions='opaque', drawEdges=False)
+            meshItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions=self.glOptions, drawEdges=False)
             meshItem.translate(position[0], position[1], position[2])
 
             self.latticeItems.append(meshItem)
@@ -270,73 +278,123 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.atomNameItems.append(textItem)
             self.addItem(textItem)
 
-
-    def plotSupercellAtoms(self, atomicPositions):
-        numAtoms = len(atomicPositions)
-
-        for i in range(numAtoms):
-            meshData = gl.MeshData.sphere(10, 10, 2)
-            meshItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions='opaque', drawEdges=False)
-            meshItem.translate(atomicPositions[i][0], atomicPositions[i][1], atomicPositions[i][2])
-
-            self.addItem(meshItem)
-
     def plotFixedParticle(self):
         meshData = gl.MeshData.sphere(8, 8, 0.3)
         faceColors = np.full(shape=(meshData.faceCount(), 4), fill_value=[1.0, 1.0, 1.0, 1.0], dtype=np.float32)
         meshData.setFaceColors(faceColors)
 
-        self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions='opaque', drawEdges=False)
+        self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions=self.glOptions, drawEdges=False)
         self.addItem(self.fixedParticleItem)
 
     def translateFixedParticle(self, position):
         self.fixedParticleItem.resetTransform()
         self.fixedParticleItem.translate(position[0], position[1], position[2])
 
-    def sortFacesByCamera(self, vertices, faces, cameraPos):
+    def plotAxes(self):
+        self.axisItem = gl.GLAxisItem(glOptions=self.glOptions)
+        self.axisItem.setDepthValue(2)
+        self.addItem(self.axisItem)
+        self.onCameraChanged()
+
+    def sortFacesByCameraBak1(self, vertices, faces, viewMatrix):
+        centroids3 = vertices[faces].mean(axis=1)
+        centroids4 = np.hstack((centroids3, np.ones((centroids3.shape[0], 1), dtype=centroids3.dtype)))
+        # camCentroids4 = (viewMatrix @ centroids4.T).T
+        # camCentroids4 = centroids4 @ viewMatrix.T
+        camCentroids4 = viewMatrix @ centroids4.T
+        w = camCentroids4[:, 3:4]
+        camCentroids3 = camCentroids4[:, :3] / np.where(np.abs(w) > 0, w, 1.0)
+        order = np.argsort(camCentroids3[:,2])
+        return faces[order]
+
+    def sortFacesByCameraBak2(self, vertices, faces, cameraPosition):
         centroids = vertices[faces].mean(axis=1)
-        dists = np.linalg.norm(centroids - cameraPos, axis=1)
-        order = np.argsort(dists)[::-1]
+        distances = np.linalg.norm(centroids - cameraPosition, axis=1)
+        order = np.argsort(distances)[:-1]
+        return faces[order]
+
+    def sortFacesByCamera(self, vertices, faces, cameraPosition):
+        minDistances = np.min(np.linalg.norm(vertices[faces] - cameraPosition, axis=2), axis=1)
+        order = np.argsort(minDistances)[:-1]
         return faces[order]
 
     def mouseMoveEvent(self, ev):
+        self.onCameraChanged()
         super().mouseMoveEvent(ev)
-        self.onCameraChanged()
-
-    def mouseReleaseEvent(self, ev):
-        super().mouseReleaseEvent(ev)
-        self.onCameraChanged()
-
-    def wheelEvent(self, ev):
-        super().wheelEvent(ev)
-        self.onCameraChanged()
-
-    def onCameraChanged(self):
-        cam = self.cameraPosition()
-
-        if self.wfMeshItem is not None and self.wfMeshItem.visible():
-            newFaces = self.sortFacesByCamera(self.wfIsoVertices, self.wfIsoFaces, np.array([cam.x(), cam.y(), cam.z()]))
-            self.wfMeshItem.setMeshData(meshdata=gl.MeshData(vertexes=self.wfIsoVertices, faces=newFaces), smooth=True)
-
-        if self.wfMeshItemSet is not None and self.wfMeshItemSet.visible():
-            newFaces = self.sortFacesByCamera(self.wfIsoVerticesSet, self.wfIsoFacesSet, np.array([cam.x(), cam.y(), cam.z()]))
-            # self.wfMeshItemSet.setMeshData(meshdata=gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=newFaces, vertexColors=self.wfIsoColorsSet), smooth=True)
-            # self.wfMeshItemSet.meshDataChanged()
-            self.wfMeshItemSet.setMeshData(vertexes=self.wfIsoVerticesSet, faces=newFaces, vertexColors=self.wfIsoColorsSet)
-
-        # for i in range(len(self.wfMeshItemSet)):
-        #     if self.wfMeshItemSet[i].visible():
-        #         self.wfMeshItemSet[i].setMeshData(meshdata=self.sortedMeshData(self.wfIsoVerticesSet[i], self.wfIsoFacesSet[i], cam), smooth=True)
-
         self.update()
 
-    def sortedMeshData(self, vertices, faces, cam):
-        newFaces = self.sortFacesByCamera(vertices, faces, np.array([cam.x(), cam.y(), cam.z()]))
-        return gl.MeshData(vertexes=vertices, faces=newFaces)
+    # def mouseReleaseEvent(self, ev):
+    #     super().mouseReleaseEvent(ev)
+    #     self.onCameraChanged()
+
+    def wheelEvent(self, ev):
+        self.onCameraChanged()
+        super().wheelEvent(ev)
+        self.update()
+
+    def onCameraChanged(self):
+        # viewMatrix = np.array(list(self.viewMatrix().data()), dtype=np.float64).reshape((4, 4), order='C')
+        cameraPosition = np.array([self.cameraPosition().x(), self.cameraPosition().y(), self.cameraPosition().z()])
+
+        if self.wfMeshItem is not None and self.wfMeshItem.visible():
+            self.wfIsoFaces = self.sortFacesByCamera(self.wfIsoVertices, self.wfIsoFaces, cameraPosition)
+            self.wfIsoMeshData.setFaces(self.wfIsoFaces)
+            self.wfMeshItem.setMeshData(meshdata=self.wfIsoMeshData)
+            # print(self.wfMeshData.faceNormals())
+
+        if self.wfMeshItemSet is not None and self.wfMeshItemSet.visible():
+            self.wfIsoFacesSet = self.sortFacesByCamera(self.wfIsoVerticesSet, self.wfIsoFacesSet, cameraPosition)
+            self.wfIsoMeshDataSet.setFaces(self.wfIsoFacesSet)
+            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
+            # self.wfMeshItemSet.update()
+
+        # self.update()
+
+        # rotCam = viewMatrix[:3, :3]
+        # U, s, Vt = np.linalg.svd(rotCam.T)
+
+        # rotMatrix = np.eye(4, 4, dtype=np.float64)
+        # rotMatrix[:3, :3] = U @ Vt
+        # rotMatrix[:3, :3] = invViewMatrix
+
+        # transMatrix = np.eye(4, 4, dtype=np.float64)
+        # transMatrix[:3, 3] = np.array([0.8, -0.8, -0.9])
+
+        # projMatrix = np.array(list(self.projectionMatrix(self.getViewport(), self.getViewport()).data()), dtype=np.float64).reshape((4, 4), order='F')
+
+        # self.axisItem.resetTransform()
+        # self.axisItem.setTransform(self.axisItem.viewTransform().inverted()[0])
+
+        self.removeItem(self.axisItem)
+        self.addItem(self.axisItem)
 
     @Slot(float)
     def setOpacity(self, opacity: float):
         if self.wfMeshItemSet is not None and self.wfMeshItemSet.visible():
             self.wfIsoColorsSet[:,3] = opacity
-            self.wfMeshItemSet.setMeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
-            self.update()
+            self.wfIsoMeshDataSet.setVertexColors(self.wfIsoColorsSet)
+            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
+            # self.update()
+
+    @Slot()
+    def centerView(self):
+        coords = []
+        for item in self.items:
+            if isinstance(item, gl.GLLinePlotItem):
+                for coord in item.pos:
+                    local_pos = coord
+                    transform = item.transform()
+                    transform_matrix = transform.matrix()
+                    local_homogeneous = np.append(local_pos, 1)
+                    world_coords = transform_matrix @ local_homogeneous
+                    coords.append(world_coords[:3])
+            elif isinstance(item, gl.GLMeshItem):
+                for coord in item.vertexes:
+                    local_pos = coord
+                    transform = item.transform()
+                    transform_matrix = transform.matrix()
+                    local_homogeneous = np.append(local_pos, 1)
+                    world_coords = transform_matrix @ local_homogeneous
+                    coords.append(world_coords[:3])
+        center = pg.Vector(np.mean(coords, axis=0))
+        self.setCameraParams(center=center)
