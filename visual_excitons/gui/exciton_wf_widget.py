@@ -73,6 +73,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.plotFixedParticle()
         self.plotAxes()
 
+        self.opts['fov'] = 1
+        self.opts['distance'] = 2000
+
     def itemExists(self, index: int):
         if index == 0:
             return self.wfMeshItem is not None
@@ -401,6 +404,16 @@ class ExcitonWfWidget(gl.GLViewWidget):
                     coords.append(world_coords[:3])
         center = pg.Vector(np.mean(coords, axis=0))
         self.setCameraParams(center=center)
+
+    @Slot(Qt.CheckState)
+    def changeProjection(self, state):
+        if state == Qt.CheckState.Checked:
+            self.opts['fov'] = 1
+            self.opts['distance'] = 2000
+        else:
+            self.opts['fov'] = 60
+            self.opts['distance'] = 75
+        self.update()
 
     @Slot(Qt.CheckState)
     def viewLattice(self, state):

@@ -15,6 +15,7 @@ class Parameters3DWidget(QWidget):
     sliceDensityChanged = Signal()
     opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
+    projectionChanged = Signal(Qt.CheckState)
     viewLatticeChanged = Signal(Qt.CheckState)
     viewBoundariesChanged = Signal(Qt.CheckState)
 
@@ -185,6 +186,11 @@ class Parameters3DWidget(QWidget):
         centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         centerViewButton.clicked.connect(self.centerViewClicked)
 
+        projectionCheckBox = QCheckBox('Orthographic projection')
+        projectionCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        projectionCheckBox.setCheckState(Qt.CheckState.Checked)
+        projectionCheckBox.checkStateChanged.connect(self.projectionChanged)
+
         viewLatticeCheckBox = QCheckBox('View lattice')
         viewLatticeCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         viewLatticeCheckBox.setCheckState(Qt.CheckState.Checked)
@@ -199,6 +205,7 @@ class Parameters3DWidget(QWidget):
 
         viewLayout = QVBoxLayout()
         viewLayout.addWidget(centerViewButton)
+        viewLayout.addWidget(projectionCheckBox)
         viewLayout.addWidget(viewLatticeCheckBox)
         viewLayout.addWidget(viewBoundariesCheckBox)
 

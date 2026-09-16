@@ -29,6 +29,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
+        self.parameters3DWidget.projectionChanged.connect(self.excitonWfWidget.changeProjection)
         self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
         self.parameters3DWidget.viewBoundariesChanged.connect(self.excitonWfWidget.viewBoundaries)
 
