@@ -16,6 +16,7 @@ class Parameters3DWidget(QWidget):
     opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
     viewLatticeChanged = Signal(Qt.CheckState)
+    viewBoundariesChanged = Signal(Qt.CheckState)
 
     def __init__(self, options: Options, calculations: Calculations):
         QWidget.__init__(self)
@@ -189,11 +190,17 @@ class Parameters3DWidget(QWidget):
         viewLatticeCheckBox.setCheckState(Qt.CheckState.Checked)
         viewLatticeCheckBox.checkStateChanged.connect(self.viewLatticeChanged)
 
+        viewBoundariesCheckBox = QCheckBox('View boundaries')
+        viewBoundariesCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        viewBoundariesCheckBox.setCheckState(Qt.CheckState.Checked)
+        viewBoundariesCheckBox.checkStateChanged.connect(self.viewBoundariesChanged)
+
         # View layout
 
         viewLayout = QVBoxLayout()
         viewLayout.addWidget(centerViewButton)
         viewLayout.addWidget(viewLatticeCheckBox)
+        viewLayout.addWidget(viewBoundariesCheckBox)
 
         # Groupbox
 
