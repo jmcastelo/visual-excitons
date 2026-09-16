@@ -17,6 +17,7 @@ class Parameters3DWidget(QWidget):
     centerViewClicked = Signal()
     projectionChanged = Signal(Qt.CheckState)
     viewLatticeChanged = Signal(Qt.CheckState)
+    viewAtomNamesChanged = Signal(Qt.CheckState)
     viewBoundariesChanged = Signal(Qt.CheckState)
 
     def __init__(self, options: Options, calculations: Calculations):
@@ -196,6 +197,11 @@ class Parameters3DWidget(QWidget):
         viewLatticeCheckBox.setCheckState(Qt.CheckState.Checked)
         viewLatticeCheckBox.checkStateChanged.connect(self.viewLatticeChanged)
 
+        viewAtomNamesCheckBox = QCheckBox('View atom names')
+        viewAtomNamesCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        viewAtomNamesCheckBox.setCheckState(Qt.CheckState.Checked)
+        viewAtomNamesCheckBox.checkStateChanged.connect(self.viewAtomNamesChanged)
+
         viewBoundariesCheckBox = QCheckBox('View boundaries')
         viewBoundariesCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         viewBoundariesCheckBox.setCheckState(Qt.CheckState.Checked)
@@ -207,6 +213,7 @@ class Parameters3DWidget(QWidget):
         viewLayout.addWidget(centerViewButton)
         viewLayout.addWidget(projectionCheckBox)
         viewLayout.addWidget(viewLatticeCheckBox)
+        viewLayout.addWidget(viewAtomNamesCheckBox)
         viewLayout.addWidget(viewBoundariesCheckBox)
 
         # Groupbox

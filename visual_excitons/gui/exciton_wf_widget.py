@@ -426,6 +426,12 @@ class ExcitonWfWidget(gl.GLViewWidget):
             item.setVisible(visible)
 
     @Slot(Qt.CheckState)
+    def viewAtomNames(self, state):
+        visible = (state == Qt.CheckState.Checked)
+        for item in self.atomNameItems:
+            item.setVisible(visible)
+
+    @Slot(Qt.CheckState)
     def viewBoundaries(self, state):
         visible = (state == Qt.CheckState.Checked)
         for item in self.latticeBoundaryItems:
