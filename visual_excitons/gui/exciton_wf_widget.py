@@ -13,7 +13,7 @@ from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemic
 
 class ExcitonWfWidget(gl.GLViewWidget):
     def __init__(self, parent = None):
-        gl.GLViewWidget.__init__(self, parent, rotationMethod='quaternion')
+        gl.GLViewWidget.__init__(self, parent, rotationMethod='euler')
 
         self.colormap = pg.colormap.get('viridis')
 
@@ -71,10 +71,28 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.axisItem = None
 
         self.plotFixedParticle()
-        self.plotAxes()
+        # self.plotAxes()
+
+        self.gizmo = None
 
         self.opts['fov'] = 1
-        self.opts['distance'] = 2000
+        self.opts['distance'] = 5000
+
+    def attach_gizmo(self, gizmo, margin=8):
+        self.gizmo = gizmo
+        gizmo.margin = margin
+        gizmo.setParent(self)
+        self._reposition_gizmo()
+        gizmo.show()
+        gizmo.raise_()
+
+    def _reposition_gizmo(self):
+        if self.gizmo is None:
+            return
+        m = self.gizmo.margin
+        x = self.width() - self.gizmo.width() - m
+        y = m
+        self.gizmo.move(x, y)
 
     def itemExists(self, index: int):
         if index == 0:
@@ -321,10 +339,15 @@ class ExcitonWfWidget(gl.GLViewWidget):
         order = np.argsort(minDistances)[:-1]
         return faces[order]
 
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._reposition_gizmo()
+
     def mouseMoveEvent(self, ev):
         # self.onCameraChanged()
         super().mouseMoveEvent(ev)
-        self.update()
+        if self.gizmo is not None:
+            self.gizmo.sync()
 
     # def mouseReleaseEvent(self, ev):
     #     super().mouseReleaseEvent(ev)
@@ -333,7 +356,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
     def wheelEvent(self, ev):
         # self.onCameraChanged()
         super().wheelEvent(ev)
-        self.update()
+        if self.gizmo is not None:
+            self.gizmo.sync()
 
     def onCameraChanged(self):
         # viewMatrix = np.array(list(self.viewMatrix().data()), dtype=np.float64).reshape((4, 4), order='C')
@@ -385,31 +409,32 @@ class ExcitonWfWidget(gl.GLViewWidget):
     @Slot()
     def centerView(self):
         coords = []
-        for item in self.items:
-            if isinstance(item, gl.GLLinePlotItem):
-                for coord in item.pos:
-                    local_pos = coord
-                    transform = item.transform()
-                    transform_matrix = transform.matrix()
-                    local_homogeneous = np.append(local_pos, 1)
-                    world_coords = transform_matrix @ local_homogeneous
-                    coords.append(world_coords[:3])
-            elif isinstance(item, gl.GLMeshItem):
-                for coord in item.vertexes:
-                    local_pos = coord
-                    transform = item.transform()
-                    transform_matrix = transform.matrix()
-                    local_homogeneous = np.append(local_pos, 1)
-                    world_coords = transform_matrix @ local_homogeneous
-                    coords.append(world_coords[:3])
+        for item in self.latticeBoundaryItems:
+            for coord in item.pos:
+                local_pos = coord
+                transform = item.transform()
+                transform_matrix = transform.matrix()
+                local_homogeneous = np.append(local_pos, 1)
+                world_coords = transform_matrix @ local_homogeneous
+                coords.append(world_coords[:3])
         center = pg.Vector(np.mean(coords, axis=0))
         self.setCameraParams(center=center)
+
+    @Slot(list)
+    def setViewDirection(self, dir):
+        direction = np.array(dir, dtype=float)
+        direction /= np.linalg.norm(direction)
+        elevation = np.degrees(np.arcsin(direction[2]))
+        azimuth = np.degrees(np.arctan2(direction[1], direction[0]))
+        self.setCameraPosition(pos=self.opts['center'], distance=self.opts['distance'], elevation=elevation, azimuth=azimuth)
+        if self.gizmo is not None:
+            self.gizmo.sync()
 
     @Slot(Qt.CheckState)
     def changeProjection(self, state):
         if state == Qt.CheckState.Checked:
             self.opts['fov'] = 1
-            self.opts['distance'] = 2000
+            self.opts['distance'] = 5000
         else:
             self.opts['fov'] = 60
             self.opts['distance'] = 75

@@ -15,6 +15,7 @@ class Parameters3DWidget(QWidget):
     sliceDensityChanged = Signal()
     opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
+    viewDirChanged = Signal(int)
     projectionChanged = Signal(Qt.CheckState)
     viewLatticeChanged = Signal(Qt.CheckState)
     viewAtomNamesChanged = Signal(Qt.CheckState)
@@ -187,6 +188,12 @@ class Parameters3DWidget(QWidget):
         centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         centerViewButton.clicked.connect(self.centerViewClicked)
 
+        viewsComboBox = QComboBox()
+        viewsComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        viewsComboBox.addItems(self.options.viewDirections.keys())
+        viewsComboBox.activated.connect(self.viewDirChanged)
+        viewsComboBox.setCurrentIndex(len(self.options.viewDirections.keys()) - 1)
+
         projectionCheckBox = QCheckBox('Orthographic projection')
         projectionCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         projectionCheckBox.setCheckState(Qt.CheckState.Checked)
@@ -207,10 +214,16 @@ class Parameters3DWidget(QWidget):
         viewBoundariesCheckBox.setCheckState(Qt.CheckState.Checked)
         viewBoundariesCheckBox.checkStateChanged.connect(self.viewBoundariesChanged)
 
+        # View sublayout
+
+        viewSubLayout = QHBoxLayout()
+        viewSubLayout.addWidget(centerViewButton)
+        viewSubLayout.addWidget(viewsComboBox)
+
         # View layout
 
         viewLayout = QVBoxLayout()
-        viewLayout.addWidget(centerViewButton)
+        viewLayout.addLayout(viewSubLayout)
         viewLayout.addWidget(projectionCheckBox)
         viewLayout.addWidget(viewLatticeCheckBox)
         viewLayout.addWidget(viewAtomNamesCheckBox)

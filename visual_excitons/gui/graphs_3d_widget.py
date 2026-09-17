@@ -1,9 +1,10 @@
-import numpy as np
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter
+import pyqtgraph.opengl as gl
 
 from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
+from .axes_3d_widget import AxisGizmo
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 
@@ -29,10 +30,16 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
+        self.parameters3DWidget.viewDirChanged.connect(self.setViewDirection)
         self.parameters3DWidget.projectionChanged.connect(self.excitonWfWidget.changeProjection)
         self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
         self.parameters3DWidget.viewAtomNamesChanged.connect(self.excitonWfWidget.viewAtomNames)
         self.parameters3DWidget.viewBoundariesChanged.connect(self.excitonWfWidget.viewBoundaries)
+
+        self.excitonWfWidget.setViewDirection(self.options.viewDirections['(1, 1, 1)'])
+
+        gizmo = AxisGizmo(target=self.excitonWfWidget, size=100)
+        self.excitonWfWidget.attach_gizmo(gizmo)
 
         hSplitter = QSplitter()
         hSplitter.setOrientation(Qt.Orientation.Horizontal)
@@ -104,3 +111,8 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def translateFixedParticle(self):
         self.excitonWfWidget.translateFixedParticle(self.options.particlePositionCartesian())
+
+    @Slot(int)
+    def setViewDirection(self, index):
+        dirs = list(self.options.viewDirections.values())
+        self.excitonWfWidget.setViewDirection(dirs[index])

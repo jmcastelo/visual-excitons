@@ -78,6 +78,15 @@ class Options(QObject):
         self.numWfIsoLevels = 10
         self.wfIsoOpacity = 0.1
         self.volSliceDensity = 5
+        self.viewDirections = {
+            '(1, 0, 0)': [1, 0, 0],
+            '(0, 1, 0)': [0, 1, 0],
+            '(0, 0, 1)': [0, 0, 1],
+            '(1, 1, 0)': [1, 1, 0],
+            '(1, 0, 1)': [1, 0, 1],
+            '(0, 1, 1)': [0, 1, 1],
+            '(1, 1, 1)': [1, 1, 1]
+        }
 
     def setSaveDir(self, dir):
         file = Path(dir + '/ns.db1')
