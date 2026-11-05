@@ -18,9 +18,10 @@ class SortedMeshItem(gl.GLMeshItem):
     vertices, normals and colors are left untouched, so nothing is recomputed.
 
     Distances are measured in view space, with the item's own transform
-    included. Unlike depth along the camera axis, the distance to the camera
-    changes with panning and zooming, and is the right ordering for
-    perspective projection.
+    included. With perspective projection, faces are ordered by their distance
+    to the eye, which changes with panning and zooming. With orthographic
+    projection, where every point is viewed along the same direction, they are
+    ordered by depth along the viewing axis, which is exact.
 
     Requires indexed drawing: smooth=True and mesh data without face-indexed
     arrays, as produced by MeshData(vertexes=..., faces=..., vertexColors=...).
@@ -73,7 +74,14 @@ class SortedMeshItem(gl.GLMeshItem):
 
         self._sortMatrix = modelView
         viewCentroids = self._centroids @ modelView[:3, :3].T.astype(np.float64) + modelView[:3, 3]
-        squaredDistances = np.einsum('ij,ij->i', viewCentroids, viewCentroids)
-        order = np.argsort(-squaredDistances, kind='stable')
+
+        projection = np.array(self.projectionMatrix().data(), dtype=np.float32).reshape(4, 4, order='F')
+        if projection[3, 2] == 0.0:
+            # Orthographic projection: farthest means most negative view-space z
+            order = np.argsort(viewCentroids[:, 2], kind='stable')
+        else:
+            # Perspective projection: farthest from the eye, at the view-space origin
+            squaredDistances = np.einsum('ij,ij->i', viewCentroids, viewCentroids)
+            order = np.argsort(-squaredDistances, kind='stable')
         self.faces = np.ascontiguousarray(self._baseFaces[order])
         self.upload_vertex_buffers(DirtyFlag.FACES)

@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Slot, QSize
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtGui import QQuaternion, QVector3D
+from PySide6.QtGui import QQuaternion, QVector3D, QMatrix4x4
 
 from OpenGL import GL
 
@@ -11,6 +11,7 @@ import numpy as np
 from PySide6.QtWidgets import QLabel
 
 from .sorted_mesh_item import SortedMeshItem
+from .atom_labels_item import AtomLabelsItem
 from .axes_3d_widget import cellInfoHtml
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols
 
@@ -67,7 +68,11 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
         self.latticeBoundaryItems = []
         self.latticeItems = []
-        self.atomNameItems = []
+        # Atom names: labels on the atom surfaces, as one depth-tested item
+        self.atomLabels = AtomLabelsItem()
+        self.addItem(self.atomLabels)
+        self.latticeVisible = True
+        self.atomNamesVisible = True
         self.fixedParticleItem = None
 
         self.plotFixedParticle()
@@ -85,6 +90,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.cellInfoLabel.move(10, 10)
         self.cellInfoLabel.hide()
 
+        # Orthographic projection by default (see projectionMatrix)
+        self.orthographic = True
         self.opts['fov'] = 1
         self.opts['distance'] = 5000
 
@@ -176,10 +183,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.latticeItems.clear()
 
     def clearAtomNamesItems(self):
-        if len(self.atomNameItems) > 0:
-            for item in self.atomNameItems:
-                self.removeItem(item)
-            self.atomNameItems.clear()
+        self.atomLabels.clear()
 
     @Slot(list, float, list)
     def plotWfIso(self, wf, level, transform, opacity):
@@ -309,9 +313,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.latticeItems.append(meshItem)
             self.addItem(meshItem)
 
-            textItem = gl.GLTextItem(pos=position, color=(255, 255, 255, 255), text=chemical_symbols[atomicNumbers[i]], alignment=Qt.AlignmentFlag.AlignCenter)
-            self.atomNameItems.append(textItem)
-            self.addItem(textItem)
+        self.atomLabels.addLabels(offset + np.asarray(atomicPositions, dtype=float)[:numAtoms],
+                                  [covalent_radii[z] for z in atomicNumbers],
+                                  [chemical_symbols[z] for z in atomicNumbers])
 
     def plotFixedParticle(self):
         meshData = gl.MeshData.sphere(8, 8, 0.3)
@@ -324,6 +328,35 @@ class ExcitonWfWidget(gl.GLViewWidget):
     def translateFixedParticle(self, position):
         self.fixedParticleItem.resetTransform()
         self.fixedParticleItem.translate(position[0], position[1], position[2])
+
+    def projectionMatrix(self, region, viewport):
+        """
+        True orthographic projection when enabled, perspective otherwise.
+
+        The orthographic view shows the same area as a perspective view with the
+        current fov and distance would at the view center, so zooming (which
+        changes the distance), panning and pixelSize() keep working unchanged.
+        Its depth is linear, so the depth buffer stays precise however far the
+        camera is: a perspective frustum with a tiny fov at a large distance
+        resolves depth very poorly, making nearby surfaces z-fight.
+        """
+        if not self.orthographic:
+            return super().projectionMatrix(region, viewport)
+
+        x0, y0, w, h = viewport
+        dist = self.opts['distance']
+        r = dist * np.tan(0.5 * np.radians(self.opts['fov']))
+        t = r * h / w
+        left = r * ((region[0] - x0) * (2.0 / w) - 1)
+        right = r * ((region[0] + region[2] - x0) * (2.0 / w) - 1)
+        bottom = t * ((region[1] - y0) * (2.0 / h) - 1)
+        top = t * ((region[1] + region[3] - y0) * (2.0 / h) - 1)
+
+        # Depth range around the view center, in world units (Bohr)
+        depthRange = 1.0e4 + dist
+        tr = QMatrix4x4()
+        tr.ortho(left, right, bottom, top, dist - depthRange, dist + depthRange)
+        return tr
 
     def paint(self, **kwargs):
         # glClear() respects the depth write mask. Translucent items turn depth
@@ -423,7 +456,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     @Slot(Qt.CheckState)
     def changeProjection(self, state):
-        if state == Qt.CheckState.Checked:
+        self.orthographic = (state == Qt.CheckState.Checked)
+        if self.orthographic:
             self.opts['fov'] = 1
             self.opts['distance'] = 5000
         else:
@@ -433,17 +467,15 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     @Slot(Qt.CheckState)
     def viewLattice(self, state):
-        visible = (state == Qt.CheckState.Checked)
+        self.latticeVisible = (state == Qt.CheckState.Checked)
         for item in self.latticeItems:
-            item.setVisible(visible)
-        for item in self.atomNameItems:
-            item.setVisible(visible)
+            item.setVisible(self.latticeVisible)
+        self.atomLabels.setVisible(self.latticeVisible and self.atomNamesVisible)
 
     @Slot(Qt.CheckState)
     def viewAtomNames(self, state):
-        visible = (state == Qt.CheckState.Checked)
-        for item in self.atomNameItems:
-            item.setVisible(visible)
+        self.atomNamesVisible = (state == Qt.CheckState.Checked)
+        self.atomLabels.setVisible(self.latticeVisible and self.atomNamesVisible)
 
     @Slot(Qt.CheckState)
     def viewBoundaries(self, state):
