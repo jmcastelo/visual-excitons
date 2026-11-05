@@ -26,7 +26,9 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.isoLevelChanged.connect(self.plotWfIso)
         self.parameters3DWidget.numIsoLevelsChanged.connect(self.plotWfIsoSet)
         self.parameters3DWidget.opacityChanged.connect(self.excitonWfWidget.setOpacity)
+        self.parameters3DWidget.isoSetStyleChanged.connect(self.excitonWfWidget.setIsoSetStyle)
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
+        self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
@@ -94,7 +96,8 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def plotWfVol(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfVol(self.calculations.probabilityDensity(), self.options.sliceDensity(), self.calculations.tr4x4.tolist())
+            self.excitonWfWidget.plotWfVol(self.calculations.probabilityDensity(), self.options.sliceDensity(), self.calculations.tr4x4.tolist(),
+                                           self.options.volumeOpacity(), self.options.volumeContrast())
 
     @Slot()
     def plotLattice(self):

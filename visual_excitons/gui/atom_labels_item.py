@@ -6,6 +6,8 @@ from PySide6.QtGui import QColor, QFont, QImage, QOpenGLContext, QPainter, QPain
 from PySide6.QtOpenGL import QOpenGLBuffer
 from pyqtgraph.opengl.GLGraphicsItem import GLGraphicsItem
 
+from .gl_style import LABEL_STAGE
+
 
 def labelImage(text, pixelSize=96, outline=10):
     """RGBA image (rows top to bottom) of white text with a dark outline, tightly cropped."""
@@ -61,8 +63,8 @@ class AtomLabelsItem(GLGraphicsItem):
             GL.GL_BLEND: True,
             'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
         })
-        # After opaque items (depth 0), before translucent ones (depth 1)
-        self.setDepthValue(0.5)
+        # After opaque items, before translucent ones
+        self.setDepthValue(LABEL_STAGE)
 
         self.centers = []
         self.radii = []

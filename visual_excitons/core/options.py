@@ -78,6 +78,8 @@ class Options(QObject):
         self.numWfIsoLevels = 10
         self.wfIsoOpacity = 0.1
         self.volSliceDensity = 5
+        self.volOpacity = 0.8
+        self.volContrast = 1.0
         # View directions (VESTA convention: the direction of projection,
         # i.e. from the viewer into the screen). Vectors are given in the basis
         # of each group and converted to Cartesian with viewVectorToCartesian
@@ -253,6 +255,18 @@ class Options(QObject):
 
     def setSliceDensity(self, density: int):
         self.volSliceDensity = density
+
+    def volumeOpacity(self):
+        return self.volOpacity
+
+    def setVolumeOpacity(self, opacity: float):
+        self.volOpacity = min(max(opacity, 0.0), 1.0)
+
+    def volumeContrast(self):
+        return self.volContrast
+
+    def setVolumeContrast(self, contrast: float):
+        self.volContrast = max(contrast, 0.01)
 
     def opacity(self):
         return self.wfIsoOpacity

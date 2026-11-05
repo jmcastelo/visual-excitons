@@ -3,48 +3,11 @@ from PySide6.QtGui import QFont, QQuaternion, QVector3D
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
+
+from .gl_style import headlightShader, enableMultisampling
 
 
 BOHR_TO_ANGSTROM = 0.529177210544
-
-
-# pyqtgraph's 'shaded' shader lights from behind the scene (direction (1, -1, -1)
-# in view space), so thin arrows, mostly facing the viewer, come out nearly black.
-# This one uses a headlight from the viewer's upper right, lights both sides of
-# each face, and adds an ambient term and a small specular highlight.
-headlightShader = ShaderProgram('gizmoHeadlight', [
-    VertexShader("""
-        uniform mat4 u_mvp;
-        uniform mat3 u_normal;
-        attribute vec4 a_position;
-        attribute vec3 a_normal;
-        attribute vec4 a_color;
-        varying vec4 v_color;
-        varying vec3 v_normal;
-        void main() {
-            v_normal = normalize(u_normal * a_normal);
-            v_color = a_color;
-            gl_Position = u_mvp * a_position;
-        }
-    """),
-    FragmentShader("""
-        #ifdef GL_ES
-        precision mediump float;
-        #endif
-        varying vec4 v_color;
-        varying vec3 v_normal;
-        void main() {
-            vec3 n = normalize(v_normal);
-            vec3 light = normalize(vec3(0.35, 0.45, 1.0));
-            float diffuse = abs(dot(n, light));
-            vec3 halfway = normalize(light + vec3(0.0, 0.0, 1.0));
-            float specular = pow(abs(dot(n, halfway)), 32.0);
-            vec3 rgb = v_color.rgb * (0.35 + 0.65 * diffuse) + vec3(0.25 * specular);
-            gl_FragColor = vec4(min(rgb, vec3(1.0)), v_color.a);
-        }
-    """)
-])
 
 
 def arrowMeshData(length, shaftRadius, headRadius, headLength, segments=24):
@@ -163,6 +126,7 @@ class AxisGizmo(gl.GLViewWidget):
         fmt = self.format()
         fmt.setAlphaBufferSize(8)
         self.setFormat(fmt)
+        enableMultisampling(self)
 
         # Fixed framing -- only rotation is ever synced.
         self.opts['center'] = pg.Vector(0, 0, 0)

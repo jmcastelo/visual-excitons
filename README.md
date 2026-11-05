@@ -142,6 +142,29 @@ Thanks to PyQtGraph, you can explore the 2D graphs using the mouse. Left-clickin
 
 Currently under active development, this tabs plots 3D visualizations of the probability density of the wave function of excitons. Several types of plots are being developed: isosurfaces, isosurfaces-set and volumetric graphs.
 
+#### Plot types and rendering
+
+The `Plot parameters` group on the right controls how the probability density is displayed:
+
+- **Isosurface**: a single translucent surface at the level set with the `Iso level` slider, with lighting that reveals its 3D shape.
+- **Isosurface set**: a number of nested translucent surfaces (`Number of levels`), evenly spaced between the lowest and highest density and colored with the viridis colormap. Their look is chosen with `Isosurface set style`:
+  - `Lit, edges emphasized` (default): soft lighting gives shape cues, and the surfaces become more opaque near their outlines so nested shells remain distinguishable.
+  - `Edges only (x-ray)`: no lighting, only the more opaque outlines. Lighter and more see-through.
+- **Volumetric**: the density rendered as a translucent cloud, colored like the isosurfaces. Light is absorbed through it as through a fog whose thickness grows with the density, so dense regions look more opaque. Three controls apply:
+  - `Volume opacity` (default 0.8): the opacity along the densest line of sight through the cloud. It means the same whatever the shape or extent of the density and the resolution of the grid. Low values give a light, see-through cloud, and high values a denser one.
+  - `Volume contrast` (default 1.0): a power applied to the density before computing the opacity. Values above 1 fade the low-density tails so that the core stands out, and values below 1 bring the tails out. Colors keep following the actual density.
+  - `Slices per voxel`: the rendering quality. The volume is drawn as a stack of slices, and more slices give a smoother result. It does not change the overall opacity.
+
+  Changing any of these controls switches the plot type to `Volumetric`.
+
+`Isosurface opacity` sets the transparency of both isosurface types.
+
+Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
+
+Atoms are drawn as lit spheres in their Jmol colors, sized by their covalent radii. Their chemical symbols are shown as labels on the surface of each atom, facing the viewer. Labels behave like the rest of the scene: they scale with zoom, are hidden by atoms in front of them, and are tinted by translucent surfaces in front of them.
+
+The 3D view uses antialiasing, so edges of atoms, lines and surfaces are smooth.
+
 #### View directions
 
 The `View` group on the right lets you look at the lattice and the wave function from well-defined directions, given either in Cartesian coordinates or in terms of the crystal lattice.
@@ -179,7 +202,7 @@ Note that lattice directions are defined with respect to the cell stored in `ns.
 Other view controls in the same group:
 
 - `Center view` centers the camera on the plotted cells.
-- `Orthographic projection` switches between orthographic and perspective projection.
+- `Orthographic projection` switches between orthographic projection (the default, where parallel lines stay parallel, convenient to inspect crystal structures) and perspective projection.
 - Checkboxes toggle the visibility of the lattice, the atom names and the cell boundaries.
 
 #### Axes gizmo and cell parameters

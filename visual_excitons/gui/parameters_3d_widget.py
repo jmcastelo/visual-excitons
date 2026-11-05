@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QWidget, QPushButton, QSizePolicy, QVBoxLayout, QSpinBox, QLineEdit, QFormLayout
-from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox, QLabel
+from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox, QLabel, QDoubleSpinBox
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
@@ -14,6 +14,7 @@ class Parameters3DWidget(QWidget):
     isoLevelChanged = Signal()
     numIsoLevelsChanged = Signal()
     sliceDensityChanged = Signal()
+    volumeParametersChanged = Signal()
     opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
     viewDirChanged = Signal(list, object)  # look direction, up direction or None (Cartesian)
@@ -26,6 +27,7 @@ class Parameters3DWidget(QWidget):
     showReciprocalVectorsChanged = Signal(bool)
     showAxisLabelsChanged = Signal(bool)
     showCellInfoChanged = Signal(bool)
+    isoSetStyleChanged = Signal(int)
 
     def __init__(self, options: Options, calculations: Calculations):
         QWidget.__init__(self)
@@ -173,6 +175,24 @@ class Parameters3DWidget(QWidget):
         sliceDensitySpinBox.setValue(self.options.sliceDensity())
         sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
 
+        # Volume opacity and contrast widgets
+
+        volumeOpacitySlider = QSlider()
+        volumeOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
+        volumeOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
+        volumeOpacitySlider.setRange(0, self.opacityTickMax)
+        volumeOpacitySlider.setValue(round(self.options.volumeOpacity() * self.opacityTickMax))
+        volumeOpacitySlider.setToolTip('Opacity along the densest line of sight through the density')
+        volumeOpacitySlider.valueChanged.connect(self.setVolumeOpacity)
+
+        volumeContrastSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10.0, singleStep=0.1, decimals=2)
+        volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        volumeContrastSpinBox.setValue(self.options.volumeContrast())
+        volumeContrastSpinBox.setToolTip('Power applied to the density for the opacity:\n'
+                                         'above 1 fades low densities so the core stands out,\n'
+                                         'below 1 brings out the low-density tails')
+        volumeContrastSpinBox.valueChanged.connect(self.setVolumeContrast)
+
         # Plot form layout
 
         plotFormLayout = QFormLayout()
@@ -180,7 +200,16 @@ class Parameters3DWidget(QWidget):
         plotFormLayout.addRow('Plot type:', self.plotTypeComboBox)
         plotFormLayout.addRow('Iso level:', isoLevelSlider)
         plotFormLayout.addRow('Number of levels:', numIsoLevelsSpinBox)
+
+        isoSetStyleComboBox = QComboBox()
+        isoSetStyleComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        isoSetStyleComboBox.addItems(['Lit, edges emphasized', 'Edges only (x-ray)'])
+        isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
+        isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
+        plotFormLayout.addRow('Isosurface set style:', isoSetStyleComboBox)
         plotFormLayout.addRow('Isosurface opacity:', opacitySlider)
+        plotFormLayout.addRow('Volume opacity:', volumeOpacitySlider)
+        plotFormLayout.addRow('Volume contrast:', volumeContrastSpinBox)
         plotFormLayout.addRow('Slices per voxel:', sliceDensitySpinBox)
 
         # Groupbox
@@ -383,6 +412,22 @@ class Parameters3DWidget(QWidget):
     def setSliceDensity(self, density):
         self.options.setSliceDensity(density)
         self.sliceDensityChanged.emit()
+
+        if self.plotTypeComboBox.currentIndex() != 2:
+            self.plotTypeComboBox.setCurrentIndex(2)
+
+    @Slot(int)
+    def setVolumeOpacity(self, tick: int):
+        self.options.setVolumeOpacity(tick / self.opacityTickMax)
+        self.volumeParametersChanged.emit()
+
+        if self.plotTypeComboBox.currentIndex() != 2:
+            self.plotTypeComboBox.setCurrentIndex(2)
+
+    @Slot(float)
+    def setVolumeContrast(self, contrast: float):
+        self.options.setVolumeContrast(contrast)
+        self.volumeParametersChanged.emit()
 
         if self.plotTypeComboBox.currentIndex() != 2:
             self.plotTypeComboBox.setCurrentIndex(2)

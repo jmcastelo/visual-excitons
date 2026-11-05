@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Slot, QSize
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtGui import QQuaternion, QVector3D, QMatrix4x4
 
@@ -13,6 +13,9 @@ from PySide6.QtWidgets import QLabel
 from .sorted_mesh_item import SortedMeshItem
 from .atom_labels_item import AtomLabelsItem
 from .axes_3d_widget import cellInfoHtml
+from .volume_item import volumeRGBA, FloatVolumeItem
+from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
+                       headlightShader, litEdgesShader, enableMultisampling, spheresMeshData)
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols
 
 
@@ -23,33 +26,11 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
         self.colormap = pg.colormap.get('viridis')
 
-        # self.shader = 'balloon'
-        # self.shader = 'normalColor'
-        # self.shader = 'viewNormalColor'
-        self.shader = 'shaded'
-        # self.shader = 'edgeHilight'
-        # self.shader = 'heightColor'
+        # Smooth edges of atoms, lines and surfaces
+        enableMultisampling(self)
 
-        # self.glOptions = 'opaque'
-        # self.glOptions = 'additive'
-        # self.glOptions = 'translucent'
-        self.glOptions = {
-            GL.GL_DEPTH_TEST: True,
-            'glDepthMask': (GL.GL_TRUE,),
-            GL.GL_CULL_FACE: False,
-            GL.GL_BLEND: False
-        }
-        self.isoGlOptions = {
-            GL.GL_DEPTH_TEST: True,
-            'glDepthMask': (GL.GL_FALSE,),
-            GL.GL_CULL_FACE: False,
-            GL.GL_BLEND: True,
-            'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA),
-            # 'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
-            # 'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_SRC_ALPHA, GL.GL_DST_ALPHA),
-            # 'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-            # 'glBlendEquationSeparate': (GL.GL_FUNC_ADD, GL.GL_FUNC_ADD)
-        }
+        # Shader of the isosurface set (see setIsoSetStyle)
+        self.isoSetShader = litEdgesShader
 
         self.setCameraPosition(distance=75)
         self.setBackgroundColor((255, 255, 255, 255))
@@ -196,10 +177,10 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.clearWfMeshItem()
 
         # Faces are drawn back to front for correct transparency
-        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader='shaded', smooth=True, computeNormals=True)
+        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader=headlightShader, smooth=True, computeNormals=True)
         self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
-        self.wfMeshItem.setGLOptions(self.isoGlOptions)
-        self.wfMeshItem.setDepthValue(1)
+        self.wfMeshItem.setGLOptions(TRANSLUCENT_GL_OPTIONS)
+        self.wfMeshItem.setDepthValue(TRANSLUCENT_STAGE)
         self.wfMeshItem.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItem)
@@ -222,22 +203,23 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.wfIsoMeshDataSet = gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
 
         # All levels in one mesh, so faces of different levels are sorted together
-        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader='balloon', smooth=True, computeNormals=True)
-        self.wfMeshItemSet.setGLOptions(self.isoGlOptions)
-        self.wfMeshItemSet.setDepthValue(1)
+        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader=self.isoSetShader, smooth=True, computeNormals=True)
+        self.wfMeshItemSet.setGLOptions(TRANSLUCENT_GL_OPTIONS)
+        self.wfMeshItemSet.setDepthValue(TRANSLUCENT_STAGE)
         self.wfMeshItemSet.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItemSet)
 
-    @Slot(list, int, list)
-    def plotWfVol(self, wf, sliceDensity, transform):
-        # RGBA bytes for every voxel in one vectorized call; alpha scaled by density
-        data = self.colormap.mapToByte(wf).astype(np.ubyte, copy=False)
-        data[..., 3] = (data[..., 3] * wf).astype(np.ubyte)
+    def plotWfVol(self, wf, sliceDensity, transform, opacity=0.8, contrast=1.0):
+        # Colors by density; opacity from absorption, corrected for the number of slices
+        data = volumeRGBA(wf, self.colormap, opacity, contrast, sliceDensity)
 
         self.clearWfVolItem()
 
-        self.wfVolItem = gl.GLVolumeItem(data=data, sliceDensity=sliceDensity)
+        # Translucent like the isosurfaces: drawn after opaque items and writing no
+        # depth, otherwise even its invisible slices would hide what is drawn later
+        self.wfVolItem = FloatVolumeItem(data=data, sliceDensity=sliceDensity, glOptions=TRANSLUCENT_GL_OPTIONS)
+        self.wfVolItem.setDepthValue(TRANSLUCENT_STAGE)
         self.wfVolItem.setTransform(pg.Transform3D(transform))
         self.addItem(self.wfVolItem)
 
@@ -268,61 +250,46 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.gizmo.setShowReciprocal(show)
         self.updateCellInfo()
 
+    @Slot(int)
+    def setIsoSetStyle(self, index: int):
+        """0: lit surfaces with emphasized edges, 1: edges only (x-ray look)."""
+        self.isoSetShader = litEdgesShader if index == 0 else 'balloon'
+        if self.wfMeshItemSet is not None:
+            self.wfMeshItemSet.setShader(self.isoSetShader)
+
     def plotUnitCellBoundaries(self, baseVectors, offset):
-        color = (0.5, 0.5, 0.5, 1.0)
+        a, b, c = (np.asarray(v, dtype=float) for v in baseVectors[:3])
+        corners = {(i, j, k): i * a + j * b + k * c for i in (0, 1) for j in (0, 1) for k in (0, 1)}
+        # The 12 edges of the cell: pairs of corners differing in one index
+        edges = [(p, q) for p in corners for q in corners if p < q and sum(x != y for x, y in zip(p, q)) == 1]
+        segments = np.array([[corners[p], corners[q]] for p, q in edges]).reshape(-1, 3)
 
-        ucellBoundaries = []
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0], baseVectors[0] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1], baseVectors[1] + baseVectors[2]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[0]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2], baseVectors[2] + baseVectors[1]], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-
-        apex = baseVectors[0] + baseVectors[1] + baseVectors[2]
-
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[0] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[1] + baseVectors[2], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[0], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        ucellBoundaries.append(gl.GLLinePlotItem(pos=[baseVectors[2] + baseVectors[1], apex], color=color, width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-
-        for item in ucellBoundaries:
-            self.latticeBoundaryItems.append(item)
-            item.translate(offset[0], offset[1], offset[2])
-            self.addItem(item)
+        item = gl.GLLinePlotItem(pos=segments, color=(0.5, 0.5, 0.5, 1.0), width=1.0, antialias=True, mode='lines',
+                                 glOptions=OPAQUE_GL_OPTIONS)
+        item.translate(offset[0], offset[1], offset[2])
+        self.latticeBoundaryItems.append(item)
+        self.addItem(item)
 
     def plotUnitCellAtoms(self, atomicNumbers, atomicPositions, offset):
         numAtoms = len(atomicNumbers)
+        centers = offset + np.asarray(atomicPositions, dtype=float)[:numAtoms]
+        radii = [covalent_radii[z] for z in atomicNumbers]
 
-        for i in range(numAtoms):
-            meshData = gl.MeshData.sphere(8, 8, covalent_radii[atomicNumbers[i]])
-            faceColors = np.full(shape=(meshData.faceCount(), 4), fill_value=list(jmol_colors[atomicNumbers[i]]) + [1.0], dtype=np.float32)
-            meshData.setFaceColors(faceColors)
+        # All atoms of the cell as a single mesh
+        colors = [list(jmol_colors[z]) + [1.0] for z in atomicNumbers]
+        meshItem = gl.GLMeshItem(meshdata=spheresMeshData(centers, radii, colors), smooth=True,
+                                 shader=headlightShader, glOptions=OPAQUE_GL_OPTIONS, drawEdges=False)
+        meshItem.setDepthValue(OPAQUE_STAGE)
+        meshItem.setVisible(self.latticeVisible)
+        self.latticeItems.append(meshItem)
+        self.addItem(meshItem)
 
-            position = offset + atomicPositions[i]
-
-            meshItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions=self.glOptions, drawEdges=False)
-            meshItem.translate(position[0], position[1], position[2])
-
-            self.latticeItems.append(meshItem)
-            self.addItem(meshItem)
-
-        self.atomLabels.addLabels(offset + np.asarray(atomicPositions, dtype=float)[:numAtoms],
-                                  [covalent_radii[z] for z in atomicNumbers],
-                                  [chemical_symbols[z] for z in atomicNumbers])
+        self.atomLabels.addLabels(centers, radii, [chemical_symbols[z] for z in atomicNumbers])
 
     def plotFixedParticle(self):
-        meshData = gl.MeshData.sphere(8, 8, 0.3)
-        faceColors = np.full(shape=(meshData.faceCount(), 4), fill_value=[1.0, 1.0, 1.0, 1.0], dtype=np.float32)
-        meshData.setFaceColors(faceColors)
-
-        self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=self.shader, glOptions=self.glOptions, drawEdges=False)
+        meshData = spheresMeshData([[0.0, 0.0, 0.0]], [0.3], [[1.0, 1.0, 1.0, 1.0]])
+        self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=headlightShader,
+                                               glOptions=OPAQUE_GL_OPTIONS, drawEdges=False)
         self.addItem(self.fixedParticleItem)
 
     def translateFixedParticle(self, position):
