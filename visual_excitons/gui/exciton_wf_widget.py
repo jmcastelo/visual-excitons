@@ -1,5 +1,6 @@
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QSize
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtGui import QQuaternion, QVector3D
 
 from OpenGL import GL
 
@@ -13,7 +14,7 @@ from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemic
 
 class ExcitonWfWidget(gl.GLViewWidget):
     def __init__(self, parent = None):
-        gl.GLViewWidget.__init__(self, parent, rotationMethod='euler')
+        gl.GLViewWidget.__init__(self, parent, rotationMethod='quaternion')
 
         self.colormap = pg.colormap.get('viridis')
 
@@ -68,10 +69,11 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.atomNameItems = []
         self.fixedParticleItem = None
 
-        self.axisItem = None
-
         self.plotFixedParticle()
-        # self.plotAxes()
+
+        self.axisItem = gl.GLAxisItem()
+        self.axisItem.setSize(5, 5, 5)
+        self.addItem(self.axisItem)
 
         self.gizmo = None
 
@@ -90,8 +92,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
         if self.gizmo is None:
             return
         m = self.gizmo.margin
-        x = self.width() - self.gizmo.width() - m
-        y = m
+        y = self.height() - self.gizmo.height() - m
+        x = m
         self.gizmo.move(x, y)
 
     def itemExists(self, index: int):
@@ -158,6 +160,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
             for item in self.baseLatticeItems:
                 self.removeItem(item)
             self.baseLatticeItems.clear()
+        self.gizmo.clearBaseLatticeItems()
 
     def clearLatticeBoundaryItems(self):
         if len(self.latticeBoundaryItems) > 0:
@@ -225,13 +228,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     @Slot(list, int, list)
     def plotWfVol(self, wf, sliceDensity, transform):
-        data = np.zeros(wf.shape + (4,), np.ubyte)
-        for i in range(wf.shape[0]):
-            for j in range(wf.shape[1]):
-                for k in range(wf.shape[2]):
-                    c = self.colormap.mapToByte(wf[i, j, k])
-                    c[3] *= wf[i, j, k]
-                    data[i, j, k] = c
+        # RGBA bytes for every voxel in one vectorized call; alpha scaled by density
+        data = self.colormap.mapToByte(wf).astype(np.ubyte, copy=False)
+        data[..., 3] = (data[..., 3] * wf).astype(np.ubyte)
 
         self.clearWfVolItem()
 
@@ -242,13 +241,15 @@ class ExcitonWfWidget(gl.GLViewWidget):
     def plotBaseLatticeVectors(self, baseVectors):
         self.clearBaseLatticeItems()
 
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=(1.0, 0.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=(0.0, 1.0, 0.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=(0.0, 0.0, 1.0, 1.0), width=1.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=(1.0, 0.0, 0.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=(0.0, 1.0, 0.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
+        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=(0.0, 0.0, 1.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
 
         self.addItem(self.baseLatticeItems[0])
         self.addItem(self.baseLatticeItems[1])
         self.addItem(self.baseLatticeItems[2])
+
+        self.gizmo.plotBaseLatticeVectors(baseVectors)
 
     def plotUnitCellBoundaries(self, baseVectors, offset):
         color = (0.5, 0.5, 0.5, 1.0)
@@ -311,12 +312,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.fixedParticleItem.resetTransform()
         self.fixedParticleItem.translate(position[0], position[1], position[2])
 
-    def plotAxes(self):
-        self.axisItem = gl.GLAxisItem(glOptions=self.glOptions)
-        self.axisItem.setDepthValue(2)
-        self.addItem(self.axisItem)
-        self.onCameraChanged()
-
     def sortFacesByCameraBak1(self, vertices, faces, viewMatrix):
         centroids3 = vertices[faces].mean(axis=1)
         centroids4 = np.hstack((centroids3, np.ones((centroids3.shape[0], 1), dtype=centroids3.dtype)))
@@ -361,7 +356,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     def onCameraChanged(self):
         # viewMatrix = np.array(list(self.viewMatrix().data()), dtype=np.float64).reshape((4, 4), order='C')
-        cameraPosition = np.array([self.cameraPosition().x(), self.cameraPosition().y(), self.cameraPosition().z()])
+        cameraPosition = self.trueCameraPosition()
 
         if self.wfMeshItem is not None and self.wfMeshItem.visible():
             self.wfIsoFaces = self.sortFacesByCamera(self.wfIsoVertices, self.wfIsoFaces, cameraPosition)
@@ -420,15 +415,63 @@ class ExcitonWfWidget(gl.GLViewWidget):
         center = pg.Vector(np.mean(coords, axis=0))
         self.setCameraParams(center=center)
 
-    @Slot(list)
-    def setViewDirection(self, dir):
-        direction = np.array(dir, dtype=float)
-        direction /= np.linalg.norm(direction)
-        elevation = np.degrees(np.arcsin(direction[2]))
-        azimuth = np.degrees(np.arctan2(direction[1], direction[0]))
-        self.setCameraPosition(pos=self.opts['center'], distance=self.opts['distance'], elevation=elevation, azimuth=azimuth)
+    def viewRotation(self, lookDir, up=None):
+        """
+        World-to-camera rotation (the convention of opts['rotation']) for a camera
+        looking along `lookDir` (from the viewer into the screen), with `up`
+        projected onto the screen as the vertical direction. If `up` is not given
+        or is parallel to `lookDir`, the world z-axis is used, or the y-axis when
+        looking along z.
+        """
+        toCamera = -np.asarray(lookDir, dtype=float)
+        toCamera = toCamera / np.linalg.norm(toCamera)
+
+        candidates = [] if up is None else [np.asarray(up, dtype=float)]
+        candidates += [np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])]
+        for upVector in candidates:
+            if np.linalg.norm(np.cross(toCamera, upVector)) > 1e-6 * np.linalg.norm(upVector):
+                break
+
+        # fromDirection maps the camera axes (+z = towards the viewer, +y = up)
+        # to world space, i.e. camera-to-world: conjugate it for world-to-camera
+        camToWorld = QQuaternion.fromDirection(QVector3D(*toCamera), QVector3D(*upVector))
+        return camToWorld.conjugated()
+
+    def setViewDirection(self, lookDir, up=None):
+        """
+        Point the camera along `lookDir` (Cartesian, from the viewer into the
+        screen; VESTA's "direction of projection") with `up` vertical on screen.
+        In 'euler' mode the screen-up is always world z (no roll), so `up` only
+        has an effect there when looking along z.
+        """
+        if self.opts['rotationMethod'] == 'quaternion':
+            self.setCameraPosition(rotation=self.viewRotation(lookDir, up))
+        else:
+            # pyqtgraph's own rotation -> (elevation, azimuth) conversion is unreliable,
+            # so compute the spherical angles of the camera position directly
+            n = -np.asarray(lookDir, dtype=float)
+            n = n / np.linalg.norm(n)
+            elevation = np.degrees(np.arcsin(np.clip(n[2], -1.0, 1.0)))
+            if np.hypot(n[0], n[1]) < 1e-6:
+                # Looking along z: azimuth is free, choose it to match the up vector
+                rotation = self.viewRotation(lookDir, up)
+                screenUp = rotation.conjugated().rotatedVector(QVector3D(0.0, 1.0, 0.0))
+                azimuth = np.degrees(np.arctan2(screenUp.y(), screenUp.x())) - 180.0 * (n[2] > 0)
+            else:
+                azimuth = np.degrees(np.arctan2(n[1], n[0]))
+            self.setCameraPosition(elevation=elevation, azimuth=azimuth)
+
         if self.gizmo is not None:
             self.gizmo.sync()
+
+    def trueCameraPosition(self):
+        """
+        Camera position in world coordinates from the view matrix. Unlike
+        GLViewWidget.cameraPosition(), this is also right in 'quaternion' mode.
+        """
+        inverted, _ = self.viewMatrix().inverted()
+        p = inverted.map(QVector3D(0.0, 0.0, 0.0))
+        return np.array([p.x(), p.y(), p.z()])
 
     @Slot(Qt.CheckState)
     def changeProjection(self, state):

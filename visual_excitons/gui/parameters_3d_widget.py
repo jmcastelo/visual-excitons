@@ -1,7 +1,8 @@
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QWidget, QPushButton, QSizePolicy, QVBoxLayout, QSpinBox, QLineEdit, QFormLayout
-from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox
+from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox, QLabel
+import numpy as np
 
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
@@ -15,7 +16,7 @@ class Parameters3DWidget(QWidget):
     sliceDensityChanged = Signal()
     opacityChanged = Signal(float, float)
     centerViewClicked = Signal()
-    viewDirChanged = Signal(int)
+    viewDirChanged = Signal(list, object)  # look direction, up direction or None (Cartesian)
     projectionChanged = Signal(Qt.CheckState)
     viewLatticeChanged = Signal(Qt.CheckState)
     viewAtomNamesChanged = Signal(Qt.CheckState)
@@ -188,11 +189,62 @@ class Parameters3DWidget(QWidget):
         centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         centerViewButton.clicked.connect(self.centerViewClicked)
 
-        viewsComboBox = QComboBox()
-        viewsComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        viewsComboBox.addItems(self.options.viewDirections.keys())
-        viewsComboBox.activated.connect(self.viewDirChanged)
-        viewsComboBox.setCurrentIndex(len(self.options.viewDirections.keys()) - 1)
+        # View direction: basis, presets and custom direction / up vectors
+
+        self.viewBasisComboBox = QComboBox()
+        self.viewBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.viewBasisComboBox.addItems(self.options.viewBases)
+        self.viewBasisComboBox.setToolTip('Basis of the direction and up vectors:\n'
+                                          'Cartesian: x, y, z\n'
+                                          'Lattice [uvw]: u a + v b + w c\n'
+                                          'Reciprocal (hkl): h a* + k b* + l c*, normal to the (hkl) planes')
+        self.viewBasisComboBox.currentIndexChanged.connect(self.onViewBasisChanged)
+
+        self.viewPresetComboBox = QComboBox()
+        self.viewPresetComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.viewPresetComboBox.activated.connect(self.onViewPresetActivated)
+
+        self.viewDirLineEdits = [self.newVectorLineEdit() for _ in range(3)]
+        self.viewUpLineEdits = [self.newVectorLineEdit('auto') for _ in range(3)]
+        for lineEdit in self.viewDirLineEdits + self.viewUpLineEdits:
+            lineEdit.returnPressed.connect(self.applyView)
+
+        viewDirLayout = QHBoxLayout()
+        for lineEdit in self.viewDirLineEdits:
+            viewDirLayout.addWidget(lineEdit)
+
+        viewUpLayout = QHBoxLayout()
+        for lineEdit in self.viewUpLineEdits:
+            viewUpLayout.addWidget(lineEdit)
+
+        applyViewButton = QPushButton('Apply')
+        applyViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        applyViewButton.clicked.connect(self.applyView)
+        viewDirLayout.addWidget(applyViewButton)
+
+        self.reverseViewCheckBox = QCheckBox('View from the opposite side')
+        self.reverseViewCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.reverseViewCheckBox.setToolTip('Look along minus the direction, i.e. with it pointing towards the viewer')
+        self.reverseViewCheckBox.setChecked(True)
+        self.reverseViewCheckBox.toggled.connect(self.applyView)
+
+        self.viewStatusLabel = QLabel()
+        self.viewStatusLabel.setStyleSheet('color: red')
+        self.viewStatusLabel.setVisible(False)
+
+        viewFormLayout = QFormLayout()
+        viewFormLayout.addRow('Basis:', self.viewBasisComboBox)
+        viewFormLayout.addRow('Preset:', self.viewPresetComboBox)
+        viewFormLayout.addRow('Direction:', viewDirLayout)
+        viewFormLayout.addRow('Up (optional):', viewUpLayout)
+
+        # Lattice bases need the cell from the SAVE database
+        self.setLatticeBasesEnabled(self.options.hasCell())
+        self.options.databaseFound.connect(self.onDatabaseFound)
+
+        self.populateViewPresets()
+        self.viewPresetComboBox.setCurrentText('x + y + z')
+        self.onViewPresetActivated(self.viewPresetComboBox.currentIndex(), apply=False)
 
         projectionCheckBox = QCheckBox('Orthographic projection')
         projectionCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
@@ -216,14 +268,13 @@ class Parameters3DWidget(QWidget):
 
         # View sublayout
 
-        viewSubLayout = QHBoxLayout()
-        viewSubLayout.addWidget(centerViewButton)
-        viewSubLayout.addWidget(viewsComboBox)
-
         # View layout
 
         viewLayout = QVBoxLayout()
-        viewLayout.addLayout(viewSubLayout)
+        viewLayout.addWidget(centerViewButton)
+        viewLayout.addLayout(viewFormLayout)
+        viewLayout.addWidget(self.reverseViewCheckBox)
+        viewLayout.addWidget(self.viewStatusLabel)
         viewLayout.addWidget(projectionCheckBox)
         viewLayout.addWidget(viewLatticeCheckBox)
         viewLayout.addWidget(viewAtomNamesCheckBox)
@@ -312,3 +363,92 @@ class Parameters3DWidget(QWidget):
     def supercellChanged(self):
         self.options.setSupercell([self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()])
         self.signalReplotLattice.emit()
+
+    # View direction
+
+    def newVectorLineEdit(self, placeholder=''):
+        lineEdit = QLineEdit()
+        lineEdit.setValidator(QDoubleValidator())
+        lineEdit.setPlaceholderText(placeholder)
+        lineEdit.setMaximumWidth(70)
+        return lineEdit
+
+    def viewBasis(self):
+        return self.viewBasisComboBox.currentText()
+
+    def setLatticeBasesEnabled(self, enabled: bool):
+        model = self.viewBasisComboBox.model()
+        for i, basis in enumerate(self.options.viewBases):
+            if basis != 'Cartesian':
+                model.item(i).setEnabled(enabled)
+        if not enabled and self.viewBasis() != 'Cartesian':
+            self.viewBasisComboBox.setCurrentText('Cartesian')
+
+    @Slot(bool)
+    def onDatabaseFound(self, found: bool):
+        self.setLatticeBasesEnabled(found)
+        # A new cell changes what lattice directions mean in Cartesian space
+        if found and self.viewBasis() != 'Cartesian':
+            self.applyView()
+
+    def populateViewPresets(self):
+        self.viewPresetComboBox.clear()
+        self.viewPresetComboBox.addItems(list(self.options.viewPresets[self.viewBasis()].keys()))
+
+    @Slot(int)
+    def onViewBasisChanged(self, index: int):
+        presetIndex = self.viewPresetComboBox.currentIndex()
+        self.populateViewPresets()
+        self.viewPresetComboBox.setCurrentIndex(max(presetIndex, 0))
+        self.onViewPresetActivated(self.viewPresetComboBox.currentIndex())
+
+    @Slot(int)
+    def onViewPresetActivated(self, index: int, apply: bool = True):
+        presets = self.options.viewPresets[self.viewBasis()]
+        vector = list(presets.values())[index]
+        for lineEdit, value in zip(self.viewDirLineEdits, vector):
+            lineEdit.setText(f'{value:g}')
+        for lineEdit in self.viewUpLineEdits:
+            lineEdit.clear()
+        if apply:
+            self.applyView()
+
+    def readVector(self, lineEdits):
+        """Vector from three line edits; empty fields count as 0. None if all are empty."""
+        texts = [lineEdit.text().strip() for lineEdit in lineEdits]
+        if not any(texts):
+            return None
+        return [float(text.replace(',', '.')) if text else 0.0 for text in texts]
+
+    def showViewStatus(self, message: str):
+        self.viewStatusLabel.setText(message)
+        self.viewStatusLabel.setVisible(bool(message))
+
+    @Slot()
+    def applyView(self):
+        try:
+            direction = self.readVector(self.viewDirLineEdits)
+            up = self.readVector(self.viewUpLineEdits)
+        except ValueError:
+            self.showViewStatus('Invalid number in the direction or up vector')
+            return
+
+        if direction is None or np.allclose(direction, 0.0):
+            self.showViewStatus('The direction must be a non-zero vector')
+            return
+
+        if up is not None and np.allclose(up, 0.0):
+            up = None
+
+        try:
+            lookDir = self.options.viewVectorToCartesian(direction, self.viewBasis())
+            upDir = None if up is None else self.options.viewVectorToCartesian(up, self.viewBasis())
+        except ValueError as error:
+            self.showViewStatus(str(error))
+            return
+
+        if self.reverseViewCheckBox.isChecked():
+            lookDir = -lookDir
+
+        self.showViewStatus('')
+        self.viewDirChanged.emit(lookDir.tolist(), None if upDir is None else upDir.tolist())

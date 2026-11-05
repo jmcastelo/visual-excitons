@@ -78,14 +78,38 @@ class Options(QObject):
         self.numWfIsoLevels = 10
         self.wfIsoOpacity = 0.1
         self.volSliceDensity = 5
-        self.viewDirections = {
-            '(1, 0, 0)': [1, 0, 0],
-            '(0, 1, 0)': [0, 1, 0],
-            '(0, 0, 1)': [0, 0, 1],
-            '(1, 1, 0)': [1, 1, 0],
-            '(1, 0, 1)': [1, 0, 1],
-            '(0, 1, 1)': [0, 1, 1],
-            '(1, 1, 1)': [1, 1, 1]
+        # View directions (VESTA convention: the direction of projection,
+        # i.e. from the viewer into the screen). Vectors are given in the basis
+        # of each group and converted to Cartesian with viewVectorToCartesian
+        self.viewBases = ['Cartesian', 'Lattice [uvw]', 'Reciprocal (hkl)']
+        self.viewPresets = {
+            'Cartesian': {
+                'x': [1, 0, 0],
+                'y': [0, 1, 0],
+                'z': [0, 0, 1],
+                'x + y': [1, 1, 0],
+                'x + z': [1, 0, 1],
+                'y + z': [0, 1, 1],
+                'x + y + z': [1, 1, 1]
+            },
+            'Lattice [uvw]': {
+                'a  [1 0 0]': [1, 0, 0],
+                'b  [0 1 0]': [0, 1, 0],
+                'c  [0 0 1]': [0, 0, 1],
+                '[1 1 0]': [1, 1, 0],
+                '[1 0 1]': [1, 0, 1],
+                '[0 1 1]': [0, 1, 1],
+                '[1 1 1]': [1, 1, 1]
+            },
+            'Reciprocal (hkl)': {
+                'a*  normal to (1 0 0)': [1, 0, 0],
+                'b*  normal to (0 1 0)': [0, 1, 0],
+                'c*  normal to (0 0 1)': [0, 0, 1],
+                'normal to (1 1 0)': [1, 1, 0],
+                'normal to (1 0 1)': [1, 0, 1],
+                'normal to (0 1 1)': [0, 1, 1],
+                'normal to (1 1 1)': [1, 1, 1]
+            }
         }
 
     def setSaveDir(self, dir):
@@ -235,3 +259,25 @@ class Options(QObject):
 
     def setOpacity(self, alpha: float):
         self.wfIsoOpacity = alpha
+
+    def hasCell(self):
+        return len(self.cell) > 0
+
+    def viewVectorToCartesian(self, vector, basis: str):
+        """
+        Cartesian components of `vector` given in `basis` (one of viewBases):
+        Cartesian, lattice [uvw] -> u a + v b + w c, or reciprocal (hkl) -> h a* + k b* + l c*.
+        Only the direction matters, so the 2*pi factor of the reciprocal basis is dropped.
+        """
+        vector = np.asarray(vector, dtype=float)
+        if basis == 'Cartesian':
+            return vector
+        if not self.hasCell():
+            raise ValueError('Lattice vectors are not available: no SAVE database loaded')
+        cell = np.asarray(self.cell, dtype=float)  # rows: a, b, c
+        if basis == 'Lattice [uvw]':
+            return cell.T @ vector
+        if basis == 'Reciprocal (hkl)':
+            reciprocal = np.linalg.inv(cell).T  # rows: a*, b*, c* (without 2*pi)
+            return reciprocal.T @ vector
+        raise ValueError(f'Unknown view basis: {basis}')

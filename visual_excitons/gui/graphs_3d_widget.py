@@ -30,16 +30,17 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
-        self.parameters3DWidget.viewDirChanged.connect(self.setViewDirection)
+        self.parameters3DWidget.viewDirChanged.connect(self.excitonWfWidget.setViewDirection)
         self.parameters3DWidget.projectionChanged.connect(self.excitonWfWidget.changeProjection)
         self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
         self.parameters3DWidget.viewAtomNamesChanged.connect(self.excitonWfWidget.viewAtomNames)
         self.parameters3DWidget.viewBoundariesChanged.connect(self.excitonWfWidget.viewBoundaries)
 
-        self.excitonWfWidget.setViewDirection(self.options.viewDirections['(1, 1, 1)'])
+        gizmo = AxisGizmo(target=self.excitonWfWidget, size=200)
+        self.excitonWfWidget.attach_gizmo(gizmo, 10)
 
-        gizmo = AxisGizmo(target=self.excitonWfWidget, size=100)
-        self.excitonWfWidget.attach_gizmo(gizmo)
+        # Initial view from the view widgets' default state
+        self.parameters3DWidget.applyView()
 
         hSplitter = QSplitter()
         hSplitter.setOrientation(Qt.Orientation.Horizontal)
@@ -111,8 +112,3 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def translateFixedParticle(self):
         self.excitonWfWidget.translateFixedParticle(self.options.particlePositionCartesian())
-
-    @Slot(int)
-    def setViewDirection(self, index):
-        dirs = list(self.options.viewDirections.values())
-        self.excitonWfWidget.setViewDirection(dirs[index])

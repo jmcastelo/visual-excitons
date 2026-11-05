@@ -140,7 +140,49 @@ Thanks to PyQtGraph, you can explore the 2D graphs using the mouse. Left-clickin
 
 ### 3D Graphs
 
-Currently under active development, this tabs plots 3D visualizations of the probability density of the wave function of excitons. Several types of plots are being developed: isosurfaces and volumetric graphs.
+Currently under active development, this tabs plots 3D visualizations of the probability density of the wave function of excitons. Several types of plots are being developed: isosurfaces, isosurfaces-set and volumetric graphs.
+
+#### View directions
+
+The `View` group on the right lets you look at the lattice and the wave function from well-defined directions, given either in Cartesian coordinates or in terms of the crystal lattice.
+
+**Convention.** A view direction is the *direction of projection*: the direction from the viewer into the screen, as in [VESTA](http://jp-minerals.org/vesta/en/doc/VESTAch10.html). For example, viewing along lattice direction `[0 0 1]` means looking down the `c` axis, with `c` pointing away from you. The literature is not unanimous on this sign. In transmission electron microscopy, for instance, the zone axis is usually taken antiparallel to the electron beam, i.e. pointing towards the observer ([JEMS](https://www.jems-swiss.ch/Home/Help/ZoneAxis.htm), [Wikipedia: Zone axis](https://en.wikipedia.org/wiki/Zone_axis)). The `View from the opposite side` checkbox flips the direction, so both conventions are available. It is checked by default, so the initial view (Cartesian `x + y + z`) places the camera in the positive octant, looking towards the origin.
+
+**Bases.** Direction and up vectors are interpreted in the basis chosen in the `Basis` selector:
+
+- **Cartesian**: components along `x`, `y`, `z`.
+- **Lattice [uvw]**: the lattice vector `u a + v b + w c`.
+- **Reciprocal (hkl)**: the reciprocal-lattice vector `h a* + k b* + l c*`, i.e. the normal to the `(hkl)` planes. This is useful for looking perpendicular to atomic planes, for example to the layers of a layered material.
+
+The lattice and reciprocal bases use the lattice vectors read from `ns.db1`, so they are only available once a valid **SAVE** directory has been loaded.
+
+**Presets.** Each basis comes with a set of presets in the `Preset` selector:
+
+- Cartesian: `x`, `y`, `z`, `x + y`, `x + z`, `y + z`, `x + y + z`.
+- Lattice: `a [1 0 0]`, `b [0 1 0]`, `c [0 0 1]`, `[1 1 0]`, `[1 0 1]`, `[0 1 1]`, `[1 1 1]`.
+- Reciprocal: `a*`, `b*`, `c*` (normals to `(1 0 0)`, `(0 1 0)`, `(0 0 1)`) and the normals to `(1 1 0)`, `(1 0 1)`, `(0 1 1)`, `(1 1 1)`.
+
+Note that lattice directions are defined with respect to the cell stored in `ns.db1`. For a rhombohedral primitive cell, such as that of bulk `BiI3`, the hexagonal `c` axis is the lattice direction `[1 1 1]`, not `[0 0 1]`.
+
+**Custom directions.** How to set your own view:
+
+1. Choose a basis.
+2. Type the three components of the view direction in the `Direction` boxes. Selecting a preset fills them in, so you can start from one and modify it.
+3. Optionally, type an up vector in the `Up (optional)` boxes, in the same basis. Its component perpendicular to the view direction will point upwards on the screen. Unlike in VESTA, it does not need to be perpendicular to the view direction. Left empty (`auto`), the up direction is `z`, or `y` when looking along `z`.
+4. Press `Apply` or `Enter`. Invalid input, such as a zero direction, is reported in red below the controls.
+
+**Rotation modes.** PyQtGraph's 3D view supports two camera rotation methods, and the view directions behave identically in both:
+
+- `quaternion` (current default): mouse dragging rotates freely, like a trackball, and any up vector is honored.
+- `euler`: mouse dragging works like a turntable that keeps `z` vertical on the screen, so a custom up vector only takes effect when looking along `±z`.
+
+Other view controls in the same group:
+
+- `Center view` centers the camera on the plotted cells.
+- `Orthographic projection` switches between orthographic and perspective projection.
+- Checkboxes toggle the visibility of the lattice, the atom names and the cell boundaries.
+
+The axes gizmo in the lower-left corner shows the current orientation of the Cartesian axes and the lattice vectors.
 
 ## Future features
 
