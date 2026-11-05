@@ -182,7 +182,27 @@ Other view controls in the same group:
 - `Orthographic projection` switches between orthographic and perspective projection.
 - Checkboxes toggle the visibility of the lattice, the atom names and the cell boundaries.
 
-The axes gizmo in the lower-left corner shows the current orientation of the Cartesian axes and the lattice vectors.
+#### Axes gizmo and cell parameters
+
+The axes gizmo in the lower-left corner of the 3D view follows the orientation of the camera and shows, as 3D arrows with labels at their tips:
+
+- **Cartesian axes** `x`, `y`, `z`: thin grey arrows.
+- **Lattice vectors** `a`, `b`, `c`: bold red, green and blue arrows, as in VESTA.
+- **Reciprocal vectors** `a*`, `b*`, `c*`: light red, green and blue arrows, off by default. Each of them is perpendicular to the other two lattice vectors, e.g. `a*` to `b` and `c`. They help to interpret the views along the normals to `(hkl)` planes.
+
+Scene coordinates are in Bohr, so the lattice vectors are about an order of magnitude longer than the Cartesian unit vectors. Since the gizmo has a fixed size, each set of arrows is scaled separately: the longest arrow of each set has the same length. Directions, angles and length ratios within a set are preserved, so an elongated cell still looks elongated. Lengths are not comparable between sets, and their actual values are shown in the cell parameters box.
+
+The **cell parameters** box in the top-left corner of the 3D view shows the lattice constants `a`, `b`, `c` (in Å) and the angles `α`, `β`, `γ`. When the reciprocal vectors are shown, it also shows `a*`, `b*`, `c*` (in Å⁻¹, including the factor 2π) and the angles `α*`, `β*`, `γ*`.
+
+Arrows pointing towards or away from the viewer look short, since they are seen foreshortened. Their labels may overlap the center of the gizmo.
+
+All of this can be toggled from the `Axes` group on the right:
+
+- `Cartesian axes x, y, z`
+- `Lattice vectors a, b, c`
+- `Reciprocal vectors a*, b*, c*`
+- `Axis labels`
+- `Cell parameters`
 
 ## Future features
 

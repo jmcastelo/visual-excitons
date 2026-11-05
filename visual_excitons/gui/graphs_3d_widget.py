@@ -39,6 +39,12 @@ class Graphs3DWidget(QWidget):
         gizmo = AxisGizmo(target=self.excitonWfWidget, size=200)
         self.excitonWfWidget.attach_gizmo(gizmo, 10)
 
+        self.parameters3DWidget.showCartesianAxesChanged.connect(gizmo.setShowCartesian)
+        self.parameters3DWidget.showLatticeVectorsChanged.connect(gizmo.setShowLattice)
+        self.parameters3DWidget.showReciprocalVectorsChanged.connect(self.excitonWfWidget.setShowReciprocalVectors)
+        self.parameters3DWidget.showAxisLabelsChanged.connect(gizmo.setShowLabels)
+        self.parameters3DWidget.showCellInfoChanged.connect(self.excitonWfWidget.setShowCellInfo)
+
         # Initial view from the view widgets' default state
         self.parameters3DWidget.applyView()
 

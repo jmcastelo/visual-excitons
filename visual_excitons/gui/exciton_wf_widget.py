@@ -8,7 +8,10 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 import numpy as np
 
+from PySide6.QtWidgets import QLabel
+
 from .sorted_mesh_item import SortedMeshItem
+from .axes_3d_widget import cellInfoHtml
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols
 
 
@@ -62,7 +65,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.wfMeshItemSet = None
         self.wfVolItem = None
 
-        self.baseLatticeItems = []
         self.latticeBoundaryItems = []
         self.latticeItems = []
         self.atomNameItems = []
@@ -70,11 +72,18 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
         self.plotFixedParticle()
 
-        self.axisItem = gl.GLAxisItem()
-        self.axisItem.setSize(5, 5, 5)
-        self.addItem(self.axisItem)
-
         self.gizmo = None
+
+        # Cell parameters overlay (top-left corner)
+        self.cellLattice = None
+        self.showCellInfo = True
+        self.cellInfoLabel = QLabel(self)
+        self.cellInfoLabel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.cellInfoLabel.setTextFormat(Qt.TextFormat.RichText)
+        self.cellInfoLabel.setStyleSheet('QLabel { background-color: rgba(255, 255, 255, 210); color: #222;'
+                                         ' border: 1px solid #bbb; border-radius: 4px; padding: 4px; }')
+        self.cellInfoLabel.move(10, 10)
+        self.cellInfoLabel.hide()
 
         self.opts['fov'] = 1
         self.opts['distance'] = 5000
@@ -154,13 +163,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
     #         self.wfIsoFacesSet.clear()
     #         self.wfIsoColorsSet.clear()
 
-    def clearBaseLatticeItems(self):
-        if len(self.baseLatticeItems) > 0:
-            for item in self.baseLatticeItems:
-                self.removeItem(item)
-            self.baseLatticeItems.clear()
-        self.gizmo.clearBaseLatticeItems()
-
     def clearLatticeBoundaryItems(self):
         if len(self.latticeBoundaryItems) > 0:
             for item in self.latticeBoundaryItems:
@@ -236,17 +238,31 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.addItem(self.wfVolItem)
 
     def plotBaseLatticeVectors(self, baseVectors):
-        self.clearBaseLatticeItems()
+        # Cartesian axes and lattice vectors are only shown in the axes gizmo
+        self.cellLattice = np.asarray(baseVectors, dtype=float)
+        if self.gizmo is not None:
+            self.gizmo.setLatticeVectors(self.cellLattice)
+        self.updateCellInfo()
 
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[0]], color=(1.0, 0.0, 0.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[1]], color=(0.0, 1.0, 0.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
-        self.baseLatticeItems.append(gl.GLLinePlotItem(pos=[[0.0, 0.0, 0.0], baseVectors[2]], color=(0.0, 0.0, 1.0, 1.0), width=5.0, antialias=True, mode='lines', glOptions=self.glOptions))
+    def updateCellInfo(self):
+        if self.cellLattice is None:
+            self.cellInfoLabel.hide()
+            return
+        showReciprocal = self.gizmo is not None and self.gizmo.showReciprocal
+        self.cellInfoLabel.setText(cellInfoHtml(self.cellLattice, showReciprocal))
+        self.cellInfoLabel.adjustSize()
+        self.cellInfoLabel.setVisible(self.showCellInfo)
 
-        self.addItem(self.baseLatticeItems[0])
-        self.addItem(self.baseLatticeItems[1])
-        self.addItem(self.baseLatticeItems[2])
+    @Slot(bool)
+    def setShowCellInfo(self, show: bool):
+        self.showCellInfo = show
+        self.updateCellInfo()
 
-        self.gizmo.plotBaseLatticeVectors(baseVectors)
+    @Slot(bool)
+    def setShowReciprocalVectors(self, show: bool):
+        if self.gizmo is not None:
+            self.gizmo.setShowReciprocal(show)
+        self.updateCellInfo()
 
     def plotUnitCellBoundaries(self, baseVectors, offset):
         color = (0.5, 0.5, 0.5, 1.0)
@@ -418,8 +434,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
     @Slot(Qt.CheckState)
     def viewLattice(self, state):
         visible = (state == Qt.CheckState.Checked)
-        for item in self.baseLatticeItems:
-            item.setVisible(visible)
         for item in self.latticeItems:
             item.setVisible(visible)
         for item in self.atomNameItems:

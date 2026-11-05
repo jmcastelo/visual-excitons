@@ -21,6 +21,11 @@ class Parameters3DWidget(QWidget):
     viewLatticeChanged = Signal(Qt.CheckState)
     viewAtomNamesChanged = Signal(Qt.CheckState)
     viewBoundariesChanged = Signal(Qt.CheckState)
+    showCartesianAxesChanged = Signal(bool)
+    showLatticeVectorsChanged = Signal(bool)
+    showReciprocalVectorsChanged = Signal(bool)
+    showAxisLabelsChanged = Signal(bool)
+    showCellInfoChanged = Signal(bool)
 
     def __init__(self, options: Options, calculations: Calculations):
         QWidget.__init__(self)
@@ -285,6 +290,31 @@ class Parameters3DWidget(QWidget):
         viewParamsGroupBox = QGroupBox('View')
         viewParamsGroupBox.setLayout(viewLayout)
 
+        # Axes gizmo and cell parameters
+
+        axesLayout = QVBoxLayout()
+        for text, signal, checked, tooltip in [
+            ('Cartesian axes x, y, z', self.showCartesianAxesChanged, True, 'Grey arrows in the axes gizmo'),
+            ('Lattice vectors a, b, c', self.showLatticeVectorsChanged, True, 'Red, green and blue arrows in the axes gizmo'),
+            ('Reciprocal vectors a*, b*, c*', self.showReciprocalVectorsChanged, False, 'Light red, green and blue arrows in the axes gizmo'),
+            ('Axis labels', self.showAxisLabelsChanged, True, 'Labels at the tips of the gizmo arrows'),
+            ('Cell parameters', self.showCellInfoChanged, True, 'Lattice constants and angles in the top-left corner'),
+        ]:
+            checkBox = QCheckBox(text)
+            checkBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+            checkBox.setToolTip(tooltip)
+            checkBox.setChecked(checked)
+            checkBox.toggled.connect(signal)
+            axesLayout.addWidget(checkBox)
+
+        axesNoteLabel = QLabel('Each set of arrows is scaled so that its longest vector has the same length.')
+        axesNoteLabel.setWordWrap(True)
+        axesNoteLabel.setStyleSheet('color: gray')
+        axesLayout.addWidget(axesNoteLabel)
+
+        axesGroupBox = QGroupBox('Axes')
+        axesGroupBox.setLayout(axesLayout)
+
         # Main layout
 
         mainLayout = QVBoxLayout()
@@ -292,6 +322,7 @@ class Parameters3DWidget(QWidget):
         mainLayout.addWidget(calcParamsGroupBox)
         mainLayout.addWidget(plotParamsGroupBox)
         mainLayout.addWidget(viewParamsGroupBox)
+        mainLayout.addWidget(axesGroupBox)
 
         self.setLayout(mainLayout)
 
