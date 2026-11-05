@@ -223,8 +223,16 @@ class Options(QObject):
         elif self.partType == 'e':
             self.electronPos = position
 
+    def setParticlePositionOf(self, particleType: str, position: list):
+        if particleType == 'h':
+            self.holePos = position
+        elif particleType == 'e':
+            self.electronPos = position
+
     def particlePositionCartesian(self):
-        return self.cell.T @ self.particlePosition()
+        # The wave function is computed with the fixed particle in the central cell of
+        # the (odd) supercell, so that is where it is shown
+        return self.cell.T @ (np.asarray(self.particlePosition(), dtype=float) + np.asarray(self.scell) // 2)
 
     def wfCutoff(self):
         return self.wfCutoffRy

@@ -7,6 +7,31 @@ import numpy as np
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
 
+class WrappedLabel(QLabel):
+    """
+    Word-wrapped label that always gets the height its text needs at its current
+    width. QFormLayout does not ask labels for their height for a given width, so
+    a plain word-wrapped QLabel gets clipped when the panel is narrow.
+    """
+
+    def __init__(self, text='', parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+
+    def _fitHeight(self):
+        height = self.heightForWidth(self.width())
+        if height > 0 and height != self.minimumHeight():
+            self.setMinimumHeight(height)
+
+    def setText(self, text):
+        super().setText(text)
+        self._fitHeight()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fitHeight()
+
+
 class Parameters3DWidget(QWidget):
     plotTypeChanged = Signal(int)
     signalReplotLattice = Signal()
@@ -35,6 +60,7 @@ class Parameters3DWidget(QWidget):
 
         self.options = options
         self.calculations = calculations
+        self.calculations.wfComputed.connect(self.onWfComputed)
 
         # Calculation parameters
 
@@ -77,19 +103,22 @@ class Parameters3DWidget(QWidget):
 
         # Supercell widgets
 
-        self.xSupercellSpinBox = QSpinBox(minimum=1, maximum=999)
+        self.xSupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
         self.xSupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.xSupercellSpinBox.setValue(1)
+        self.xSupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
         self.xSupercellSpinBox.valueChanged.connect(self.supercellChanged)
 
-        self.ySupercellSpinBox = QSpinBox(minimum=1, maximum=999)
+        self.ySupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
         self.ySupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.ySupercellSpinBox.setValue(1)
+        self.ySupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
         self.ySupercellSpinBox.valueChanged.connect(self.supercellChanged)
 
-        self.zSupercellSpinBox = QSpinBox(minimum=1, maximum=999)
+        self.zSupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
         self.zSupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.zSupercellSpinBox.setValue(1)
+        self.zSupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
         self.zSupercellSpinBox.valueChanged.connect(self.supercellChanged)
 
         supercellLayout = QHBoxLayout()
@@ -112,6 +141,13 @@ class Parameters3DWidget(QWidget):
         wfFormLayout.addRow('Exciton index:', self.excitonIndexSpinBox)
         wfFormLayout.addRow('Fixed particle type:', self.particleTypeComboBox)
         wfFormLayout.addRow('Particle position [X,Y,Z]:', particleLayout)
+
+        # Shown after computing: the position is snapped to the wave-function grid
+        self.particleGridLabel = WrappedLabel()
+        self.particleGridLabel.setStyleSheet('color: gray')
+        self.particleGridLabel.hide()
+        # Spanning both columns, so the wrapped text has the full width of the form
+        wfFormLayout.addRow(self.particleGridLabel)
         wfFormLayout.addRow('Supercell [X,Y,Z]:', supercellLayout)
         wfFormLayout.addRow('Wave-function cutoff (Ry):', self.wfCutoffLineEdit)
 
@@ -399,6 +435,28 @@ class Parameters3DWidget(QWidget):
         self.fixedParticlePosChanged.emit()
 
     @Slot()
+    def onWfComputed(self):
+        """Show the position and supercell actually used for the wave function."""
+        calc = self.calculations
+
+        # Supercell: odd sizes are enforced here, so this only guards against changes
+        for spinBox, size in zip((self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox), calc.wfSupercell):
+            if spinBox.value() != size:
+                spinBox.setValue(size)
+
+        # Fixed particle position snapped to the real-space grid
+        self.options.setParticlePositionOf(calc.wfFixedParticle, calc.wfFixedPosition)
+        if calc.wfFixedParticle == self.options.particleType():
+            for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit), calc.wfFixedPosition):
+                lineEdit.setText(f'{value:.4f}')
+
+        particle = 'Hole' if calc.wfFixedParticle == 'h' else 'Electron'
+        self.particleGridLabel.setText(f'{particle} position snapped to the nearest point of the wave-function grid '
+                                       f'({calc.wfGrid[0]} × {calc.wfGrid[1]} × {calc.wfGrid[2]} points per cell).')
+        self.particleGridLabel.show()
+        self.fixedParticlePosChanged.emit()
+
+    @Slot()
     def updateWfCutoff(self):
         self.options.setWfCutoff(float(self.wfCutoffLineEdit.text()))
 
@@ -457,8 +515,18 @@ class Parameters3DWidget(QWidget):
 
     @Slot()
     def supercellChanged(self):
+        # Even sizes are increased by 1, as the wave-function calculation does,
+        # so that the lattice drawn always matches the wave function
+        for spinBox in (self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox):
+            if spinBox.value() % 2 == 0:
+                spinBox.blockSignals(True)
+                spinBox.setValue(spinBox.value() + 1)
+                spinBox.blockSignals(False)
+
         self.options.setSupercell([self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()])
         self.signalReplotLattice.emit()
+        # The fixed particle sits in the central cell, which moves with the supercell
+        self.fixedParticlePosChanged.emit()
 
     # View direction
 

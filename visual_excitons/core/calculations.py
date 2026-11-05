@@ -58,6 +58,11 @@ class Calculations(QObject):
 
         self.waveFunction = None
         self.wfAtomPositions = None
+        # Effective parameters of the last wave function (see computeExcitonWaveFunction)
+        self.wfFixedParticle = None
+        self.wfFixedPosition = None
+        self.wfSupercell = None
+        self.wfGrid = None
         self.tr4x4 = np.eye(4, dtype=float)
 
     @Slot()
@@ -288,7 +293,12 @@ class Calculations(QObject):
 
         block_size = 256
 
-        sc_latvecs, atom_nums, self.wfAtomPositions, real_wfc = ex_wf2Real(Akcv, Qpt, wavefunctionDB, [np.min(excitonDB.table[:, 1]), np.max(excitonDB.table[:, 2])], fixed_position=fixed_position, fix_particle=fixed_particle, supercell=supercell, wfcCutoffRy=cutoff_ry, block_size=block_size)
+        # ex_wf2Real increases even supercell sizes by 1 (modifying the list in place),
+        # moves the fixed particle to the nearest point of the real-space grid and then
+        # to the central cell of the supercell; its final position is returned as the
+        # last atomic position (Cartesian)
+        supercell = list(supercell)
+        sc_latvecs, atom_nums, self.wfAtomPositions, real_wfc = ex_wf2Real(Akcv, Qpt, wavefunctionDB, [np.min(excitonDB.table[:, 1]), np.max(excitonDB.table[:, 2])], fixed_position=list(fixed_position), fix_particle=fixed_particle, supercell=supercell, wfcCutoffRy=cutoff_ry, block_size=block_size)
 
         density = np.abs(real_wfc) ** 2
         real_wfc = np.sum(density, axis=(0, 1, 2, 3))
@@ -298,6 +308,14 @@ class Calculations(QObject):
 
         self.tr4x4 = np.eye(4, dtype=float)
         self.tr4x4[0:3,0:3] = self.lattice.lat.T * supercell / self.waveFunction.shape
+
+        # Effective parameters: supercell actually used, grid points per unit cell, and
+        # fixed particle position in crystal coordinates of the unit cell (as given)
+        self.wfFixedParticle = fixed_particle
+        self.wfSupercell = list(supercell)
+        self.wfGrid = [int(n) // s for n, s in zip(self.waveFunction.shape, supercell)]
+        crystal = np.linalg.solve(self.lattice.lat.T, self.wfAtomPositions[-1])
+        self.wfFixedPosition = np.round(crystal - np.array(supercell) // 2, 10).tolist()
 
         self.wfComputed.emit()
 
