@@ -8,6 +8,7 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 import numpy as np
 
+from .sorted_mesh_item import SortedMeshItem
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols
 
 
@@ -50,8 +51,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.setBackgroundColor((255, 255, 255, 255))
         self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.NoPartialUpdate)
 
-        self.wfIsoVertices = None
-        self.wfIsoFaces = None
         self.wfIsoMeshData = None
 
         self.wfIsoVerticesSet = np.empty((0, 3), dtype=float)
@@ -182,23 +181,22 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     @Slot(list, float, list)
     def plotWfIso(self, wf, level, transform, opacity):
-        self.wfIsoVertices, self.wfIsoFaces = pg.isosurface(wf, level)
+        vertices, faces = pg.isosurface(wf, level)
 
         color = self.colormap.mapToQColor(level)
 
-        self.wfIsoMeshData = gl.MeshData(vertexes=self.wfIsoVertices, faces=self.wfIsoFaces)
+        self.wfIsoMeshData = gl.MeshData(vertexes=vertices, faces=faces)
 
         self.clearWfMeshItem()
 
-        self.wfMeshItem = gl.GLMeshItem(meshdata=self.wfIsoMeshData, shader='shaded', smooth=True, computeNormals=True)
+        # Faces are drawn back to front for correct transparency
+        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader='shaded', smooth=True, computeNormals=True)
         self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
         self.wfMeshItem.setGLOptions(self.isoGlOptions)
         self.wfMeshItem.setDepthValue(1)
         self.wfMeshItem.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItem)
-
-        self.onCameraChanged()
 
     @Slot(list, int, list)
     def plotWfIsoSet(self, wf, numLevels, transform, opacity):
@@ -217,14 +215,13 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
         self.wfIsoMeshDataSet = gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
 
-        self.wfMeshItemSet = gl.GLMeshItem(meshdata=self.wfIsoMeshDataSet, shader='balloon', smooth=True, computeNormals=True)
+        # All levels in one mesh, so faces of different levels are sorted together
+        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader='balloon', smooth=True, computeNormals=True)
         self.wfMeshItemSet.setGLOptions(self.isoGlOptions)
         self.wfMeshItemSet.setDepthValue(1)
         self.wfMeshItemSet.setTransform(pg.Transform3D(transform))
 
         self.addItem(self.wfMeshItemSet)
-
-        self.onCameraChanged()
 
     @Slot(list, int, list)
     def plotWfVol(self, wf, sliceDensity, transform):
@@ -312,83 +309,27 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.fixedParticleItem.resetTransform()
         self.fixedParticleItem.translate(position[0], position[1], position[2])
 
-    def sortFacesByCameraBak1(self, vertices, faces, viewMatrix):
-        centroids3 = vertices[faces].mean(axis=1)
-        centroids4 = np.hstack((centroids3, np.ones((centroids3.shape[0], 1), dtype=centroids3.dtype)))
-        # camCentroids4 = (viewMatrix @ centroids4.T).T
-        # camCentroids4 = centroids4 @ viewMatrix.T
-        camCentroids4 = viewMatrix @ centroids4.T
-        w = camCentroids4[:, 3:4]
-        camCentroids3 = camCentroids4[:, :3] / np.where(np.abs(w) > 0, w, 1.0)
-        order = np.argsort(camCentroids3[:,2])
-        return faces[order]
-
-    def sortFacesByCameraBak2(self, vertices, faces, cameraPosition):
-        centroids = vertices[faces].mean(axis=1)
-        distances = np.linalg.norm(centroids - cameraPosition, axis=1)
-        order = np.argsort(distances)[:-1]
-        return faces[order]
-
-    def sortFacesByCamera(self, vertices, faces, cameraPosition):
-        minDistances = np.min(np.linalg.norm(vertices[faces] - cameraPosition, axis=2), axis=1)
-        order = np.argsort(minDistances)[:-1]
-        return faces[order]
+    def paint(self, **kwargs):
+        # glClear() respects the depth write mask. Translucent items turn depth
+        # writes off and are drawn last, so without this the next frame would not
+        # clear the depth buffer: opaque items (atoms, lines...) redrawn at the same
+        # depth would fail the depth test and vanish into the background.
+        GL.glDepthMask(GL.GL_TRUE)
+        super().paint(**kwargs)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
         self._reposition_gizmo()
 
     def mouseMoveEvent(self, ev):
-        # self.onCameraChanged()
         super().mouseMoveEvent(ev)
         if self.gizmo is not None:
             self.gizmo.sync()
 
-    # def mouseReleaseEvent(self, ev):
-    #     super().mouseReleaseEvent(ev)
-    #     self.onCameraChanged()
-
     def wheelEvent(self, ev):
-        # self.onCameraChanged()
         super().wheelEvent(ev)
         if self.gizmo is not None:
             self.gizmo.sync()
-
-    def onCameraChanged(self):
-        # viewMatrix = np.array(list(self.viewMatrix().data()), dtype=np.float64).reshape((4, 4), order='C')
-        cameraPosition = self.trueCameraPosition()
-
-        if self.wfMeshItem is not None and self.wfMeshItem.visible():
-            self.wfIsoFaces = self.sortFacesByCamera(self.wfIsoVertices, self.wfIsoFaces, cameraPosition)
-            self.wfIsoMeshData.setFaces(self.wfIsoFaces)
-            self.wfMeshItem.setMeshData(meshdata=self.wfIsoMeshData)
-            # print(self.wfMeshData.faceNormals())
-
-        if self.wfMeshItemSet is not None and self.wfMeshItemSet.visible():
-            self.wfIsoFacesSet = self.sortFacesByCamera(self.wfIsoVerticesSet, self.wfIsoFacesSet, cameraPosition)
-            self.wfIsoMeshDataSet.setFaces(self.wfIsoFacesSet)
-            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
-            # self.wfMeshItemSet.update()
-
-        # self.update()
-
-        # rotCam = viewMatrix[:3, :3]
-        # U, s, Vt = np.linalg.svd(rotCam.T)
-
-        # rotMatrix = np.eye(4, 4, dtype=np.float64)
-        # rotMatrix[:3, :3] = U @ Vt
-        # rotMatrix[:3, :3] = invViewMatrix
-
-        # transMatrix = np.eye(4, 4, dtype=np.float64)
-        # transMatrix[:3, 3] = np.array([0.8, -0.8, -0.9])
-
-        # projMatrix = np.array(list(self.projectionMatrix(self.getViewport(), self.getViewport()).data()), dtype=np.float64).reshape((4, 4), order='F')
-
-        # self.axisItem.resetTransform()
-        # self.axisItem.setTransform(self.axisItem.viewTransform().inverted()[0])
-
-        self.removeItem(self.axisItem)
-        self.addItem(self.axisItem)
 
     @Slot(float, float)
     def setOpacity(self, opacity: float, level: float):
@@ -463,15 +404,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
         if self.gizmo is not None:
             self.gizmo.sync()
-
-    def trueCameraPosition(self):
-        """
-        Camera position in world coordinates from the view matrix. Unlike
-        GLViewWidget.cameraPosition(), this is also right in 'quaternion' mode.
-        """
-        inverted, _ = self.viewMatrix().inverted()
-        p = inverted.map(QVector3D(0.0, 0.0, 0.0))
-        return np.array([p.x(), p.y(), p.z()])
 
     @Slot(Qt.CheckState)
     def changeProjection(self, state):
