@@ -15,7 +15,8 @@ class Parameters3DWidget(QWidget):
     numIsoLevelsChanged = Signal()
     sliceDensityChanged = Signal()
     volumeParametersChanged = Signal()
-    opacityChanged = Signal(float, float)
+    isoOpacityChanged = Signal(float, float)  # opacity, iso level
+    isoSetOpacityChanged = Signal(float)
     centerViewClicked = Signal()
     viewDirChanged = Signal(list, object)  # look direction, up direction or None (Cartesian)
     projectionChanged = Signal(Qt.CheckState)
@@ -157,16 +158,23 @@ class Parameters3DWidget(QWidget):
         numIsoLevelsSpinBox.setValue(self.options.numIsoLevels())
         numIsoLevelsSpinBox.valueChanged.connect(self.setNumIsoLevels)
 
-        # Isosurface set opacity widget
+        # Opacity widgets of the single isosurface and of the isosurface set
 
         self.opacityTickMax = 1000
 
-        opacitySlider = QSlider()
-        opacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        opacitySlider.setOrientation(Qt.Orientation.Horizontal)
-        opacitySlider.setRange(0, self.opacityTickMax)
-        opacitySlider.setValue(self.options.opacity() * self.opacityTickMax)
-        opacitySlider.valueChanged.connect(self.setOpacity)
+        isoOpacitySlider = QSlider()
+        isoOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
+        isoOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
+        isoOpacitySlider.setRange(0, self.opacityTickMax)
+        isoOpacitySlider.setValue(round(self.options.isoOpacity() * self.opacityTickMax))
+        isoOpacitySlider.valueChanged.connect(self.setIsoOpacity)
+
+        isoSetOpacitySlider = QSlider()
+        isoSetOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
+        isoSetOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
+        isoSetOpacitySlider.setRange(0, self.opacityTickMax)
+        isoSetOpacitySlider.setValue(round(self.options.isoSetOpacity() * self.opacityTickMax))
+        isoSetOpacitySlider.valueChanged.connect(self.setIsoSetOpacity)
 
         # Slice density widget
 
@@ -207,10 +215,27 @@ class Parameters3DWidget(QWidget):
         isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
         isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
         plotFormLayout.addRow('Isosurface set style:', isoSetStyleComboBox)
-        plotFormLayout.addRow('Isosurface opacity:', opacitySlider)
+        plotFormLayout.addRow('Isosurface opacity:', isoOpacitySlider)
+        plotFormLayout.addRow('Isosurface set opacity:', isoSetOpacitySlider)
         plotFormLayout.addRow('Volume opacity:', volumeOpacitySlider)
         plotFormLayout.addRow('Volume contrast:', volumeContrastSpinBox)
         plotFormLayout.addRow('Slices per voxel:', sliceDensitySpinBox)
+
+        # Rows shown only for the plot types they apply to
+        # (0: isosurface, 1: isosurface set, 2: volumetric)
+        self.plotFormLayout = plotFormLayout
+        self.plotTypeRows = [
+            (isoLevelSlider, {0}),
+            (numIsoLevelsSpinBox, {1}),
+            (isoSetStyleComboBox, {1}),
+            (isoOpacitySlider, {0}),
+            (isoSetOpacitySlider, {1}),
+            (volumeOpacitySlider, {2}),
+            (volumeContrastSpinBox, {2}),
+            (sliceDensitySpinBox, {2}),
+        ]
+        self.plotTypeComboBox.currentIndexChanged.connect(self.updatePlotTypeRows)
+        self.updatePlotTypeRows(self.plotTypeComboBox.currentIndex())
 
         # Groupbox
 
@@ -392,45 +417,40 @@ class Parameters3DWidget(QWidget):
         self.options.setIsoLevel(float(tick / self.isoLevelTickMax))
         self.isoLevelChanged.emit()
 
-        if self.plotTypeComboBox.currentIndex() != 0:
-            self.plotTypeComboBox.setCurrentIndex(0)
-
     @Slot(int)
     def setNumIsoLevels(self, numIsoLevels: int):
         self.options.setNumIsoLevels(numIsoLevels)
         self.numIsoLevelsChanged.emit()
 
-        if self.plotTypeComboBox.currentIndex() != 1:
-            self.plotTypeComboBox.setCurrentIndex(1)
+    @Slot(int)
+    def setIsoOpacity(self, tick: int):
+        self.options.setIsoOpacity(float(tick / self.opacityTickMax))
+        self.isoOpacityChanged.emit(self.options.isoOpacity(), self.options.isoLevel())
 
     @Slot(int)
-    def setOpacity(self, tick: int):
-        self.options.setOpacity(float(tick / self.opacityTickMax))
-        self.opacityChanged.emit(self.options.opacity(), self.options.wfIsoLevel)
+    def setIsoSetOpacity(self, tick: int):
+        self.options.setIsoSetOpacity(float(tick / self.opacityTickMax))
+        self.isoSetOpacityChanged.emit(self.options.isoSetOpacity())
 
     @Slot(int)
     def setSliceDensity(self, density):
         self.options.setSliceDensity(density)
         self.sliceDensityChanged.emit()
 
-        if self.plotTypeComboBox.currentIndex() != 2:
-            self.plotTypeComboBox.setCurrentIndex(2)
-
     @Slot(int)
     def setVolumeOpacity(self, tick: int):
         self.options.setVolumeOpacity(tick / self.opacityTickMax)
         self.volumeParametersChanged.emit()
-
-        if self.plotTypeComboBox.currentIndex() != 2:
-            self.plotTypeComboBox.setCurrentIndex(2)
 
     @Slot(float)
     def setVolumeContrast(self, contrast: float):
         self.options.setVolumeContrast(contrast)
         self.volumeParametersChanged.emit()
 
-        if self.plotTypeComboBox.currentIndex() != 2:
-            self.plotTypeComboBox.setCurrentIndex(2)
+    @Slot(int)
+    def updatePlotTypeRows(self, plotType: int):
+        for widget, plotTypes in self.plotTypeRows:
+            self.plotFormLayout.setRowVisible(widget, plotType in plotTypes)
 
     def plotType(self):
         return self.plotTypeComboBox.currentIndex()

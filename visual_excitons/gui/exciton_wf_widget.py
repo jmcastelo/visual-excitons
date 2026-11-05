@@ -348,15 +348,17 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.gizmo.sync()
 
     @Slot(float, float)
-    def setOpacity(self, opacity: float, level: float):
-        if self.wfMeshItemSet is not None:
-            self.wfIsoColorsSet[:,3] = opacity
-            self.wfIsoMeshDataSet.setVertexColors(self.wfIsoColorsSet)
-            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
-            # self.update()
+    def setIsoOpacity(self, opacity: float, level: float):
         if self.wfMeshItem is not None:
             color = self.colormap.mapToQColor(level)
             self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
+
+    @Slot(float)
+    def setIsoSetOpacity(self, opacity: float):
+        if self.wfMeshItemSet is not None:
+            self.wfIsoColorsSet[:, 3] = opacity
+            self.wfIsoMeshDataSet.setVertexColors(self.wfIsoColorsSet)
+            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
 
     @Slot()
     def centerView(self):

@@ -76,7 +76,8 @@ class Options(QObject):
         self.scell = [1, 1, 1]
         self.wfIsoLevel = 0.5
         self.numWfIsoLevels = 10
-        self.wfIsoOpacity = 0.1
+        self.wfIsoOpacity = 0.3
+        self.wfIsoSetOpacity = 0.1
         self.volSliceDensity = 5
         self.volOpacity = 0.8
         self.volContrast = 1.0
@@ -268,11 +269,17 @@ class Options(QObject):
     def setVolumeContrast(self, contrast: float):
         self.volContrast = max(contrast, 0.01)
 
-    def opacity(self):
+    def isoOpacity(self):
         return self.wfIsoOpacity
 
-    def setOpacity(self, alpha: float):
+    def setIsoOpacity(self, alpha: float):
         self.wfIsoOpacity = alpha
+
+    def isoSetOpacity(self):
+        return self.wfIsoSetOpacity
+
+    def setIsoSetOpacity(self, alpha: float):
+        self.wfIsoSetOpacity = alpha
 
     def hasCell(self):
         return len(self.cell) > 0

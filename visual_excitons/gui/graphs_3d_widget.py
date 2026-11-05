@@ -25,7 +25,8 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.plotTypeChanged.connect(self.excitonWfWidget.showItem)
         self.parameters3DWidget.isoLevelChanged.connect(self.plotWfIso)
         self.parameters3DWidget.numIsoLevelsChanged.connect(self.plotWfIsoSet)
-        self.parameters3DWidget.opacityChanged.connect(self.excitonWfWidget.setOpacity)
+        self.parameters3DWidget.isoOpacityChanged.connect(self.excitonWfWidget.setIsoOpacity)
+        self.parameters3DWidget.isoSetOpacityChanged.connect(self.excitonWfWidget.setIsoSetOpacity)
         self.parameters3DWidget.isoSetStyleChanged.connect(self.excitonWfWidget.setIsoSetStyle)
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
         self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
@@ -86,12 +87,12 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def plotWfIso(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIso(self.calculations.probabilityDensity(), self.options.isoLevel(), self.calculations.tr4x4.tolist(), self.options.opacity())
+            self.excitonWfWidget.plotWfIso(self.calculations.probabilityDensity(), self.options.isoLevel(), self.calculations.tr4x4.tolist(), self.options.isoOpacity())
 
     @Slot()
     def plotWfIsoSet(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIsoSet(self.calculations.probabilityDensity(), self.options.numIsoLevels(), self.calculations.tr4x4.tolist(), self.options.opacity())
+            self.excitonWfWidget.plotWfIsoSet(self.calculations.probabilityDensity(), self.options.numIsoLevels(), self.calculations.tr4x4.tolist(), self.options.isoSetOpacity())
 
     @Slot()
     def plotWfVol(self):

@@ -144,7 +144,7 @@ Currently under active development, this tabs plots 3D visualizations of the pro
 
 #### Plot types and rendering
 
-The `Plot parameters` group on the right controls how the probability density is displayed:
+The `Plot parameters` group on the right controls how the probability density is displayed. Choose the display mode with `Plot type`; only the controls of the selected mode are shown:
 
 - **Isosurface**: a single translucent surface at the level set with the `Iso level` slider, with lighting that reveals its 3D shape.
 - **Isosurface set**: a number of nested translucent surfaces (`Number of levels`), evenly spaced between the lowest and highest density and colored with the viridis colormap. Their look is chosen with `Isosurface set style`:
@@ -155,9 +155,7 @@ The `Plot parameters` group on the right controls how the probability density is
   - `Volume contrast` (default 1.0): a power applied to the density before computing the opacity. Values above 1 fade the low-density tails so that the core stands out, and values below 1 bring the tails out. Colors keep following the actual density.
   - `Slices per voxel`: the rendering quality. The volume is drawn as a stack of slices, and more slices give a smoother result. It does not change the overall opacity.
 
-  Changing any of these controls switches the plot type to `Volumetric`.
-
-`Isosurface opacity` sets the transparency of both isosurface types.
+Each isosurface type keeps its own transparency, set with `Isosurface opacity` and `Isosurface set opacity` respectively.
 
 Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
 
