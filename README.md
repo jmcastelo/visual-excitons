@@ -88,6 +88,35 @@ Finally, run Visual Excitons as follows:
 python visual_excitons/main.py
 ```
 
+### Tests
+
+The tests use [pytest](https://docs.pytest.org) and [pytest-qt](https://pytest-qt.readthedocs.io), installed in the virtual environment with:
+
+```
+pip install pytest pytest-qt
+```
+
+Run them from the repository root:
+
+```
+pytest
+```
+
+They need no display: Qt runs on its offscreen platform, and the application settings are written to a temporary directory, so your own are never touched. The suite covers:
+
+- `test_bonds.py`: bond detection on crystals with known coordination, periodic images, half bonds in supercells.
+- `test_rendering.py`: sphere and cylinder meshes, the opacity calibration of the volume, cell parameters.
+- `test_core.py`: datasets, options, exciton selection, error reporting of calculations, absorption curves and their styles.
+- `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
+- `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function).
+
+Tests that read the datasets in `data/` (not in the repository; marked `data`) are skipped when these are missing. The end-to-end tests are slow (marked `slow`, about half a minute) and do not run by default:
+
+```
+pytest -m slow            # only the slow tests
+pytest -m "slow or not slow"   # everything
+```
+
 ## Usage instructions
 
 The main window has a navigation bar on the left with three pages, following the usual workflow:

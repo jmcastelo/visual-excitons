@@ -117,6 +117,10 @@ class Graphs3DWidget(QWidget):
         self.excitonWfWidget.clearAtomNamesItems()
         self.excitonWfWidget.clearLatticeBoundaryItems()
 
+        # Nothing to draw before a SAVE database is loaded
+        if not self.options.hasCell():
+            return
+
         ucell = self.calculations.unitCell()
 
         self.excitonWfWidget.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
@@ -146,4 +150,6 @@ class Graphs3DWidget(QWidget):
 
     @Slot()
     def translateFixedParticle(self):
+        if not self.options.hasCell():
+            return
         self.excitonWfWidget.translateFixedParticle(self.options.particlePositionCartesian())

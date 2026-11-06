@@ -1,0 +1,17 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The package is imported from the repository root
+pythonpath = ["."]
+qt_api = "pyside6"
+# Slow end-to-end tests run only on request: pytest -m slow
+addopts = "-m 'not slow'"
+markers = [
+    "slow: long end-to-end calculations on real datasets (run with -m slow)",
+    "data: needs the datasets in data/, which are not in the repository (skipped when missing)",
+]
+filterwarnings = [
+    # Raised by yambopy and its dependencies, not by this project
+    "ignore::DeprecationWarning",
+    "ignore::SyntaxWarning",
+    "ignore:numpy.ndarray size changed:RuntimeWarning",
+]
