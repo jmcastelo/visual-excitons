@@ -110,17 +110,21 @@ class AxisGizmo(gl.GLViewWidget):
     reciprocalStyle = dict(colors=[(1.0, 0.55, 0.55, 1.0), (0.55, 0.9, 0.55, 1.0), (0.55, 0.7, 1.0, 1.0)], labels=['a*', 'b*', 'c*'],
                            shaftRadius=0.07, headRadius=0.19, headLength=0.5)
 
-    def __init__(self, target, size=200, parent=None):
+    def __init__(self, target, size=200, parent=None, labelScale=1.0):
         super().__init__(parent=parent)
         self.target = target
         self.margin = 8
+        # Font of the labels relative to the default (for larger renderings)
+        self.labelScale = labelScale
 
         self.setFixedSize(size, size)
 
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
 
-        self.setBackgroundColor(1, 1, 1, 0)
+        # Transparent black: the widget is composited as premultiplied alpha, where
+        # transparent white would overflow into dark fringes around the arrows
+        self.setBackgroundColor(0, 0, 0, 0)
         fmt = self.format()
         fmt.setAlphaBufferSize(8)
         self.setFormat(fmt)
@@ -229,7 +233,7 @@ class AxisGizmo(gl.GLViewWidget):
             else:
                 labelColor = style.get('labelColor', tuple(int(255 * 0.75 * c) for c in color[:3]) + (255,))
             font = QFont()
-            font.setPointSize(11)
+            font.setPointSizeF(11 * self.labelScale)
             font.setBold(True)
             text = gl.GLTextItem(pos=vector + self.labelOffset * direction, text=label, color=labelColor,
                                  font=font, alignment=Qt.AlignmentFlag.AlignCenter)

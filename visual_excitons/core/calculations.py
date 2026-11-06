@@ -4,6 +4,8 @@ from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
 import numpy as np
 
 from .tasks import TaskRunner, databaseAccess
+from .export import supercellAtoms, writeDensity
+from .atomic_data import BOHR_TO_ANGSTROM
 
 
 
@@ -178,6 +180,8 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
         'supercell': list(supercell),
         'grid': [int(n) // s for n, s in zip(waveFunction.shape, supercell)],
         'fixedPosition': np.round(crystal - np.array(supercell) // 2, 10).tolist(),
+        'qIndex': q_index,
+        'excIndex': exc_index,
     }
 
 
@@ -201,6 +205,7 @@ class Calculations(QObject):
     excitonAbsorptionCurveRemoved = Signal(int)
 
     wfComputed = Signal()
+    densityExported = Signal(str)   # file written
 
     # Exciton chosen in the spectra, shared with the wave-function page:
     # Q-point index (0-based, as in ndb.BS_diago_Q<index + 1>), exciton index (1-based), energy (eV)
@@ -255,6 +260,7 @@ class Calculations(QObject):
         self.wfFixedPosition = None
         self.wfSupercell = None
         self.wfGrid = None
+        self.wfExciton = None  # (q index, exciton index)
         self.tr4x4 = np.eye(4, dtype=float)
 
         self.selectedExciton = None  # (q index, exciton index, energy)
@@ -531,7 +537,39 @@ class Calculations(QObject):
         self.wfSupercell = result['supercell']
         self.wfGrid = result['grid']
         self.wfFixedPosition = result['fixedPosition']
+        self.wfExciton = (result['qIndex'], result['excIndex'])
         self.wfComputed.emit()
+
+    def exportDensity(self, filename):
+        """
+        Save the probability density with the atoms of the supercell (format
+        from the extension: .cube or .xsf), in the background.
+        """
+        message = 'Saving the probability density…'
+        if self.waveFunction is None:
+            return self._reject(message, 'No wave function: compute one first.')
+
+        cell = self.unitCell()
+        numbers, positions = supercellAtoms(cell['base_lattice_vectors'], cell['atomic_positions'],
+                                            cell['atomic_numbers'], self.wfSupercell)
+        lattice = np.asarray(self.lattice.lat, dtype=float)
+        fixedCrystal = np.asarray(self.wfFixedPosition) + np.asarray(self.wfSupercell) // 2
+        fixedAngstrom = lattice.T @ fixedCrystal * BOHR_TO_ANGSTROM
+        particle = 'hole' if self.wfFixedParticle == 'h' else 'electron'
+        qIndex, excIndex = self.wfExciton
+        comment = (f'Exciton {excIndex} at Q-point {qIndex + 1}, {particle} fixed at crystal coordinates '
+                   f'{" ".join(f"{x:.4f}" for x in fixedCrystal)} of the supercell '
+                   f'({" ".join(f"{x:.4f}" for x in fixedAngstrom)} A); '
+                   f'supercell {"x".join(map(str, self.wfSupercell))}; values relative to the maximum')
+        arguments = dict(density=self.waveFunction, lattice=lattice, supercell=list(self.wfSupercell),
+                         atomicNumbers=numbers, atomPositions=positions, comment=comment)
+
+        def compute(context):
+            context.stage('Writing ' + str(filename).rsplit('/', 1)[-1])
+            writeDensity(filename, **arguments)
+            return filename
+
+        self.tasks.submit(message, compute, self.densityExported.emit)
 
     def probabilityDensity(self):
         return self.waveFunction

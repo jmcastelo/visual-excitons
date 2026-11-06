@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtGui import QQuaternion, QVector3D, QMatrix4x4
+from PySide6.QtGui import QQuaternion, QVector3D, QMatrix4x4, QColor
+from PySide6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat
 
 from OpenGL import GL
 
@@ -15,7 +16,8 @@ from .atom_labels_item import AtomLabelsItem
 from .axes_3d_widget import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
 from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
-                       headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData)
+                       headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData,
+                       MSAA_SAMPLES)
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols, ANGSTROM_TO_BOHR
 
 
@@ -238,6 +240,10 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.gizmo.setLatticeVectors(self.cellLattice)
         self.updateCellInfo()
 
+    def backgroundColor(self):
+        """Background of the scene, as a QColor."""
+        return QColor.fromRgbF(*self.opts['bgcolor'])
+
     @Slot(bool)
     def setDarkTheme(self, dark: bool):
         """Background of the scene and colors of the overlays for a dark or light theme."""
@@ -367,6 +373,45 @@ class ExcitonWfWidget(gl.GLViewWidget):
         tr = QMatrix4x4()
         tr.ortho(left, right, bottom, top, dist - depthRange, dist + depthRange)
         return tr
+
+    def renderImage(self, width, height, transparent=False):
+        """
+        The scene rendered off screen at `width` x `height` pixels, antialiased,
+        with a transparent background if `transparent`. Lines, whose width is
+        in pixels, are widened in proportion to the size of the image.
+        """
+        self.makeCurrent()
+        maximum = int(GL.glGetIntegerv(GL.GL_MAX_RENDERBUFFER_SIZE))
+        if max(width, height) > maximum:
+            raise ValueError(f'The image cannot be larger than {maximum} pixels on this graphics card')
+
+        fboFormat = QOpenGLFramebufferObjectFormat()
+        fboFormat.setAttachment(QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+        fboFormat.setSamples(MSAA_SAMPLES)
+        fboFormat.setInternalTextureFormat(GL.GL_RGBA8)
+        fbo = QOpenGLFramebufferObject(width, height, fboFormat)
+
+        background = self.opts['bgcolor']
+        scale = height / max(self.deviceHeight(), 1)
+        lineWidths = [(item, item.width) for item in self.latticeBoundaryItems]
+        try:
+            if transparent:
+                # Transparent black: the image is read as premultiplied, where a
+                # color brighter than its alpha would overflow when composited
+                self.opts['bgcolor'] = (0.0, 0.0, 0.0, 0.0)
+            for item, lineWidth in lineWidths:
+                item.setData(width=lineWidth * scale)
+            fbo.bind()
+            GL.glViewport(0, 0, width, height)
+            self.paint(region=(0, 0, width, height), viewport=(0, 0, width, height))
+            image = fbo.toImage()
+        finally:
+            fbo.release()
+            self.opts['bgcolor'] = background
+            for item, lineWidth in lineWidths:
+                item.setData(width=lineWidth)
+            self.update()
+        return image
 
     def paint(self, **kwargs):
         # glClear() respects the depth write mask. Translucent items turn depth

@@ -21,6 +21,7 @@ from .graphs_3d_widget import Graphs3DWidget
 from .navigation_bar import NavigationBar
 from .theme import themeManager, THEME_MODES
 from .persistence import StateRegistry, GLOBAL, DATASET
+from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
 
 
 # Opened on the first run, when there is no recent dataset (relative to the repository)
@@ -61,6 +62,10 @@ class MainWindow(QMainWindow):
         self.calculations.taskCancelled.connect(self.onTaskCancelled)
         self.calculations.errorOccurred.connect(self.onError)
         self.calculations.excitonSelected.connect(self.onExcitonSelected)
+        self.calculations.wfComputed.connect(lambda: self.exportDensityAction.setEnabled(True))
+        self.calculations.densityExported.connect(
+            lambda filename: self.statusBar().showMessage(f'Probability density saved to {filename}', 6000))
+        self.options.databaseFound.connect(self.onDatasetForExports)
 
         self.theme.themeChanged.connect(self.spectraPage.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunctionPage.setDarkTheme)
@@ -113,6 +118,8 @@ class MainWindow(QMainWindow):
         self.wavefunctionPage = Graphs3DWidget(self.options, self.calculations)
         self.spectraPage.inspector.showWavefunctionRequested.connect(lambda: self.setPage(WAVEFUNCTION_PAGE))
         self.systemPage.qPathApplied.connect(self.saveQPath)
+        self.wavefunctionPage.parameters3DWidget.exportImageRequested.connect(self.exportImage)
+        self.wavefunctionPage.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
 
         self.stack = QStackedWidget()
         for page in (self.systemPage, self.spectraPage, self.wavefunctionPage):
@@ -144,6 +151,18 @@ class MainWindow(QMainWindow):
 
         self.recentMenu = fileMenu.addMenu('Open &recent')
         self.updateRecentMenu()
+
+        fileMenu.addSeparator()
+        exportImageAction = QAction('&Export 3D view as image…', self)
+        exportImageAction.setShortcut(QKeySequence('Ctrl+E'))
+        exportImageAction.triggered.connect(self.exportImage)
+        fileMenu.addAction(exportImageAction)
+
+        self.exportDensityAction = QAction('Export probability &density…', self)
+        self.exportDensityAction.setShortcut(QKeySequence('Ctrl+Shift+E'))
+        self.exportDensityAction.setEnabled(False)
+        self.exportDensityAction.triggered.connect(self.exportDensity)
+        fileMenu.addAction(self.exportDensityAction)
 
         fileMenu.addSeparator()
         quitAction = QAction('&Quit', self)
@@ -406,6 +425,68 @@ class MainWindow(QMainWindow):
     @Slot(int, int, float)
     def onExcitonSelected(self, qIndex: int, excIndex: int, energy: float):
         self.statusBar().showMessage(f'Selected exciton {excIndex} at Q-point {qIndex + 1} (E = {energy:.4f} eV)', 8000)
+
+    # Export
+
+    def exportBaseName(self):
+        """File name without extension: the dataset, and the exciton of the wave function if any."""
+        name = datasetName(self.dataset or {}) or 'visual_excitons'
+        if self.calculations.waveFunction is not None and self.calculations.wfExciton is not None:
+            qIndex, excIndex = self.calculations.wfExciton
+            name += f'_Q{qIndex + 1}_exciton{excIndex}'
+        return name
+
+    def exportPath(self, filename):
+        folder = self.settings.value('exportDir', str(Path.cwd()))
+        return str(Path(folder) / filename)
+
+    def rememberExportFolder(self, filename):
+        self.settings.setValue('exportDir', str(Path(filename).parent))
+
+    @Slot(bool)
+    def onDatasetForExports(self, found):
+        # A density belongs to the dataset it was computed on
+        self.exportDensityAction.setEnabled(False)
+        self.wavefunctionPage.parameters3DWidget.exportDensityButton.setEnabled(False)
+
+    @Slot()
+    def exportImage(self):
+        # The view must have been shown to be rendered
+        self.setPage(WAVEFUNCTION_PAGE)
+        QApplication.processEvents()
+        view = self.wavefunctionPage.excitonWfWidget
+        dialog = ImageExportDialog(view, self)
+        if dialog.exec() != ImageExportDialog.DialogCode.Accepted:
+            return
+        filename, _ = QFileDialog.getSaveFileName(self, 'Export image', self.exportPath(self.exportBaseName() + '.png'),
+                                                  IMAGE_FILTERS)
+        if not filename:
+            return
+        if not Path(filename).suffix:
+            filename += '.png'
+        try:
+            saveImage(dialog.composedImage(), filename, view.backgroundColor())
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, 'Export image failed', str(error))
+            return
+        self.rememberExportFolder(filename)
+        width, height = dialog.imageSize()
+        self.statusBar().showMessage(f'Image ({width} × {height}) saved to {filename}', 6000)
+
+    @Slot()
+    def exportDensity(self):
+        if self.calculations.waveFunction is None:
+            QMessageBox.information(self, 'Export probability density', 'Compute a wave function first.')
+            return
+        filters = 'Gaussian cube (*.cube);;XCrySDen XSF (*.xsf)'
+        filename, chosenFilter = QFileDialog.getSaveFileName(
+            self, 'Export probability density', self.exportPath(self.exportBaseName() + '.cube'), filters)
+        if not filename:
+            return
+        if Path(filename).suffix.lower() not in ('.cube', '.xsf'):
+            filename += '.xsf' if 'xsf' in chosenFilter else '.cube'
+        self.rememberExportFolder(filename)
+        self.calculations.exportDensity(filename)
 
     # Misc
 

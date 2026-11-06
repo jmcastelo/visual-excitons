@@ -268,3 +268,47 @@ def test_invalid_saved_q_path_is_dropped(window):
     assert window.options.qBZ is None and 'qPath' not in window.recentDatasets()[0]
     assert window.systemPage.qPathLineEdit.text() == window.options.defaultPath
     assert 'could not be restored' in window.statusBar().currentMessage()
+
+
+def test_image_export_dialog(window):
+    from visual_excitons.gui.image_export import ImageExportDialog
+    view = window.wavefunctionPage.excitonWfWidget
+    view.resize(400, 300)
+    dialog = ImageExportDialog(view, window)
+    dialog.scaleComboBox.setCurrentIndex(2)                 # 3x
+    assert dialog.imageSize() == (1200, 900) and not dialog.widthSpinBox.isEnabled()
+    dialog.scaleComboBox.setCurrentIndex(len(dialog.SCALES))  # custom: width free, height keeps the proportions
+    dialog.widthSpinBox.setValue(1000)
+    assert dialog.imageSize() == (1000, 750)
+    dialog.transparentCheckBox.setChecked(True)
+    dialog.accept()
+
+    again = ImageExportDialog(view, window)
+    assert again.imageSize() == (1000, 750) and again.transparentCheckBox.isChecked()
+
+
+def test_export_density_from_the_window(window, qtbot, monkeypatch, tmp_path):
+    calc = window.calculations
+    assert not window.exportDensityAction.isEnabled()
+
+    class Lattice:
+        lat = np.eye(3) * 8.0
+        atomic_numbers = [6]
+        car_atomic_positions = np.zeros((1, 3))
+    calc.lattice = Lattice()
+    calc.waveFunction = np.random.default_rng(0).random((4, 4, 4))
+    calc.wfSupercell, calc.wfFixedParticle, calc.wfFixedPosition, calc.wfExciton = [1, 1, 1], 'e', [0, 0, 0], (0, 3)
+    calc.wfGrid = [4, 4, 4]
+    calc.wfComputed.emit()
+    assert window.exportDensityAction.isEnabled()
+    assert window.exportBaseName().endswith('_Q1_exciton3')
+
+    target = tmp_path / 'density'
+    monkeypatch.setattr(main_window.QFileDialog, 'getSaveFileName',
+                        lambda *args, **kwargs: (str(target), 'XCrySDen XSF (*.xsf)'))
+    with qtbot.waitSignal(calc.densityExported, timeout=10000) as blocker:
+        window.exportDensityAction.trigger()
+    assert blocker.args == [str(target) + '.xsf'] and (tmp_path / 'density.xsf').stat().st_size > 0
+    assert 'saved' in window.statusBar().currentMessage()
+    assert QSettings('VisualExcitons', 'VisualExcitons').value('exportDir') == str(tmp_path)
+    calc.waveFunction = None

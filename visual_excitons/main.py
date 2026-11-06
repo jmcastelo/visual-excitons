@@ -8,12 +8,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QApplication
 
 from visual_excitons.gui.main_window import MainWindow
 
 
 if __name__ == "__main__":
+    # All OpenGL contexts share their resources (shaders, buffers), so the 3D
+    # items can also be drawn by a separate window, as in image exports
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName('Visual Excitons')
     app.setOrganizationName('VisualExcitons')

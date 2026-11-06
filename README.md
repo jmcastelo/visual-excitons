@@ -109,6 +109,8 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_core.py`: datasets, options, exciton selection, error reporting of calculations, absorption curves and their styles.
 - `test_tasks.py`: background calculations (worker thread, ordering, progress, cancellation, queue replacement, the hooks into yambopy's progress).
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
+- `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
+- `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
 - `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
 
 Tests that read the datasets in `data/` (not in the repository; marked `data`) are skipped when these are missing. The end-to-end tests are slow (marked `slow`, about half a minute) and do not run by default:
@@ -307,6 +309,19 @@ All of this can be toggled from the `Axes` section of the side panel:
 - `Reciprocal vectors a*, b*, c*`
 - `Axis labels`
 - `Cell parameters`
+
+#### Export
+
+The `Export` section of the side panel, or the `File` menu, saves what is on the Wave function page:
+
+- **Image…** (`Ctrl+E`): the 3D view as a PNG, JPEG or TIFF image, at 1 to 4 times the size of the view on screen or at a custom width (the height keeps the proportions of the view). It shows exactly what the view shows, rendered again at the chosen size: surfaces, atoms and labels are sharp, and lines are widened in proportion. The axes gizmo and the cell parameters can be included. With `Transparent background` (PNG and TIFF), only the scene is drawn, ready to be placed on slides or figures.
+- **Density…** (`Ctrl+Shift+E`): the probability density of the last wave function computed, on its real-space grid, with the atoms of the supercell, as:
+  - a Gaussian cube file (`.cube`, lengths in Bohr), or
+  - an XCrySDen XSF file (`.xsf`, lengths in Å),
+
+  which [VESTA](https://jp-minerals.org/vesta/en/), [VMD](https://www.ks.uiuc.edu/Research/vmd/), [XCrySDen](http://www.xcrysden.org/), [Ovito](https://www.ovito.org/) or [ParaView](https://www.paraview.org/) can open, e.g. to draw isosurfaces with their own tools. The grid covers the supercell from its origin, as in the 3D view; values are relative to the maximum of the density, in scientific notation so the tails are kept. The fixed particle is not an atom: its position, the exciton and the supercell are written in the comments of the file. The file is written in the background.
+
+File names are suggested from the dataset and the exciton (e.g. `BiI3_Bulk_8x8x8_Q1_exciton1.cube`), in the folder of the last export.
 
 ## Future features
 

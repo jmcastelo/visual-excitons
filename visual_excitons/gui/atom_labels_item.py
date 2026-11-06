@@ -61,7 +61,9 @@ class AtomLabelsItem(GLGraphicsItem):
             'glDepthMask': (GL.GL_TRUE,),
             GL.GL_CULL_FACE: False,
             GL.GL_BLEND: True,
-            'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
+            # Alpha accumulates coverage (as for translucent items): with the same
+            # factors as color, the edges of labels would make the image translucent
+            'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA),
         })
         # After opaque items, before translucent ones
         self.setDepthValue(LABEL_STAGE)

@@ -14,7 +14,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QCoreApplication, Qt
+
+# As in main.py, before the application is created
+QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

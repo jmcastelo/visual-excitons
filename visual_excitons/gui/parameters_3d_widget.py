@@ -33,6 +33,8 @@ class Parameters3DWidget(Inspector):
     showAxisLabelsChanged = Signal(bool)
     showCellInfoChanged = Signal(bool)
     isoSetStyleChanged = Signal(int)
+    exportImageRequested = Signal()
+    exportDensityRequested = Signal()
 
     def __init__(self, options: Options, calculations: Calculations):
         Inspector.__init__(self)
@@ -48,6 +50,7 @@ class Parameters3DWidget(Inspector):
         self.buildViewSection()
         self.buildStructureSection()
         self.buildAxesSection()
+        self.buildExportSection()
 
         self.alignLabels()
         self.persistence.afterRestore.append(self.afterRestore)
@@ -387,6 +390,24 @@ class Parameters3DWidget(Inspector):
 
         layout.addWidget(NoteLabel('Each set of arrows is scaled so that its longest vector has the same length.'), 3, 0, 1, 2)
         self.addSection('Axes', layout, expanded=False)
+
+    def buildExportSection(self):
+        imageButton = QPushButton('Image…')
+        imageButton.setToolTip('Save the 3D view as an image, at any size (Ctrl+E)')
+        imageButton.clicked.connect(self.exportImageRequested)
+
+        self.exportDensityButton = QPushButton('Density…')
+        self.exportDensityButton.setToolTip('Save the probability density with the atoms, as a Gaussian cube or\n'
+                                            'XSF file for VESTA, VMD, XCrySDen, Ovito... (Ctrl+Shift+E)')
+        self.exportDensityButton.setEnabled(False)
+        self.exportDensityButton.clicked.connect(self.exportDensityRequested)
+        self.calculations.wfComputed.connect(lambda: self.exportDensityButton.setEnabled(True))
+
+        layout = QHBoxLayout()
+        layout.addWidget(imageButton)
+        layout.addWidget(self.exportDensityButton)
+        layout.addStretch(1)
+        self.addSection('Export', layout, expanded=False)
 
     def newCoordinateLineEdit(self):
         lineEdit = QLineEdit()
