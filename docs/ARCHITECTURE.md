@@ -28,7 +28,7 @@ Stack:
 
 | Layer | Library | Used for |
 |---|---|---|
-| GUI | PySide6 (Qt 6) | Windows, widgets, signals, threads, settings |
+| GUI | PySide6 (Qt 6), as `PySide6-Essentials` (the full `PySide6` adds about 400 MB of unused add-ons) | Windows, widgets, signals, threads, settings |
 | 2D plots | PyQtGraph | Dispersion, absorption, band structure, analysis plots |
 | 3D plots | PyQtGraph OpenGL (`pyqtgraph.opengl`) + PyOpenGL | Crystal structure, isosurfaces, volume |
 | Data | YamboPy, from the fork [jmcastelo/yambopy](https://github.com/jmcastelo/yambopy), branch `ase-bz` | Reading Yambo databases, BSE quantities, real-space wave functions |

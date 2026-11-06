@@ -73,7 +73,7 @@ git switch ase-bz
 pip install -e . --config-settings editable_mode=compat
 ```
 
-The last option helps some IDEs find the package, as noted [here](https://stackoverflow.com/questions/76301782/why-are-pycharm-and-pylance-not-detecting-packages-installed-in-editable-mode). Installing Visual Excitons again later (`pip install -e .`) replaces the editable fork by the one on GitHub: reinstall the editable fork afterwards, or use `pip install -e . --no-deps`.
+The last option helps some IDEs find the package, as noted [here](https://stackoverflow.com/questions/76301782/why-are-pycharm-and-pylance-not-detecting-packages-installed-in-editable-mode). Setuptools warns that this `compat` mode is transitional and will be removed: when it is, install without it, and add the fork's folder to the analysis paths of your editor instead (e.g. `basedpyright.analysis.extraPaths` in VS Code). Installing Visual Excitons again later (`pip install -e .`) replaces the editable fork by the one on GitHub: reinstall the editable fork afterwards, or use `pip install -e . --no-deps`.
 
 **Version.** The version of Visual Excitons is set in `visual_excitons/__init__.py` (`__version__`), which the packaging and the About box read. The package is described in `pyproject.toml`, with the minimum versions of its dependencies.
 

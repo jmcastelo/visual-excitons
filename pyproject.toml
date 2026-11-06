@@ -22,7 +22,10 @@ classifiers = [
 ]
 # Lower bounds: versions the code is known to work with
 dependencies = [
-    "PySide6>=6.8",
+    # Only the essential Qt modules (Core, Gui, Widgets, OpenGL, Svg, Test...): the
+    # full PySide6 package adds about 400 MB of add-ons this program does not use
+    # (WebEngine, PDF, 3D, charts...)
+    "PySide6-Essentials>=6.8",
     "pyqtgraph>=0.14",
     "PyOpenGL>=3.1.7",
     "numpy>=1.26",
