@@ -10,6 +10,12 @@ from .inspector import pageLayout
 from .analysis_widget import AnalysisWidget
 from visual_excitons.core.analysis import (planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon,
                                            upsampleDensity)
+from visual_excitons.core.tasks import TaskContext
+from .wf_geometry import isoMesh, isoSetMesh, volumeColors
+
+# Below this many grid points (times surfaces), plots are prepared inline:
+# fast enough not to show (e.g. while dragging the iso level slider)
+INLINE_DISPLAY_WORK = 3_000_000
 from .persistence import PersistentState
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
@@ -30,6 +36,7 @@ class Graphs3DWidget(QWidget):
         # Display upsampling (see displayDensity), cleared with each new wave function
         self.smoothing = 1
         self.displayCache = {}
+        self.displayRequest = None
         self.calculations.wfComputed.connect(self.displayCache.clear)
         self.calculations.wfComputed.connect(self.plotWf)
 
@@ -195,7 +202,12 @@ class Graphs3DWidget(QWidget):
 
     @Slot()
     def plotWf(self):
-        self.excitonWfWidget.clearWfItems()
+        # The other plot types are redone when shown (plotWfIfMissing); the shown
+        # one stays until its replacement is ready
+        view, plotType = self.excitonWfWidget, self.parameters3DWidget.plotType()
+        for index, clear in enumerate((view.clearWfMeshItem, view.clearWfMeshItemSet, view.clearWfVolItem)):
+            if index != plotType:
+                clear()
 
         if self.parameters3DWidget.plotType() == 0:
             self.plotWfIso()
@@ -214,24 +226,86 @@ class Graphs3DWidget(QWidget):
             elif index == 2:
                 self.plotWfVol()
 
+    # Plots of the density: geometry prepared inline when light, in the worker
+    # thread when heavy (fine grids, smoothing, many levels), then uploaded
+
+    def prepareDisplay(self, plotType, message, makeGeometry, work):
+        """
+        Compute `makeGeometry(density, context)` on the displayed density
+        (upsampling it first if needed) and show it with plot type `plotType`'s
+        show method; inline if `work` (grid points times surfaces) is small.
+        """
+        calc = self.calculations
+        density = calc.probabilityDensity()
+        if density is None:
+            return
+        factor = self.smoothing
+        transform = np.array(calc.tr4x4, dtype=float)
+        transform[:3, :3] /= factor
+        transform = transform.tolist()
+        cached = self.displayCache.get((id(density), factor)) if factor > 1 else density
+        # Only the latest request is shown: an earlier one still being prepared
+        # (other smoothing, level, colormap...) is outdated
+        request = self.displayRequest = object()
+
+        def compute(context):
+            displayed = cached
+            if displayed is None:
+                context.stage('Smoothing the density')
+                displayed = upsampleDensity(density, factor)
+            return displayed, makeGeometry(displayed, context)
+
+        def apply(result):
+            displayed, geometry = result
+            if self.displayRequest is not request or calc.probabilityDensity() is not density:
+                return   # outdated: a newer request, or a newer wave function
+            if factor > 1:
+                self.displayCache.clear()   # one copy at a time
+                self.displayCache[(id(density), factor)] = displayed
+            self.showGeometry(plotType, geometry, transform)
+            self.excitonWfWidget.showItem(self.parameters3DWidget.plotType())
+
+        # Upsampling always takes a while: only work on a grid at hand runs inline
+        if cached is not None and work * factor ** 3 <= INLINE_DISPLAY_WORK:
+            calc.tasks.dropPending('display')
+            apply(compute(TaskContext()))
+        else:
+            calc.tasks.submit(message, compute, apply, key='display')
+
+    def showGeometry(self, plotType, geometry, transform):
+        view = self.excitonWfWidget
+        if plotType == 0:
+            view.showIsoMesh(geometry, self.options.isoLevel(), transform, self.options.isoOpacity())
+        elif plotType == 1:
+            view.showIsoSetMesh(geometry, transform)
+        else:
+            view.showVolume(geometry, self.options.sliceDensity(), transform)
+
+    def gridPoints(self):
+        density = self.calculations.probabilityDensity()
+        return 0 if density is None else density.size
+
     @Slot()
     def plotWfIso(self):
-        if self.calculations.probabilityDensity() is not None:
-            density, transform = self.displayDensity()
-            self.excitonWfWidget.plotWfIso(density, self.options.isoLevel(), transform, self.options.isoOpacity())
+        level = self.options.isoLevel()
+        self.prepareDisplay(0, 'Preparing the isosurface…', lambda density, context: isoMesh(density, level),
+                            self.gridPoints())
 
     @Slot()
     def plotWfIsoSet(self):
-        if self.calculations.probabilityDensity() is not None:
-            density, transform = self.displayDensity()
-            self.excitonWfWidget.plotWfIsoSet(density, self.options.numIsoLevels(), transform, self.options.isoSetOpacity())
+        numLevels, opacity = self.options.numIsoLevels(), self.options.isoSetOpacity()
+        colormap = self.excitonWfWidget.colormap
+        self.prepareDisplay(1, 'Preparing the isosurfaces…',
+                            lambda density, context: isoSetMesh(density, numLevels, colormap, opacity, context),
+                            self.gridPoints() * numLevels)
 
     @Slot()
     def plotWfVol(self):
-        if self.calculations.probabilityDensity() is not None:
-            density, transform = self.displayDensity()
-            self.excitonWfWidget.plotWfVol(density, self.options.sliceDensity(), transform,
-                                           self.options.volumeOpacity(), self.options.volumeContrast())
+        colormap, sliceDensity = self.excitonWfWidget.colormap, self.options.sliceDensity()
+        opacity, contrast = self.options.volumeOpacity(), self.options.volumeContrast()
+        self.prepareDisplay(2, 'Preparing the volume…',
+                            lambda density, context: volumeColors(density, colormap, opacity, contrast, sliceDensity),
+                            self.gridPoints())
 
     @Slot()
     def plotLattice(self):

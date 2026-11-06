@@ -230,7 +230,7 @@ Each isosurface type keeps its own transparency, set with `Isosurface opacity` a
 
 `Reverse` swaps the ends of the colormap. Colormaps that start dark (e.g. `Inferno`, `Magma`, `Fire`) hide the low densities on the dark theme, and those that start light (`Blues`, `Sunset`) on the light one: reverse them, or pick another, to suit the background. The choice is remembered between sessions.
 
-**Smoothing.** `Smoothing` displays the density on a grid 2 or 3 times finer, interpolated with cubic splines from the computed one: isosurfaces and volume look smoother, especially when zoomed in or at low cutoffs. It adds no physical detail (that needs a higher cutoff), and the analysis and the exported files use the computed grid. The finer copy is computed once per wave function, in about a second at most.
+**Smoothing.** `Smoothing` displays the density on a grid 2 or 3 times finer, interpolated with cubic splines from the computed one: isosurfaces and volume look smoother, especially when zoomed in or at low cutoffs. It adds no physical detail (that needs a higher cutoff), and the analysis and the exported files use the computed grid. The finer copy is computed once per wave function. Plots that take a while to prepare (with smoothing, or isosurface sets on fine grids) are prepared in the background, with their progress in the status bar, while the previous plot stays shown; the window stays responsive, and rotating stays smooth even with nearly a million triangles.
 
 Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
 

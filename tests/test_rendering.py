@@ -98,7 +98,8 @@ def test_cell_info_is_in_angstrom():
 
 # Colormaps of the density
 
-def test_colormaps():
+def test_colormaps(qapp):
+    """(qapp: icons are pixmaps, which need the Qt application.)"""
     from visual_excitons.gui.colormaps import COLORMAPS, makeColormap, colormapIcon, DEFAULT_COLORMAP
     assert DEFAULT_COLORMAP in COLORMAPS
     for label in COLORMAPS:
@@ -113,3 +114,29 @@ def test_colormaps():
     # Unknown labels (e.g. from old settings) fall back to the default
     np.testing.assert_allclose(makeColormap('No such map').getLookupTable(nPts=8), makeColormap(DEFAULT_COLORMAP).getLookupTable(nPts=8))
     assert not colormapIcon(plain).isNull()
+
+
+def test_vertex_normals_and_meshes():
+    from visual_excitons.gui.wf_geometry import vertexNormals, isoMesh, isoSetMesh
+    from visual_excitons.gui.colormaps import makeColormap
+    # A sphere: normals point outwards, along the radius
+    x = np.linspace(-1, 1, 41)
+    r = np.sqrt(x[:, None, None] ** 2 + x[None, :, None] ** 2 + x[None, None, :] ** 2)
+    density = np.clip(1.0 - r, 0.0, 1.0)
+    vertices, faces, normals = isoMesh(density, 0.5)
+    radial = vertices - 20.0
+    radial /= np.linalg.norm(radial, axis=1, keepdims=True)
+    assert np.mean(np.abs(np.sum(normals * radial, axis=1))) > 0.99
+    np.testing.assert_allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-5)
+    # Same as pyqtgraph's (slow) normals, up to orientation
+    import pyqtgraph.opengl as gl
+    with np.errstate(invalid='ignore'):   # pyqtgraph divides by zero on zero-area-only vertices
+        reference = gl.MeshData(vertexes=vertices, faces=faces).vertexNormals()
+    reference = reference / np.maximum(np.linalg.norm(reference, axis=1, keepdims=True), 1e-12)
+    defined = np.linalg.norm(reference, axis=1) > 0.5   # pyqtgraph leaves zero-area-only vertices at zero
+    assert defined.mean() > 0.99
+    assert np.allclose(np.abs(np.sum(reference[defined] * normals[defined], axis=1)), 1.0, atol=1e-3)
+
+    vertices, faces, normals, colors = isoSetMesh(density, 4, makeColormap('Viridis'), 0.3)
+    assert len(vertices) == len(normals) == len(colors) and faces.max() < len(vertices)
+    assert np.all(colors[:, 3] == np.float32(0.3)) and len(np.unique(colors[:, :3], axis=0)) == 4

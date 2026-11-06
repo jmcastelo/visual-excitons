@@ -17,7 +17,8 @@ from .axes_3d_widget import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
 from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
                        headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData,
-                       MSAA_SAMPLES)
+                       MSAA_SAMPLES, PrecomputedNormalsMeshData)
+from .wf_geometry import isoMesh, isoSetMesh, volumeColors
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols, ANGSTROM_TO_BOHR
 
 
@@ -178,59 +179,53 @@ class ExcitonWfWidget(gl.GLViewWidget):
     def clearAtomNamesItems(self):
         self.atomLabels.clear()
 
-    @Slot(list, float, list)
+    # Probability density: geometry computed by wf_geometry (possibly in the
+    # worker thread), uploaded here
+
     def plotWfIso(self, wf, level, transform, opacity):
-        vertices, faces = pg.isosurface(wf, level)
+        self.showIsoMesh(isoMesh(wf, level), level, transform, opacity)
 
+    def plotWfIsoSet(self, wf, numLevels, transform, opacity):
+        self.showIsoSetMesh(isoSetMesh(wf, numLevels, self.colormap, opacity), transform)
+
+    def plotWfVol(self, wf, sliceDensity, transform, opacity=0.8, contrast=1.0):
+        self.showVolume(volumeColors(wf, self.colormap, opacity, contrast, sliceDensity), sliceDensity, transform)
+
+    def showIsoMesh(self, mesh, level, transform, opacity):
+        """The isosurface at `level`: `mesh` = (vertices, faces, normals) from wf_geometry.isoMesh."""
+        vertices, faces, normals = mesh
         color = self.colormap.mapToQColor(level)
-
-        self.wfIsoMeshData = gl.MeshData(vertexes=vertices, faces=faces)
+        self.wfIsoMeshData = PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces)
 
         self.clearWfMeshItem()
-
         # Faces are drawn back to front for correct transparency
-        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader=headlightShader, smooth=True, computeNormals=True)
+        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader=headlightShader, smooth=True)
         self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
         self.wfMeshItem.setGLOptions(TRANSLUCENT_GL_OPTIONS)
         self.wfMeshItem.setDepthValue(TRANSLUCENT_STAGE)
         self.wfMeshItem.setTransform(pg.Transform3D(transform))
-
         self.addItem(self.wfMeshItem)
 
-    @Slot(list, int, list)
-    def plotWfIsoSet(self, wf, numLevels, transform, opacity):
+    def showIsoSetMesh(self, mesh, transform):
+        """The isosurface set: `mesh` = (vertices, faces, normals, colors) from wf_geometry.isoSetMesh."""
+        vertices, faces, normals, colors = mesh
         self.clearWfMeshItemSet()
-
-        for level in np.linspace(0.01, 0.99, numLevels):
-            verts, faces = pg.isosurface(wf, level)
-
-            self.wfIsoFacesSet = np.concatenate((self.wfIsoFacesSet, faces + self.wfIsoVerticesSet.shape[0]), axis=0)
-            self.wfIsoVerticesSet = np.concatenate((self.wfIsoVerticesSet, verts), axis=0)
-
-            color = self.colormap.mapToQColor(level)
-            color.setAlphaF(opacity)
-            colors = np.full(shape=(len(verts), 4), fill_value=[color.redF(), color.greenF(), color.blueF(), color.alphaF()], dtype=np.float32)
-            self.wfIsoColorsSet = np.concatenate((self.wfIsoColorsSet, colors), axis=0)
-
-        self.wfIsoMeshDataSet = gl.MeshData(vertexes=self.wfIsoVerticesSet, faces=self.wfIsoFacesSet, vertexColors=self.wfIsoColorsSet)
+        self.wfIsoVerticesSet, self.wfIsoFacesSet, self.wfIsoColorsSet = vertices, faces, colors
+        self.wfIsoMeshDataSet = PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces, vertexColors=colors)
 
         # All levels in one mesh, so faces of different levels are sorted together
-        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader=self.isoSetShader, smooth=True, computeNormals=True)
+        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader=self.isoSetShader, smooth=True)
         self.wfMeshItemSet.setGLOptions(TRANSLUCENT_GL_OPTIONS)
         self.wfMeshItemSet.setDepthValue(TRANSLUCENT_STAGE)
         self.wfMeshItemSet.setTransform(pg.Transform3D(transform))
-
         self.addItem(self.wfMeshItemSet)
 
-    def plotWfVol(self, wf, sliceDensity, transform, opacity=0.8, contrast=1.0):
-        # Colors by density; opacity from absorption, corrected for the number of slices
-        data = volumeRGBA(wf, self.colormap, opacity, contrast, sliceDensity)
-
+    def showVolume(self, rgba, sliceDensity, transform):
+        """The volume: `rgba` from wf_geometry.volumeColors."""
         self.clearWfVolItem()
-
         # Translucent like the isosurfaces: drawn after opaque items and writing no
         # depth, otherwise even its invisible slices would hide what is drawn later
-        self.wfVolItem = FloatVolumeItem(data=data, sliceDensity=sliceDensity, glOptions=TRANSLUCENT_GL_OPTIONS)
+        self.wfVolItem = FloatVolumeItem(data=rgba, sliceDensity=sliceDensity, glOptions=TRANSLUCENT_GL_OPTIONS)
         self.wfVolItem.setDepthValue(TRANSLUCENT_STAGE)
         self.wfVolItem.setTransform(pg.Transform3D(transform))
         self.addItem(self.wfVolItem)

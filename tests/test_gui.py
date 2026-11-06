@@ -452,3 +452,31 @@ def test_memory_warning(window, monkeypatch):
     estimate['peak'] = 2 * 2 ** 30                                        # fits: no question, no warning
     p3.updateEstimate()
     assert not p3.estimateWarning
+
+
+def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window, qtbot):
+    """Heavy plots (smoothing, many levels) do not block the window; outdated results are not shown."""
+    page, p3, calc = window.wavefunctionPage, window.wavefunctionPage.parameters3DWidget, window.calculations
+    view = page.excitonWfWidget
+    fakeWaveFunction(calc, sigma=2.0)
+    p3.plotTypeComboBox.setCurrentIndex(1)        # isosurface set
+    p3.smoothingComboBox.setCurrentIndex(0)
+    calc.wfComputed.emit()                        # 36^3 x 10 levels: inline
+    assert not calc.isBusy() and view.wfMeshItemSet is not None
+    small = len(view.wfIsoFacesSet)
+
+    # Smoothing 3x: upsampled in the background
+    p3.smoothingComboBox.setCurrentIndex(2)
+    assert calc.isBusy()
+    # Back to none before it finishes: the 3x result must not replace it
+    p3.smoothingComboBox.setCurrentIndex(0)
+    qtbot.waitUntil(lambda: not calc.isBusy(), timeout=20000)
+    qtbot.wait(50)
+    assert len(view.wfIsoFacesSet) == small
+
+    p3.smoothingComboBox.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: not calc.isBusy(), timeout=20000)
+    qtbot.wait(50)
+    assert len(view.wfIsoFacesSet) > 2 * small
+    p3.smoothingComboBox.setCurrentIndex(0)
+    calc.waveFunction = None

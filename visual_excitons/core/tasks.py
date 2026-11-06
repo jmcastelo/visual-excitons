@@ -270,6 +270,13 @@ class TaskRunner(QObject):
         self._startNext()
         return task
 
+    def dropPending(self, key):
+        """Drop the queued (not started) tasks with `key`."""
+        before = len(self.pending)
+        self.pending = deque(task for task in self.pending if task.key != key)
+        if before and not self.pending and self.running is None:
+            self.busyChanged.emit(False)
+
     @Slot()
     def cancelAll(self):
         """Drop the queued tasks and stop the running one."""
