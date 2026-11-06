@@ -60,6 +60,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.bondsItem = None
         self.bondsVisible = True
         self.fixedParticleItem = None
+        # Plane of the analysis cut (see setCutPlane)
+        self.cutPlaneItems = []
 
         self.plotFixedParticle()
 
@@ -239,6 +241,31 @@ class ExcitonWfWidget(gl.GLViewWidget):
         if self.gizmo is not None:
             self.gizmo.setLatticeVectors(self.cellLattice)
         self.updateCellInfo()
+
+    def cameraAxes(self):
+        """World directions towards the viewer and up on the screen."""
+        camToWorld = self.opts['rotation'].conjugated()
+        toViewer = camToWorld.rotatedVector(QVector3D(0.0, 0.0, 1.0))
+        up = camToWorld.rotatedVector(QVector3D(0.0, 1.0, 0.0))
+        return np.array([toViewer.x(), toViewer.y(), toViewer.z()]), np.array([up.x(), up.y(), up.z()])
+
+    def setCutPlane(self, vertices):
+        """Show the plane of the analysis cut: its polygon inside the supercell; None or empty to hide it."""
+        for item in self.cutPlaneItems:
+            self.removeItem(item)
+        self.cutPlaneItems.clear()
+        if vertices is None or len(vertices) < 3:
+            return
+        vertices = np.asarray(vertices, dtype=float)
+        faces = np.array([[0, i, i + 1] for i in range(1, len(vertices) - 1)])
+        surface = gl.GLMeshItem(meshdata=gl.MeshData(vertexes=vertices, faces=faces), color=(1.0, 0.55, 0.0, 0.18),
+                                smooth=False, drawEdges=False, glOptions=TRANSLUCENT_GL_OPTIONS)
+        surface.setDepthValue(TRANSLUCENT_STAGE)
+        outline = gl.GLLinePlotItem(pos=np.vstack([vertices, vertices[:1]]), color=(1.0, 0.55, 0.0, 1.0), width=2.0,
+                                    antialias=True, mode='line_strip', glOptions=OPAQUE_GL_OPTIONS)
+        for item in (surface, outline):
+            self.addItem(item)
+            self.cutPlaneItems.append(item)
 
     def backgroundColor(self):
         """Background of the scene, as a QColor."""

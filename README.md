@@ -109,6 +109,7 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_core.py`: datasets, options, exciton selection, error reporting of calculations, absorption curves and their styles.
 - `test_tasks.py`: background calculations (worker thread, ordering, progress, cancellation, queue replacement, the hooks into yambopy's progress).
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
+- `test_analysis.py`: plane cuts (exact interpolation, masking, plane axes, intersection with the supercell) and the distance distribution (radii of a Gaussian, truncation warning).
 - `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
 - `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
 - `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
@@ -316,6 +317,18 @@ All of this can be toggled from the `Axes` section of the side panel:
 - `Reciprocal vectors a*, b*, c*`
 - `Axis labels`
 - `Cell parameters`
+
+#### Analysis
+
+The `Analysis` section of the side panel shows, below the 3D view, two analyses of the last wave function computed. Check `Show the analysis panel`; the panel can be resized by dragging its top edge.
+
+**Plane cut.** The probability density on a plane, as a map in the colormap of the 3D view, with a color bar (values relative to the maximum of the density in the supercell). The plane goes through the fixed particle (★), or parallel to it at the chosen `Offset` along its normal. Its normal is given in the `Plane normal in` basis, as for the view directions: Cartesian, lattice `[uvw]`, or reciprocal `(hkl)` for the lattice plane `(hkl)` (e.g. a layer of a layered material). `Perpendicular to the view` takes the plane of the screen, and orients the map as the 3D view. The density is interpolated linearly between the points of its grid; the parts of the plane outside the supercell are left blank. Atoms closer to the plane than `Atoms within` are drawn on it, fainter the farther they are. With `Show the plane in the 3D view`, the plane is drawn as an orange polygon where it cuts the supercell.
+
+**Distance distribution.** The distribution of the distance between the free particle and the fixed one: with the hole fixed, of the electron-hole distance. It shows the probability per unit distance P(r) and, on the right axis, the probability within each distance, with the mean and the distance within which 90% of the probability lies; their values, with the root mean square and the median, are given below. They measure the size (radius) of the exciton.
+
+These distances only cover the part of the exciton inside the supercell. When the density is still significant at its edges (above 2% of its maximum), the exciton does not fit in it: the distances are underestimated, and a warning suggests computing it with a larger supercell. Increase the supercell until the warning disappears and the distances stop changing.
+
+The analysis settings are remembered between sessions.
 
 #### Export
 

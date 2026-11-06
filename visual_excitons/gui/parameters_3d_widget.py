@@ -9,6 +9,7 @@ from visual_excitons.core.options import Options
 from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 from .persistence import DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
+from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 
 
 class Parameters3DWidget(Inspector):
@@ -36,6 +37,8 @@ class Parameters3DWidget(Inspector):
     isoSetStyleChanged = Signal(int)
     exportImageRequested = Signal()
     colormapChanged = Signal(object)   # pyqtgraph ColorMap
+    analysisChanged = Signal()
+    planeFromViewRequested = Signal()
     exportDensityRequested = Signal()
 
     def __init__(self, options: Options, calculations: Calculations):
@@ -52,6 +55,7 @@ class Parameters3DWidget(Inspector):
         self.buildViewSection()
         self.buildStructureSection()
         self.buildAxesSection()
+        self.buildAnalysisSection()
         self.buildExportSection()
 
         self.alignLabels()
@@ -435,6 +439,114 @@ class Parameters3DWidget(Inspector):
 
         layout.addWidget(NoteLabel('Each set of arrows is scaled so that its longest vector has the same length.'), 3, 0, 1, 2)
         self.addSection('Axes', layout, expanded=False)
+
+    def buildAnalysisSection(self):
+        self.showAnalysisCheckBox = QCheckBox('Show the analysis panel')
+        self.showAnalysisCheckBox.setToolTip('Below the 3D view: the density on a plane, and the distribution\n'
+                                             'of distances from the fixed particle (exciton radius)')
+        self.showAnalysisCheckBox.toggled.connect(self.analysisChanged)
+
+        self.planeBasisComboBox = QComboBox()
+        self.planeBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.planeBasisComboBox.addItems(self.options.viewBases)
+        self.planeBasisComboBox.setToolTip('Basis of the normal: Cartesian, lattice [uvw] or reciprocal (hkl),\n'
+                                           'the last one giving the lattice plane (hkl)')
+        self.planeBasisComboBox.currentIndexChanged.connect(self.onPlaneNormalEdited)
+
+        self.planeNormalLineEdits = [self.newVectorLineEdit() for _ in range(3)]
+        for lineEdit, value in zip(self.planeNormalLineEdits, ('0', '0', '1')):
+            lineEdit.setText(value)
+            lineEdit.editingFinished.connect(self.onPlaneNormalEdited)
+        normalLayout = QHBoxLayout()
+        for lineEdit in self.planeNormalLineEdits:
+            normalLayout.addWidget(lineEdit)
+
+        fromViewButton = QPushButton('Perpendicular to the view')
+        fromViewButton.setToolTip('The plane of the screen: the cut is seen as the 3D view shows it')
+        fromViewButton.clicked.connect(self.planeFromViewRequested)
+        # Screen up when the normal was taken from the view: the cut is then
+        # oriented as the view (cleared when the normal is edited)
+        self.planeUpHint = None
+
+        self.planeOffsetSpinBox = QDoubleSpinBox(minimum=-100.0, maximum=100.0, singleStep=0.1, decimals=2, suffix=' Å')
+        self.planeOffsetSpinBox.setToolTip('Distance of the plane from the fixed particle, along its normal')
+        self.planeOffsetSpinBox.valueChanged.connect(self.analysisChanged)
+
+        self.planeAtomsSpinBox = QDoubleSpinBox(minimum=0.0, maximum=20.0, singleStep=0.1, decimals=1, suffix=' Å')
+        self.planeAtomsSpinBox.setValue(1.0)
+        self.planeAtomsSpinBox.setToolTip('Atoms closer than this to the plane are drawn on the cut')
+        self.planeAtomsSpinBox.valueChanged.connect(self.analysisChanged)
+
+        for widget in (self.planeOffsetSpinBox, self.planeAtomsSpinBox):
+            widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        self.showPlaneCheckBox = QCheckBox('Show the plane in the 3D view')
+        self.showPlaneCheckBox.setChecked(True)
+        self.showPlaneCheckBox.toggled.connect(self.analysisChanged)
+
+        self.planeStatusLabel = QLabel()
+        self.planeStatusLabel.setStyleSheet('color: #e05050')
+        self.planeStatusLabel.setWordWrap(True)
+        self.planeStatusLabel.hide()
+
+        form = formLayout()
+        form.addRow(self.showAnalysisCheckBox)
+        form.addRow('Plane normal in:', self.planeBasisComboBox)
+        form.addRow('Normal:', normalLayout)
+        form.addRow('', fromViewButton)
+        form.addRow(self.planeStatusLabel)
+        form.addRow('Offset:', self.planeOffsetSpinBox)
+        form.addRow('Atoms within:', self.planeAtomsSpinBox)
+        form.addRow(self.showPlaneCheckBox)
+        self.addSection('Analysis', form, expanded=False)
+
+        def vector(lineEdits):
+            def setVector(values):
+                for lineEdit, value in zip(lineEdits, values):
+                    lineEdit.setText(str(value))
+            return dict(get=lambda: [lineEdit.text() for lineEdit in lineEdits], set=setVector)
+        self.remember('showAnalysis', self.showAnalysisCheckBox)
+        self.remember('planeBasis', self.planeBasisComboBox)
+        self.remember('planeNormal', **vector(self.planeNormalLineEdits))
+        self.remember('planeOffset', self.planeOffsetSpinBox)
+        self.remember('planeAtoms', self.planeAtomsSpinBox)
+        self.remember('showPlane', self.showPlaneCheckBox)
+
+    @Slot()
+    def onPlaneNormalEdited(self, *args):
+        self.planeUpHint = None
+        self.analysisChanged.emit()
+
+    def setPlaneFromView(self, toViewer, up):
+        """Plane of the screen: normal towards the viewer, oriented as the view."""
+        self.planeBasisComboBox.blockSignals(True)
+        self.planeBasisComboBox.setCurrentText('Cartesian')
+        self.planeBasisComboBox.blockSignals(False)
+        for lineEdit, value in zip(self.planeNormalLineEdits, toViewer):
+            lineEdit.setText(f'{value + 0.0:.4f}')
+        self.planeUpHint = list(up)
+        self.analysisChanged.emit()
+
+    def planeSettings(self):
+        """
+        The plane chosen: Cartesian normal, screen-up hint (or None), offset and
+        atom distance (Bohr), and whether to show it in 3D. ValueError if invalid.
+        """
+        try:
+            components = [float(e.text().replace(',', '.')) if e.text().strip() else 0.0 for e in self.planeNormalLineEdits]
+        except ValueError:
+            raise ValueError('Invalid number in the normal of the plane')
+        if np.allclose(components, 0.0):
+            raise ValueError('The normal of the plane must be a non-zero vector')
+        normal = self.options.viewVectorToCartesian(components, self.planeBasisComboBox.currentText())
+        return {'normal': np.asarray(normal, dtype=float), 'up': self.planeUpHint,
+                'offset': self.planeOffsetSpinBox.value() * ANGSTROM_TO_BOHR,
+                'atoms': self.planeAtomsSpinBox.value() * ANGSTROM_TO_BOHR,
+                'show3D': self.showPlaneCheckBox.isChecked()}
+
+    def showPlaneStatus(self, message):
+        self.planeStatusLabel.setText(message)
+        self.planeStatusLabel.setVisible(bool(message))
 
     def buildExportSection(self):
         imageButton = QPushButton('Image…')

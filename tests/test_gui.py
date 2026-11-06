@@ -333,3 +333,71 @@ def test_side_panels_fit_their_content(window):
     for inspector in (window.spectraPage.inspector, window.wavefunctionPage.inspector):
         for section in inspector.sections.values():
             assert inspector.minimumWidth() >= section.content.minimumSizeHint().width()
+
+
+def fakeWaveFunction(calc, sigma):
+    """A Gaussian density around the fixed hole, on a 3 x 3 x 3 supercell of a cubic cell."""
+    from visual_excitons.core.analysis import gridPositions
+
+    class Lattice:
+        lat = np.eye(3) * 6.0
+        atomic_numbers = [83]
+        car_atomic_positions = np.array([[3.0, 3.0, 3.0]])
+    calc.lattice = Lattice()
+    calc.wfSupercell, calc.wfFixedParticle, calc.wfFixedPosition = [3, 3, 3], 'h', [0.5, 0.5, 0.5]
+    shape = (36, 36, 36)
+    voxels = Lattice.lat * 3 / 36
+    center = Lattice.lat.T @ (np.array([0.5, 0.5, 0.5]) + 1)
+    r2 = np.sum((gridPositions(shape, voxels) - center) ** 2, axis=-1)
+    calc.waveFunction = np.exp(-r2 / (2 * sigma ** 2))
+    calc.wfGrid, calc.wfExciton = [12, 12, 12], (0, 1)
+    calc.tr4x4 = np.eye(4)
+    calc.tr4x4[:3, :3] = voxels.T
+
+
+def test_analysis_panel(window, qtbot):
+    page = window.wavefunctionPage
+    p3, analysis, calc = page.parameters3DWidget, page.analysisWidget, window.calculations
+    assert analysis.isHidden()
+    p3.showAnalysisCheckBox.setChecked(True)
+    assert not analysis.isHidden() and 'Compute a wave function' in analysis.statistics.text()
+
+    fakeWaveFunction(calc, sigma=2.0)
+    calc.wfComputed.emit()
+    result = page.radialResult
+    assert result['mean'] == pytest.approx(2.0 * np.sqrt(8 / np.pi), rel=0.03)
+    assert 'Distance of the electron from the hole' in analysis.statistics.text()
+    assert analysis.warning.isHidden()
+    # The cut through the hole, and the plane in 3D (a square: normal z in a cubic supercell)
+    assert np.isfinite(analysis.image.image).any()
+    assert len(page.excitonWfWidget.cutPlaneItems) == 2
+    assert len(analysis.atomsItem.data) > 0            # the Bi atoms of the plane z = 9 Bohr
+
+    # Without the plane in 3D
+    p3.showPlaneCheckBox.setChecked(False)
+    assert page.excitonWfWidget.cutPlaneItems == []
+
+    # Invalid normal: reported, nothing breaks
+    for edit in p3.planeNormalLineEdits:
+        edit.setText('0')
+    p3.onPlaneNormalEdited()
+    assert 'non-zero' in p3.planeStatusLabel.text() and not p3.planeStatusLabel.isHidden()
+
+    # Perpendicular to the view: the normal points to the viewer
+    page.excitonWfWidget.setViewDirection([0, 0, -1])
+    p3.planeFromViewRequested.emit()
+    assert [e.text() for e in p3.planeNormalLineEdits] == ['0.0000', '0.0000', '1.0000']
+    assert p3.planeBasisComboBox.currentText() == 'Cartesian' and p3.planeUpHint is not None
+    assert p3.planeStatusLabel.isHidden()
+
+    # A wide exciton in this small supercell: flagged
+    fakeWaveFunction(calc, sigma=12.0)
+    calc.wfComputed.emit()
+    assert not analysis.warning.isHidden() and 'larger supercell' in analysis.warning.text()
+
+    # A new dataset clears the analysis
+    page.onDatasetChanged(False)
+    assert page.radialResult is None and page.excitonWfWidget.cutPlaneItems == []
+    calc.waveFunction = None
+    p3.showAnalysisCheckBox.setChecked(False)
+    assert analysis.isHidden()

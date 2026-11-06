@@ -5,6 +5,7 @@ import numpy as np
 
 from .tasks import TaskRunner, databaseAccess
 from .export import supercellAtoms, writeDensity
+from .analysis import voxelVectors
 from .atomic_data import BOHR_TO_ANGSTROM
 
 
@@ -540,6 +541,25 @@ class Calculations(QObject):
         self.wfExciton = (result['qIndex'], result['excIndex'])
         self.wfComputed.emit()
 
+    # Geometry of the last wave function (lengths in Bohr)
+
+    def wfVoxels(self):
+        """Voxel vectors (rows) of the grid of the wave function."""
+        return voxelVectors(self.lattice.lat, self.wfSupercell, self.waveFunction.shape)
+
+    def wfFixedCrystal(self):
+        """Position of the fixed particle in crystal coordinates of the supercell (central cell)."""
+        return np.asarray(self.wfFixedPosition, dtype=float) + np.asarray(self.wfSupercell) // 2
+
+    def wfFixedCartesian(self):
+        return np.asarray(self.lattice.lat, dtype=float).T @ self.wfFixedCrystal()
+
+    def wfSupercellAtoms(self):
+        """Atomic numbers and Cartesian positions of the atoms of the supercell."""
+        cell = self.unitCell()
+        return supercellAtoms(cell['base_lattice_vectors'], cell['atomic_positions'], cell['atomic_numbers'],
+                              self.wfSupercell)
+
     def exportDensity(self, filename):
         """
         Save the probability density with the atoms of the supercell (format
@@ -549,12 +569,10 @@ class Calculations(QObject):
         if self.waveFunction is None:
             return self._reject(message, 'No wave function: compute one first.')
 
-        cell = self.unitCell()
-        numbers, positions = supercellAtoms(cell['base_lattice_vectors'], cell['atomic_positions'],
-                                            cell['atomic_numbers'], self.wfSupercell)
+        numbers, positions = self.wfSupercellAtoms()
         lattice = np.asarray(self.lattice.lat, dtype=float)
-        fixedCrystal = np.asarray(self.wfFixedPosition) + np.asarray(self.wfSupercell) // 2
-        fixedAngstrom = lattice.T @ fixedCrystal * BOHR_TO_ANGSTROM
+        fixedCrystal = self.wfFixedCrystal()
+        fixedAngstrom = self.wfFixedCartesian() * BOHR_TO_ANGSTROM
         particle = 'hole' if self.wfFixedParticle == 'h' else 'electron'
         qIndex, excIndex = self.wfExciton
         comment = (f'Exciton {excIndex} at Q-point {qIndex + 1}, {particle} fixed at crystal coordinates '

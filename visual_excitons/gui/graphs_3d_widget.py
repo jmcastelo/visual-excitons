@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QSplitter
 import pyqtgraph.opengl as gl
 import numpy as np
 
@@ -7,6 +7,8 @@ from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
 from .inspector import pageLayout
+from .analysis_widget import AnalysisWidget
+from visual_excitons.core.analysis import planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon
 from .persistence import PersistentState
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
@@ -61,22 +63,97 @@ class Graphs3DWidget(QWidget):
         # Initial view from the view widgets' default state
         self.parameters3DWidget.applyView()
 
+        # Analysis panel, below the 3D view
+        self.analysisWidget = AnalysisWidget()
+        self.analysisWidget.setVisible(False)
+        self.radialResult = None   # of the current wave function, computed when first shown
+        self.calculations.wfComputed.connect(self.onWfComputedForAnalysis)
+        self.parameters3DWidget.analysisChanged.connect(self.updateAnalysis)
+        self.parameters3DWidget.planeFromViewRequested.connect(self.setPlaneFromView)
+        self.parameters3DWidget.colormapChanged.connect(self.analysisWidget.setColormap)
+
+        self.viewSplitter = QSplitter(Qt.Orientation.Vertical)
+        self.viewSplitter.addWidget(self.excitonWfWidget)
+        self.viewSplitter.addWidget(self.analysisWidget)
+        self.viewSplitter.setCollapsible(0, False)
+        self.viewSplitter.setStretchFactor(0, 3)
+        self.viewSplitter.setStretchFactor(1, 2)
+
         self.inspector = self.parameters3DWidget
-        layout = pageLayout(self.excitonWfWidget, self.inspector)
+        layout = pageLayout(self.viewSplitter, self.inspector)
         self.setLayout(layout)
 
-        # Size of the side panel, kept between sessions
+        # Sizes of the side panel and of the analysis panel, kept between sessions
         self.persistence = PersistentState()
         self.persistence.remember('page', layout.itemAt(0).widget())
+        self.persistence.remember('analysis', self.viewSplitter)
 
     @Slot(bool)
     def setDarkTheme(self, dark: bool):
         self.excitonWfWidget.setDarkTheme(dark)
+        self.analysisWidget.setDarkTheme(dark)
+
+    # Analysis
+
+    @Slot()
+    def onWfComputedForAnalysis(self):
+        self.radialResult = None
+        self.updateAnalysis()
+
+    @Slot()
+    def setPlaneFromView(self):
+        toViewer, up = self.excitonWfWidget.cameraAxes()
+        self.parameters3DWidget.setPlaneFromView(toViewer, up)
+
+    @Slot()
+    def updateAnalysis(self):
+        """Show or hide the analysis panel, and update it and the plane in 3D."""
+        parameters, calc = self.parameters3DWidget, self.calculations
+        shown = parameters.showAnalysisCheckBox.isChecked()
+        self.analysisWidget.setVisible(shown)
+
+        if not shown or calc.probabilityDensity() is None or calc.wfSupercell is None:
+            self.excitonWfWidget.setCutPlane(None)
+            if calc.probabilityDensity() is None:
+                self.analysisWidget.clear()
+            return
+
+        try:
+            plane = parameters.planeSettings()
+        except ValueError as error:
+            parameters.showPlaneStatus(str(error))
+            return
+        parameters.showPlaneStatus('')
+
+        density = calc.probabilityDensity()
+        voxels = calc.wfVoxels()
+        particle = calc.wfFixedCartesian()
+        particleLabel = 'hole' if calc.wfFixedParticle == 'h' else 'electron'
+        lattice = np.asarray(calc.lattice.lat, dtype=float)
+
+        normal = plane['normal'] / np.linalg.norm(plane['normal'])
+        point = particle + plane['offset'] * normal
+        cut = planeCut(density, voxels, point, normal, inPlane=plane['up'], latticeVectors=lattice)
+        numbers, positions = calc.wfSupercellAtoms()
+        atoms = atomsNearPlane(positions, numbers, point, (cut['u'], cut['v'], cut['n']), plane['atoms'])
+        self.analysisWidget.setColormap(parameters.colormap())
+        self.analysisWidget.showCut(cut, atoms, particleLabel, plane['offset'])
+
+        if self.radialResult is None:
+            self.radialResult = radialDistribution(density, voxels, particle)
+        self.analysisWidget.showRadial(self.radialResult, particleLabel)
+
+        supercellVectors = lattice * np.asarray(calc.wfSupercell)[:, None]
+        polygon = planeSupercellPolygon(supercellVectors, point, normal) if plane['show3D'] else None
+        self.excitonWfWidget.setCutPlane(polygon)
 
     @Slot(bool)
     def onDatasetChanged(self, found: bool):
         """Drop the wave function of the previous dataset and draw the new lattice."""
         self.excitonWfWidget.clearWfItems()
+        self.excitonWfWidget.setCutPlane(None)
+        self.radialResult = None
+        self.analysisWidget.clear()
         if found:
             self.plotLattice()
             self.excitonWfWidget.centerView()
