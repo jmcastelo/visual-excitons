@@ -134,7 +134,13 @@ The status bar shows the dataset loaded (name, Bravais lattice and number of Q-p
 
 **Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen under `Appearance` are kept.
 
-The window remembers its size, the page, the theme and the recent datasets between sessions.
+**Resuming a session.** When the program is opened again, it resumes where it was left:
+
+- The window: its size, the page shown, the theme, whether the side panels are shown, their width and which of their sections are open, and the sizes of the plots.
+- Preferences: how the wave function is displayed (plot type, iso level, number of levels, style, opacities, volume settings), the view (basis, preset, direction and up vectors, side, projection), the structure (atoms, names, bonds and boundaries shown, atom and bond sizes, bond colors), the axes gizmo and cell parameters shown, and whether bright excitons are labelled.
+- The last dataset, with its own parameters: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff.
+
+Each dataset keeps its own parameters: switching to another one and back, or opening it again later from `Open recent` or `Open dataset`, brings them back; a dataset opened for the first time starts from the defaults. Results (dispersion, spectra, wave function) are not stored: compute them again, with the parameters already set.
 
 ### Datasets
 
@@ -148,13 +154,13 @@ These files must be coherent, i.e. correspond to calculations of the same system
 
 `File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. The calculation type is set from whether a GW directory was found. `File › Open recent` lists the last datasets.
 
-On start, the most recent dataset is opened again. On the first run, the `BiI3` test dataset in `data/BiI3_Bulk_8x8x8` is opened if present (it is not included in the repository). Its Q-path must be set to `LGZF` instead of the default one.
+On start, the most recent dataset is opened again, with its Q-path. On the first run, the `BiI3` test dataset in `data/BiI3_Bulk_8x8x8` is opened if present (it is not included in the repository). Its Q-path must be set to `LGZF` instead of the default one, once: it is remembered from then on.
 
 ### System
 
 - **Data**: the calculation type and the three directories, which can also be chosen one by one with `Browse…` or typed in. A green tick or a red cross below each shows whether its databases were found.
 - **Crystal lattice**: the detected `ibrav` and variant, and the lattice parameters `a`, `b`, `c` in Å (hover over them for their value in Bohr) and `α`, `β`, `γ` in degrees.
-- **Q-path**: the labels of the high-symmetry points along the path, as a string such as `GLB1,BZGX` (commas separate disconnected sections), and its sampling, by number of points or by density. Press `Set Q-path` to apply it.
+- **Q-path**: the labels of the high-symmetry points along the path, as a string such as `GLB1,BZGX` (commas separate disconnected sections), and its sampling, by number of points or by density. Press `Set Q-path` to apply it. The Q-path is saved with the dataset, together with its sampling, the lattice type and the extra high-symmetry points: when the dataset is opened again, in this session or a later one, it is restored and applied, so the dispersion can be computed right away. A saved path that no longer applies (e.g. to a different lattice) is dropped, with a message in the status bar.
 - **High-symmetry points**: the points of the Brillouin zone of the lattice, with their fractional coordinates `k₁`, `k₂`, `k₃` relative to the reciprocal lattice vectors. Right-click the table to add extra points, which can then be used in the Q-path, or to delete them.
 
 ### Spectra

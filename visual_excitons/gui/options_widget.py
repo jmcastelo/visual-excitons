@@ -1,4 +1,4 @@
-from PySide6.QtCore import Slot, Qt
+from PySide6.QtCore import Slot, Qt, Signal
 from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout
 from PySide6.QtWidgets import QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox, QSpinBox, QDoubleSpinBox
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QMenu, QHeaderView
@@ -10,6 +10,9 @@ from .inspector import NoteLabel
 
 class OptionsWidget(QWidget):
     """System page: data directories, crystal lattice and Brillouin-zone path."""
+
+    # A Q-path was set successfully: its state (see qPathState), to be saved
+    qPathApplied = Signal(dict)
 
     def __init__(self, options):
         QWidget.__init__(self)
@@ -321,19 +324,64 @@ class OptionsWidget(QWidget):
             self.densitySpin.setVisible(True)
 
     @Slot()
-    def setBrillouinZone(self):
+    def setBrillouinZone(self, quiet: bool = False):
+        """Set the Q-path of the widgets; errors are shown in a dialog unless `quiet`. True if it was set."""
         try:
             if self.interpolationComboBox.currentIndex() == 0:
                 self.options.setBrillouinZone(path=self.qPathLineEdit.text(), npoints=self.numPointsSpin.value())
             elif self.interpolationComboBox.currentIndex() == 1:
                 self.options.setBrillouinZone(path=self.qPathLineEdit.text(), density=self.densitySpin.value())
         except ValueError as error:
-            msgBox = QMessageBox()
-            msgBox.setText('Error')
-            msgBox.setInformativeText(str(error))
-            msgBox.exec()
-        else:
-            self.qPathLineEdit.setText(self.options.getPathString())
+            if not quiet:
+                msgBox = QMessageBox()
+                msgBox.setText('Error')
+                msgBox.setInformativeText(str(error))
+                msgBox.exec()
+            return False
+        self.qPathLineEdit.setText(self.options.getPathString())
+        self.qPathApplied.emit(self.qPathState())
+        return True
+
+    def qPathState(self) -> dict:
+        """The Q-path as set, with what it depends on: lattice type and extra points."""
+        return {
+            'ibrav': self.options.ibrav,
+            'path': self.options.getPathString(),
+            'sampling': 'density' if self.interpolationComboBox.currentIndex() == 1 else 'points',
+            'points': self.numPointsSpin.value(),
+            'density': self.densitySpin.value(),
+            'extraPoints': {label: list(coords) for label, coords in self.options.extraHighSymmetryPoints.items()},
+        }
+
+    def restoreQPath(self, state: dict) -> bool:
+        """Set a Q-path saved with qPathState. False (and the default path left) if it cannot be set."""
+        try:
+            ibrav = str(int(state['ibrav']))
+            if ibrav != self.ibravComboBox.currentText() and self.ibravComboBox.findText(ibrav) >= 0:
+                self.ibravComboBox.setCurrentText(ibrav)   # resets the points and the path
+
+            # Extra points, as rows below those of the lattice
+            self.hspTable.blockSignals(True)
+            for label, coords in state.get('extraPoints', {}).items():
+                row = self.hspTable.rowCount()
+                self.hspTable.insertRow(row)
+                for column, text in enumerate([label] + [f'{float(c):.5f}' for c in coords]):
+                    self.hspTable.setItem(row, column, QTableWidgetItem(text))
+            self.hspTable.blockSignals(False)
+            self.setExtraHSP()
+
+            self.numPointsSpin.setValue(int(state.get('points', self.numPointsSpin.value())))
+            self.densitySpin.setValue(float(state.get('density', self.densitySpin.value())))
+            self.interpolationComboBox.setCurrentIndex(1 if state.get('sampling') == 'density' else 0)
+            defaultPath = self.qPathLineEdit.text()
+            self.qPathLineEdit.setText(state['path'])
+        except (KeyError, TypeError, ValueError):
+            return False
+
+        if not self.setBrillouinZone(quiet=True):
+            self.qPathLineEdit.setText(defaultPath)
+            return False
+        return True
 
     def populateHSPTable(self, hsp: dict):
         self.hspTable.clearContents()

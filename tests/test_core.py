@@ -208,3 +208,17 @@ def test_select_from_dispersion_and_highlight_positions(calculations):
     # An exciton beyond the plotted ones, bright in the spectrum: only there
     calculations.selectExciton([Point(1, j=7, x=3.0)], True)
     assert calculations.selectedExcitonPositions() == {'dispersion': [], 'absorption': [(3.0, 1.0)]}
+
+
+@pytest.mark.data
+def test_new_lattice_clears_the_q_path():
+    from conftest import datasetPath
+    options = Options()
+    options.setSaveDir(str(datasetPath('BiI3_Bulk_8x8x8') / 'save'))
+    options.setIbrav(options.detectLatticeType())
+    options.setLatticeData(options.ibrav)
+    options.extraHighSymmetryPoints = {'M': [0.25, 0.25, 0.0]}
+    options.setBrillouinZone(path='LGZFM', npoints=50)
+    assert options.qBZ is not None
+    options.setLatticeData(options.ibrav)   # e.g. another dataset or ibrav
+    assert options.qBZ is None and options.extraHighSymmetryPoints == {}

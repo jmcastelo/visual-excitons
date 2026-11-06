@@ -20,6 +20,7 @@ from .graphs_widget import GraphsWidget
 from .graphs_3d_widget import Graphs3DWidget
 from .navigation_bar import NavigationBar
 from .theme import themeManager, THEME_MODES
+from .persistence import StateRegistry, GLOBAL, DATASET
 
 
 # Opened on the first run, when there is no recent dataset (relative to the repository)
@@ -65,6 +66,18 @@ class MainWindow(QMainWindow):
         self.theme.themeChanged.connect(self.wavefunctionPage.setDarkTheme)
         self.setTheme(self.settings.value('theme', 'System'))
 
+        # Parameters kept between sessions (see persistence.py): preferences now,
+        # those of a dataset when it is opened
+        self.state = StateRegistry()
+        self.state.add('spectra', self.spectraPage.inspector.persistence)
+        self.state.add('spectraLayout', self.spectraPage.persistence)
+        self.state.add('wavefunction', self.wavefunctionPage.inspector.persistence)
+        self.state.add('wavefunctionLayout', self.wavefunctionPage.persistence)
+        # A dataset opened for the first time starts from the defaults, not from
+        # the parameters of the previous one
+        self.datasetDefaults = self.state.values(DATASET)
+        self.state.restore(GLOBAL, self.loadJson('state', {}))
+
         if not self.restoreGeometry(self.settings.value('geometry', b'')):
             self.resize(1600, 1000)
         self.setPage(int(self.settings.value('page', SYSTEM_PAGE)))
@@ -99,6 +112,7 @@ class MainWindow(QMainWindow):
                                         self.bandStructureStyle)
         self.wavefunctionPage = Graphs3DWidget(self.options, self.calculations)
         self.spectraPage.inspector.showWavefunctionRequested.connect(lambda: self.setPage(WAVEFUNCTION_PAGE))
+        self.systemPage.qPathApplied.connect(self.saveQPath)
 
         self.stack = QStackedWidget()
         for page in (self.systemPage, self.spectraPage, self.wavefunctionPage):
@@ -279,15 +293,56 @@ class MainWindow(QMainWindow):
         self.openDataset(dataset)
 
     def openDataset(self, dataset):
-        self.dataset = dict(dataset)
+        # Keep the parameters of the dataset being left
+        self.storeDatasetState()
+
+        # What was saved for this dataset (Q-path, parameters), even when it is
+        # found again through Open dataset
+        saved = next((d for d in self.recentDatasets() if d.get('save') == dataset.get('save')), {})
+        self.dataset = {**{key: saved[key] for key in ('qPath', 'state') if key in saved}, **dict(dataset)}
+        dataset = self.dataset
         self.options.setGW(bool(dataset.get('gw')))
         self.options.setSaveDir(dataset['save'])
         if dataset.get('diago'):
             self.options.setDiagoDir(dataset['diago'])
         if dataset.get('qp'):
             self.options.setQPDir(dataset['qp'])
+
+        # The Q-path last set on this dataset, if any
+        qPath = dataset.get('qPath')
+        if qPath:
+            if self.systemPage.restoreQPath(qPath):
+                self.statusBar().showMessage(f'Q-path {self.options.getPathString()} restored', 4000)
+            else:
+                # Not valid any more (e.g. different lattice): forget it
+                self.dataset.pop('qPath', None)
+                self.statusBar().showMessage('The saved Q-path could not be restored: set it again', 8000)
+
+        self.state.restore(DATASET, dataset.get('state') or self.datasetDefaults)
         self.addRecentDataset(self.dataset)
         self.updateDatasetLabel()
+
+    def storeDatasetState(self):
+        """Save the parameters of the current dataset with it, in the recent datasets."""
+        if self.dataset is None:
+            return
+        self.dataset['state'] = self.state.values(DATASET)
+        recent = [dict(self.dataset) if d.get('save') == self.dataset.get('save') else d for d in self.recentDatasets()]
+        self.settings.setValue('recentDatasets', json.dumps(recent))
+
+    def loadJson(self, key, default):
+        try:
+            return json.loads(self.settings.value(key, json.dumps(default)))
+        except (TypeError, ValueError):
+            return default
+
+    @Slot(dict)
+    def saveQPath(self, state: dict):
+        """Remember the Q-path of the current dataset, restored when it is opened again."""
+        if self.dataset is None or self.dataset.get('save') != self.options.saveDir:
+            return
+        self.dataset['qPath'] = state
+        self.addRecentDataset(self.dataset)
 
     @Slot()
     def updateDatasetLabel(self, *args):
@@ -367,4 +422,6 @@ class MainWindow(QMainWindow):
         self.settings.setValue('page', self.stack.currentIndex())
         self.settings.setValue('theme', self.theme.mode)
         self.settings.setValue('showInspector', self.inspectorAction.isChecked())
+        self.settings.setValue('state', json.dumps(self.state.values(GLOBAL)))
+        self.storeDatasetState()
         super().closeEvent(event)

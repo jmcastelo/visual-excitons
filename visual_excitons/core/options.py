@@ -192,6 +192,9 @@ class Options(QObject):
     def setLatticeData(self, ibrav):
         cell, self.variant, self.highSymmetryPoints, self.defaultPath = get_lattice_data(ibrav, self.latticeParameters)
         self.availableHighSymmetryPoints = [label for label in self.highSymmetryPoints.keys()]
+        # A path and extra points belong to the previous lattice: they must be set again
+        self.qBZ = None
+        self.extraHighSymmetryPoints = {}
 
     def setGW(self, gw: bool):
         if gw != self.gw:

@@ -2,6 +2,7 @@ from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QVBoxLayout, QSizePolicy
 
 from .inspector import Inspector, formLayout, NoteLabel
+from .persistence import DATASET
 from .style_widget import StyleWidget
 
 
@@ -110,6 +111,17 @@ class ParametersWidget(Inspector):
 
         self.alignLabels()
 
+        # Kept between sessions: the spectra settings with the dataset (they
+        # depend on its energies), the labels as a preference
+        for key, widget in (('excitons', self.nExcitonsSpinBox), ('autoRange', self.autoRangeCheckBox),
+                            ('brightThreshold', self.excMinIntensitySpinBox)):
+            self.remember(key, widget, DATASET)
+        # The range as a whole: set one bound at a time, it would be clamped by the old other one
+        self.remember('energyRange', scope=DATASET,
+                      get=lambda: [self.options.energyMin, self.options.energyMax, self.options.energyStep],
+                      set=lambda values: self.setEnergyRange(*values))
+        self.remember('labels', self.showLabelsCheckBox)
+
     def _syncEnergies(self):
         """Show the energies as clamped by the options."""
         for spinBox, value in ((self.energyMinSpinBox, self.options.energyMin),
@@ -119,6 +131,14 @@ class ParametersWidget(Inspector):
             spinBox.setValue(value)
             spinBox.blockSignals(False)
         self.absorptionParametersChanged.emit()
+
+    def setEnergyRange(self, energyMin, energyMax, energyStep):
+        """Set the whole manual range at once, if it is valid."""
+        energyMin, energyMax, energyStep = float(energyMin), float(energyMax), float(energyStep)
+        if not (0.0 <= energyMin < energyMax and 0.0 < energyStep <= energyMax - energyMin):
+            raise ValueError('invalid energy range')
+        self.options.energyMin, self.options.energyMax, self.options.energyStep = energyMin, energyMax, energyStep
+        self._syncEnergies()
 
     @Slot(float)
     def updateEnergyMin(self, value):

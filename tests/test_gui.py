@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QFormLayout, QLabel
+from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QTableWidgetItem
 
 import visual_excitons.gui.main_window as main_window
 from visual_excitons.gui.main_window import MainWindow, SYSTEM_PAGE, SPECTRA_PAGE, WAVEFUNCTION_PAGE
@@ -227,3 +227,44 @@ def test_automatic_absorption_range_control(window, qtbot):
     inspector.updateRangeNote()
     assert inspector.rangeNote.text() == 'Spectra from 1.5 to 3.2 eV.' and not inspector.rangeNote.isHidden()
     window.calculations.excAbsData = []
+
+
+@pytest.mark.data
+def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
+    folder = datasetPath('BiI3_Bulk_8x8x8')
+    window.openDataset(main_window.findDataset(folder))
+    system = window.systemPage
+    assert window.options.qBZ is None          # nothing saved yet: no path set
+
+    # An extra point, a path through it and density sampling
+    row = system.hspTable.rowCount()
+    system.hspTable.insertRow(row)
+    for column, text in enumerate(['M', '0.25', '0.25', '0.0']):
+        system.hspTable.setItem(row, column, QTableWidgetItem(text))
+    system.qPathLineEdit.setText('LGZFM')
+    system.interpolationComboBox.setCurrentIndex(1)
+    system.densitySpin.setValue(12.5)
+    assert system.setBrillouinZone()
+    window.close()
+
+    # Next session: a new window opens the same dataset (the most recent one)
+    restored = MainWindow()
+    qtbot.addWidget(restored)
+    assert restored.options.saveDir == str(folder / 'save')
+    assert restored.options.getPathString() == 'LGZFM'
+    assert restored.systemPage.interpolationComboBox.currentIndex() == 1
+    assert restored.systemPage.densitySpin.value() == 12.5
+    assert restored.options.extraHighSymmetryPoints == {'M': [0.25, 0.25, 0.0]}
+    assert restored.systemPage.hspTable.item(restored.systemPage.hspTable.rowCount() - 1, 0).text() == 'M'
+    assert 'restored' in restored.statusBar().currentMessage()
+    restored.close()
+
+
+@pytest.mark.data
+def test_invalid_saved_q_path_is_dropped(window):
+    dataset = main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8'))
+    dataset['qPath'] = {'ibrav': -5, 'path': 'NOPE', 'sampling': 'points', 'points': 100, 'density': 10.0, 'extraPoints': {}}
+    window.openDataset(dataset)
+    assert window.options.qBZ is None and 'qPath' not in window.recentDatasets()[0]
+    assert window.systemPage.qPathLineEdit.text() == window.options.defaultPath
+    assert 'could not be restored' in window.statusBar().currentMessage()

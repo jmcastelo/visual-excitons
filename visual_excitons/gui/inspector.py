@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QWidget, QToolButton, QVBoxLayout, QScrollArea, Q
                                QSizePolicy, QHBoxLayout, QSlider, QApplication, QSplitter)
 
 from .theme import themeManager
+from .persistence import PersistentState, GLOBAL
 
 
 class CollapsibleSection(QWidget):
@@ -78,13 +79,20 @@ class Inspector(QScrollArea):
         self.setWidget(self.body)
 
         self.sections = {}
+        # Values kept between sessions (see persistence.py)
+        self.persistence = PersistentState()
 
     def addSection(self, title: str, layout, expanded: bool = True) -> CollapsibleSection:
         section = CollapsibleSection(title, expanded)
         section.setContentLayout(layout)
         self.bodyLayout.insertWidget(self.bodyLayout.count() - 1, section)
         self.sections[title] = section
+        # Which sections are open
+        self.persistence.remember(f'section/{title}', section)
         return section
+
+    def remember(self, key, widget=None, scope=GLOBAL, get=None, set=None):
+        self.persistence.remember(key, widget, scope, get, set)
 
     def alignLabels(self):
         """Give the labels of all form layouts the width of the widest one."""

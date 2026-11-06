@@ -7,6 +7,7 @@ from .band_structure_widget import BandStructureWidget
 from .absorption_widget import AbsorptionWidget
 from .parameters_widget import ParametersWidget
 from .inspector import pageLayout
+from .persistence import PersistentState
 from .theme import PLOT_COLORS
 
 
@@ -91,7 +92,13 @@ class GraphsWidget(QWidget):
         hSplitter.addWidget(vSplitter)
         hSplitter.addWidget(absorptionWidget)
 
-        self.setLayout(pageLayout(hSplitter, self.inspector))
+        layout = pageLayout(hSplitter, self.inspector)
+        self.setLayout(layout)
+
+        # Sizes of the plots and the side panel, kept between sessions
+        self.persistence = PersistentState()
+        for key, splitter in (('page', layout.itemAt(0).widget()), ('plots', hSplitter), ('leftPlots', vSplitter)):
+            self.persistence.remember(key, splitter)
 
     @Slot()
     def updateHighlights(self, *args):

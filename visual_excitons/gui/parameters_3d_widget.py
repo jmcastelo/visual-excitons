@@ -7,6 +7,7 @@ import numpy as np
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
 from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
+from .persistence import DATASET
 
 
 class Parameters3DWidget(Inspector):
@@ -49,6 +50,15 @@ class Parameters3DWidget(Inspector):
         self.buildAxesSection()
 
         self.alignLabels()
+        self.persistence.afterRestore.append(self.afterRestore)
+
+    def afterRestore(self, scope):
+        """Apply restored values that the widgets do not apply by themselves."""
+        if scope == DATASET:
+            # Shows the position of the restored particle type and moves the marker
+            self.updateParticlePositionWidgets(self.particleTypeComboBox.currentIndex())
+        else:
+            self.applyView()
 
     # Sections
 
@@ -71,6 +81,8 @@ class Parameters3DWidget(Inspector):
         form.addRow('Exciton:', self.excitonIndexSpinBox)
         form.addRow(self.excitonNote)
         self.addSection('Exciton', form)
+        self.remember('qPoint', self.qPointSpinBox, DATASET)
+        self.remember('exciton', self.excitonIndexSpinBox, DATASET)
         self.updateExcitonNote()
 
     def buildCalculationSection(self):
@@ -122,6 +134,15 @@ class Parameters3DWidget(Inspector):
         form.addRow('Cutoff:', self.wfCutoffSpinBox)
         form.addRow(computeWfButton)
         self.addSection('Calculation', form)
+
+        # Both positions, before the particle type that shows one of them
+        def positionSetter(particle):
+            return lambda value: self.options.setParticlePositionOf(particle, [float(x) for x in value][:3])
+        self.remember('holePosition', scope=DATASET, get=lambda: list(self.options.holePos), set=positionSetter('h'))
+        self.remember('electronPosition', scope=DATASET, get=lambda: list(self.options.electronPos), set=positionSetter('e'))
+        self.remember('fixedParticle', self.particleTypeComboBox, DATASET)
+        self.remember('supercell', scope=DATASET, get=self.supercell, set=self.setSupercell)
+        self.remember('cutoff', self.wfCutoffSpinBox, DATASET)
 
     def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
@@ -202,6 +223,12 @@ class Parameters3DWidget(Inspector):
         self.updatePlotTypeRows(self.plotTypeComboBox.currentIndex())
 
         self.addSection('Display', form)
+        for key, widget in (('plotType', self.plotTypeComboBox), ('isoLevel', isoLevelSlider),
+                            ('isoLevels', numIsoLevelsSpinBox), ('isoSetStyle', isoSetStyleComboBox),
+                            ('isoOpacity', isoOpacitySlider), ('isoSetOpacity', isoSetOpacitySlider),
+                            ('volumeOpacity', volumeOpacitySlider), ('volumeContrast', volumeContrastSpinBox),
+                            ('slicesPerVoxel', sliceDensitySpinBox)):
+            self.remember(key, widget)
 
     def buildViewSection(self):
         # View direction: basis, presets and custom direction / up vectors
@@ -277,6 +304,19 @@ class Parameters3DWidget(Inspector):
 
         self.addSection('View', form)
 
+        # Basis, then its presets, then the vectors (applied by afterRestore)
+        def vector(lineEdits):
+            def setVector(values):
+                for lineEdit, value in zip(lineEdits, values):
+                    lineEdit.setText(str(value))
+            return dict(get=lambda: [lineEdit.text() for lineEdit in lineEdits], set=setVector)
+        self.remember('viewBasis', self.viewBasisComboBox)
+        self.remember('viewPreset', self.viewPresetComboBox)
+        self.remember('viewDirection', **vector(self.viewDirLineEdits))
+        self.remember('viewUp', **vector(self.viewUpLineEdits))
+        self.remember('viewReversed', self.reverseViewCheckBox)
+        self.remember('orthographic', projectionCheckBox)
+
     def buildStructureSection(self):
         visibilityLayout = QGridLayout()
         visibilityLayout.setContentsMargins(0, 0, 0, 0)
@@ -291,6 +331,7 @@ class Parameters3DWidget(Inspector):
             box.setToolTip(toolTip)
             box.checkStateChanged.connect(signal)
             visibilityLayout.addWidget(box, i // 2, i % 2)
+            self.remember(f'show/{text}', box)
 
         atomScaleSpinBox = QDoubleSpinBox(minimum=0.05, maximum=1.5, singleStep=0.05, decimals=2)
         atomScaleSpinBox.setValue(self.options.atomScale())
@@ -324,6 +365,9 @@ class Parameters3DWidget(Inspector):
         form.addRow('Bond radius:', bondRadiusSpinBox)
         form.addRow('Bond color:', bondColorComboBox)
         self.addSection('Structure', form, expanded=False)
+        for key, widget in (('atomRadiusScale', atomScaleSpinBox), ('bondTolerance', bondToleranceSpinBox),
+                            ('bondRadius', bondRadiusSpinBox), ('bondColor', bondColorComboBox)):
+            self.remember(key, widget)
 
     def buildAxesSection(self):
         layout = QGridLayout()
@@ -339,6 +383,7 @@ class Parameters3DWidget(Inspector):
             box.setChecked(checked)
             box.toggled.connect(signal)
             layout.addWidget(box, i // 2, i % 2)
+            self.remember(f'axes/{text}', box)
 
         layout.addWidget(NoteLabel('Each set of arrows is scaled so that its longest vector has the same length.'), 3, 0, 1, 2)
         self.addSection('Axes', layout, expanded=False)
@@ -482,6 +527,18 @@ class Parameters3DWidget(Inspector):
 
     def plotType(self):
         return self.plotTypeComboBox.currentIndex()
+
+    def supercell(self):
+        return [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
+
+    def setSupercell(self, sizes):
+        """Set the three sizes at once: one redraw of the lattice."""
+        spinBoxes = (self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox)
+        for spinBox, size in zip(spinBoxes, sizes):
+            spinBox.blockSignals(True)
+            spinBox.setValue(int(size))
+            spinBox.blockSignals(False)
+        self.supercellChanged()
 
     @Slot()
     def supercellChanged(self):

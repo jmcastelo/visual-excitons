@@ -7,6 +7,7 @@ from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
 from .inspector import pageLayout
+from .persistence import PersistentState
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.bonds import findBonds, halfBonds
@@ -60,7 +61,12 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.applyView()
 
         self.inspector = self.parameters3DWidget
-        self.setLayout(pageLayout(self.excitonWfWidget, self.inspector))
+        layout = pageLayout(self.excitonWfWidget, self.inspector)
+        self.setLayout(layout)
+
+        # Size of the side panel, kept between sessions
+        self.persistence = PersistentState()
+        self.persistence.remember('page', layout.itemAt(0).widget())
 
     @Slot(bool)
     def setDarkTheme(self, dark: bool):
