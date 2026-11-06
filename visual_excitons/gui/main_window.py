@@ -20,6 +20,7 @@ from .graphs_widget import GraphsWidget
 from .graphs_3d_widget import Graphs3DWidget
 from .navigation_bar import NavigationBar
 from .theme import themeManager, THEME_MODES
+from visual_excitons import __version__
 from .persistence import StateRegistry, GLOBAL, DATASET
 from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
 
@@ -492,7 +493,7 @@ class MainWindow(QMainWindow):
 
     def showAbout(self):
         QMessageBox.about(self, 'About Visual Excitons',
-                          '<b>Visual Excitons</b><br>Visualization of excitonic properties computed with '
+                          f'<b>Visual Excitons {__version__}</b><br>Visualization of excitonic properties computed with '
                           '<a href="https://www.yambo-code.eu/">Yambo</a>, read through YamboPy.')
 
     def closeEvent(self, event):

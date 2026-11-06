@@ -1,3 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visual-excitons"
+dynamic = ["version"]
+description = "Visualization of excitonic properties computed with Yambo: dispersion, absorption, band structure and real-space wave functions"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "jmcastelo", email = "jm.castelo@uv.es" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Development Status :: 3 - Alpha",
+]
+# Lower bounds: versions the code is known to work with
+dependencies = [
+    "PySide6>=6.8",
+    "pyqtgraph>=0.14",
+    "PyOpenGL>=3.1.7",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "netCDF4>=1.7",
+    "psutil>=5.9",
+    # The fork of YamboPy with the Brillouin-zone tools this program needs
+    # (BrillouinZone, get_lattice_data); the official package lacks them
+    "yambopy @ git+https://github.com/jmcastelo/yambopy.git@ase-bz",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-qt>=4.4"]
+
+[project.gui-scripts]
+visual-excitons = "visual_excitons.main:main"
+
+[project.urls]
+Homepage = "https://github.com/jmcastelo/visual-excitons"
+Documentation = "https://github.com/jmcastelo/visual-excitons/blob/main/docs/ARCHITECTURE.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "visual_excitons.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["visual_excitons*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The package is imported from the repository root

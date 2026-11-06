@@ -6,7 +6,7 @@ Within the framework of YamboPy, this is a GUI to explore exciton properties vis
 
 ## Dependencies
 
-Visual Excitons depends on YamboPy for data calculations, on PySide6 for GUI elements, and on PyQtGraph for visualization, which requires PyOpenGL for OpenGL based 3D plots.
+Visual Excitons depends on YamboPy for data calculations, on PySide6 for GUI elements, and on PyQtGraph for visualization, which requires PyOpenGL for OpenGL based 3D plots. It also uses NumPy, SciPy and netCDF4, and psutil to tell the memory available. They are all installed with it (see [Installation](#installation)).
 
 ### YamboPy
 
@@ -28,75 +28,58 @@ Visual Excitons depends on YamboPy for data calculations, on PySide6 for GUI ele
 - https://www.pyqtgraph.org
 - https://github.com/pyqtgraph/pyqtgraph
 
+## Installation
+
+Visual Excitons needs Python 3.10 or later and a graphics card with OpenGL (any recent one). In a virtual environment:
+
+```
+python -m venv visual-excitons-env
+source visual-excitons-env/bin/activate        # on Windows: visual-excitons-env\Scripts\activate
+pip install git+https://github.com/jmcastelo/visual-excitons.git
+```
+
+This installs Visual Excitons and everything it needs, including the YamboPy fork it depends on (see below). Then start it with:
+
+```
+visual-excitons
+```
+
+or `python -m visual_excitons`. To update it, run the `pip install` command again with `--upgrade`.
+
+**Why a fork of YamboPy.** Visual Excitons needs the Brillouin-zone tools (Bravais lattices, high-symmetry points, Q-paths) of the `ase-bz` branch of [jmcastelo/yambopy](https://github.com/jmcastelo/yambopy/tree/ase-bz), which the official YamboPy does not have yet. The installation takes it from there.
+
 ## How to develop?
 
 The architecture of the code (structure, data flows, threading, rendering, conventions and pitfalls) is explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Clone this repository, for example in `~/visual-excitons`:
+Clone this repository, for example in `~/visual-excitons`, create a virtual environment in it, and install the program in editable mode (your changes to the code take effect without reinstalling) with the test tools:
 
 ```
 git clone https://github.com/jmcastelo/visual-excitons.git ~/visual-excitons
-```
-
-Create virtual environment, activate it and install dependencies:
-
-```
 cd ~/visual-excitons
 python -m venv .venv
 source .venv/bin/activate
-pip install pyside6 pyqtgraph pyopengl psutil
+pip install -e ".[test]"
 ```
 
-Note that depending on the PyQtGraph version, you may need to install specific version 6.9.0 or 6.8.3 of PySide6. On this issue, see this [question](https://stackoverflow.com/questions/79678479/pyqtgraph-not-working-on-example-in-pythonguis-website-pyside6-with-pyqtgraph). Current versions (as of 01.2025) do **not** need this downgrade.
+Run it with `visual-excitons`, `python -m visual_excitons` or `python visual_excitons/main.py`.
 
-```
-pip install --force-reinstall -v "pyside6==6.9.0"
-```
-
-Current development depends on the following YamboPy fork's branch:
-
-- https://github.com/jmcastelo/yambopy/tree/ase-bz
-
-So this dependency must be installed after cloning that fork, for example in `~/yambopy`:
+**Working on the YamboPy fork too.** The command above installs the fork from GitHub. To work on it as well, clone it (e.g. in `~/yambopy`), switch to the `ase-bz` branch and install it in editable mode, **after** installing Visual Excitons:
 
 ```
 git clone https://github.com/jmcastelo/yambopy ~/yambopy
-```
-
-and switching to that branch (ase-bz):
-
-```
 cd ~/yambopy
 git switch ase-bz
+pip install -e . --config-settings editable_mode=compat
 ```
 
-Then, install it within the previously activated virtual environment:
+The last option helps some IDEs find the package, as noted [here](https://stackoverflow.com/questions/76301782/why-are-pycharm-and-pylance-not-detecting-packages-installed-in-editable-mode). Installing Visual Excitons again later (`pip install -e .`) replaces the editable fork by the one on GitHub: reinstall the editable fork afterwards, or use `pip install -e . --no-deps`.
 
-```
-pip install --editable . --config-settings editable_mode=compat
-```
-
-The last option of the previous command is useful for some IDEs to detect YamboPy's package, as noted [here](https://stackoverflow.com/questions/76301782/why-are-pycharm-and-pylance-not-detecting-packages-installed-in-editable-mode).
-
-Since this version of YamboPy yields an error related to netCDF4, for versions of this last package greater than 1.7.1, we must downgrade it:
-
-```
-pip install --force-reinstall -v "netCDF4==1.7.1"
-```
-
-Finally, run Visual Excitons as follows:
-
-```
-python visual_excitons/main.py
-```
+**Version.** The version of Visual Excitons is set in `visual_excitons/__init__.py` (`__version__`), which the packaging and the About box read. The package is described in `pyproject.toml`, with the minimum versions of its dependencies.
 
 ### Tests
 
-The tests use [pytest](https://docs.pytest.org) and [pytest-qt](https://pytest-qt.readthedocs.io), installed in the virtual environment with:
-
-```
-pip install pytest pytest-qt
-```
+The tests use [pytest](https://docs.pytest.org) and [pytest-qt](https://pytest-qt.readthedocs.io), installed with the `test` extra (`pip install -e ".[test]"`, above).
 
 Run them from the repository root:
 

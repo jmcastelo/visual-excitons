@@ -37,7 +37,7 @@ Stack:
 
 The fork's `ase-bz` branch provides the `BrillouinZone` class and the `get_lattice_data` / `IBRAV_REQUIRED_PARAMETERS` helpers used for Bravais lattices and Q-paths, and a patch to `ExcitonDispersion` (marked "Commented by JMC") needed by this app.
 
-Run with `python visual_excitons/main.py` (it puts the repository root on `sys.path` itself). Tests: `pytest` (see [Testing](#11-testing)).
+It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__init__.py`): `pip install -e ".[test]"` for development, then run `visual-excitons`, `python -m visual_excitons` or `python visual_excitons/main.py` (the last one puts the repository root on `sys.path` itself). Tests: `pytest` (see [Testing](#11-testing)). See the README for installation, including working on the YamboPy fork alongside.
 
 ---
 
@@ -45,7 +45,9 @@ Run with `python visual_excitons/main.py` (it puts the repository root on `sys.p
 
 ```
 visual_excitons/
-├── main.py                 Entry point: QApplication, OpenGL context sharing, MainWindow
+├── __init__.py             __version__
+├── __main__.py             python -m visual_excitons
+├── main.py                 main(): QApplication, OpenGL context sharing, MainWindow (the visual-excitons command)
 ├── core/                   No widgets: data, calculations, pure numerics
 │   ├── options.py          Options: the user's parameters and the lattice/Q-path state
 │   ├── calculations.py     Calculations: all Yambo calculations, as background tasks
