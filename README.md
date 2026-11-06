@@ -30,6 +30,8 @@ Visual Excitons depends on YamboPy for data calculations, on PySide6 for GUI ele
 
 ## How to develop?
 
+The architecture of the code (structure, data flows, threading, rendering, conventions and pitfalls) is explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 Clone this repository, for example in `~/visual-excitons`:
 
 ```
