@@ -245,10 +245,14 @@ class Calculations(QObject):
             else:
                 self.excAbsData[curveIndex]['fixed'] = True
 
-        for curveData in self.excAbsData:
+        # Drop the curves that were not kept (Ctrl-click), except the one just
+        # clicked. Going backwards, the index of each curve is still valid when
+        # it is removed, here and in the curve styles (excitonAbsorptionCurveRemoved)
+        for curveIndex in reversed(range(len(self.excAbsData))):
+            curveData = self.excAbsData[curveIndex]
             if curveData['q'] != qPointIndex and not curveData['fixed']:
-                self.excAbsData.remove(curveData)
-                self.excitonAbsorptionCurveRemoved.emit(self.absorptionCurveIndex(curveData['q']))
+                self.excAbsData.pop(curveIndex)
+                self.excitonAbsorptionCurveRemoved.emit(curveIndex)
 
         self.excitonAbsorptionReady.emit(self.excAbsData, self.showExcitonLabels)
 
