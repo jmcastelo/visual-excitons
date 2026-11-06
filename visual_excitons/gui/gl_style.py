@@ -158,3 +158,44 @@ def spheresMeshData(centers, radii, colors, rows=24, cols=24):
     vertexColors = np.repeat(colors, nv, axis=0)
 
     return PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces, vertexColors=vertexColors)
+
+
+def cylindersMeshData(starts, ends, radius, colors, sides=16):
+    """
+    One mesh with an open cylinder (no caps) of the given radius from each start
+    to each end point, with an RGBA color each and exact smooth normals. Meant
+    for bonds, whose ends are hidden inside the atoms.
+    """
+    starts = np.asarray(starts, dtype=np.float32).reshape(-1, 3)
+    ends = np.asarray(ends, dtype=np.float32).reshape(-1, 3)
+    colors = np.asarray(colors, dtype=np.float32).reshape(-1, 4)
+    n = len(starts)
+
+    axes = ends - starts
+    lengths = np.linalg.norm(axes, axis=1, keepdims=True)
+    w = axes / np.maximum(lengths, 1e-12)
+    # A unit vector perpendicular to each axis: cross it with the coordinate
+    # axis it is least aligned with
+    helper = np.eye(3, dtype=np.float32)[np.argmin(np.abs(w), axis=1)]
+    u = np.cross(w, helper)
+    u /= np.linalg.norm(u, axis=1, keepdims=True)
+    v = np.cross(w, u)
+
+    angles = np.linspace(0.0, 2.0 * np.pi, sides, endpoint=False, dtype=np.float32)
+    # Radial unit vectors around each axis: (cylinder, side, 3)
+    radial = np.cos(angles)[None, :, None] * u[:, None, :] + np.sin(angles)[None, :, None] * v[:, None, :]
+
+    # Vertices: a ring at the start, then a ring at the end of each cylinder
+    rings = np.stack([starts[:, None, :] + radius * radial, ends[:, None, :] + radius * radial], axis=1)
+    vertices = rings.reshape(-1, 3)
+    normals = np.stack([radial, radial], axis=1).reshape(-1, 3)
+
+    # Two triangles per side, between consecutive vertices of both rings
+    k = np.arange(sides, dtype=np.uint32)
+    k1 = (k + 1) % sides
+    unitFaces = np.concatenate([np.stack([k, k1, sides + k], axis=1),
+                                np.stack([k1, sides + k1, sides + k], axis=1)])
+    faces = (unitFaces[None, :, :] + (np.arange(n, dtype=np.uint32) * 2 * sides)[:, None, None]).reshape(-1, 3)
+    vertexColors = np.repeat(colors, 2 * sides, axis=0)
+
+    return PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces, vertexColors=vertexColors)

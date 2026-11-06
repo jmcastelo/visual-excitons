@@ -48,6 +48,7 @@ class Parameters3DWidget(QWidget):
     viewLatticeChanged = Signal(Qt.CheckState)
     viewAtomNamesChanged = Signal(Qt.CheckState)
     viewBoundariesChanged = Signal(Qt.CheckState)
+    viewBondsChanged = Signal(bool)
     showCartesianAxesChanged = Signal(bool)
     showLatticeVectorsChanged = Signal(bool)
     showReciprocalVectorsChanged = Signal(bool)
@@ -380,6 +381,50 @@ class Parameters3DWidget(QWidget):
         viewParamsGroupBox = QGroupBox('View')
         viewParamsGroupBox.setLayout(viewLayout)
 
+        # Atoms and bonds
+
+        viewBondsCheckBox = QCheckBox('View bonds')
+        viewBondsCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        viewBondsCheckBox.setChecked(True)
+        viewBondsCheckBox.setToolTip('Bonds crossing the supercell boundary are drawn up to their midpoint')
+        viewBondsCheckBox.toggled.connect(self.viewBondsChanged)
+
+        atomScaleSpinBox = QDoubleSpinBox(minimum=0.05, maximum=1.5, singleStep=0.05, decimals=2)
+        atomScaleSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        atomScaleSpinBox.setValue(self.options.atomScale())
+        atomScaleSpinBox.setToolTip('Atom radius as a fraction of its covalent radius\n'
+                                    '(1: atoms bonded at their covalent radii touch)')
+        atomScaleSpinBox.valueChanged.connect(self.setAtomScale)
+
+        bondToleranceSpinBox = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2)
+        bondToleranceSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        bondToleranceSpinBox.setValue(self.options.bondTolerance())
+        bondToleranceSpinBox.setToolTip('Atoms are bonded when closer than this factor\n'
+                                        'times the sum of their covalent radii')
+        bondToleranceSpinBox.valueChanged.connect(self.setBondTolerance)
+
+        bondRadiusSpinBox = QDoubleSpinBox(minimum=0.01, maximum=0.5, singleStep=0.01, decimals=2, suffix=' Å')
+        bondRadiusSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        bondRadiusSpinBox.setValue(self.options.bondRadius())
+        bondRadiusSpinBox.valueChanged.connect(self.setBondRadius)
+
+        bondColorComboBox = QComboBox()
+        bondColorComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        bondColorComboBox.addItems(['Atom colors', 'Uniform grey'])
+        bondColorComboBox.setCurrentIndex(self.options.bondColoring())
+        bondColorComboBox.setToolTip('Atom colors: each half of a bond in the color of its atom')
+        bondColorComboBox.currentIndexChanged.connect(self.setBondColoring)
+
+        atomsFormLayout = QFormLayout()
+        atomsFormLayout.addRow(viewBondsCheckBox)
+        atomsFormLayout.addRow('Atom radius scale:', atomScaleSpinBox)
+        atomsFormLayout.addRow('Bond tolerance:', bondToleranceSpinBox)
+        atomsFormLayout.addRow('Bond radius:', bondRadiusSpinBox)
+        atomsFormLayout.addRow('Bond color:', bondColorComboBox)
+
+        atomsGroupBox = QGroupBox('Atoms and bonds')
+        atomsGroupBox.setLayout(atomsFormLayout)
+
         # Axes gizmo and cell parameters
 
         axesLayout = QVBoxLayout()
@@ -412,6 +457,7 @@ class Parameters3DWidget(QWidget):
         mainLayout.addWidget(calcParamsGroupBox)
         mainLayout.addWidget(plotParamsGroupBox)
         mainLayout.addWidget(viewParamsGroupBox)
+        mainLayout.addWidget(atomsGroupBox)
         mainLayout.addWidget(axesGroupBox)
 
         self.setLayout(mainLayout)
@@ -504,6 +550,26 @@ class Parameters3DWidget(QWidget):
     def setVolumeContrast(self, contrast: float):
         self.options.setVolumeContrast(contrast)
         self.volumeParametersChanged.emit()
+
+    @Slot(float)
+    def setAtomScale(self, scale: float):
+        self.options.setAtomScale(scale)
+        self.signalReplotLattice.emit()
+
+    @Slot(float)
+    def setBondTolerance(self, tolerance: float):
+        self.options.setBondTolerance(tolerance)
+        self.signalReplotLattice.emit()
+
+    @Slot(float)
+    def setBondRadius(self, radius: float):
+        self.options.setBondRadius(radius)
+        self.signalReplotLattice.emit()
+
+    @Slot(int)
+    def setBondColoring(self, mode: int):
+        self.options.setBondColoring(mode)
+        self.signalReplotLattice.emit()
 
     @Slot(int)
     def updatePlotTypeRows(self, plotType: int):

@@ -2,6 +2,11 @@
 
 import numpy as np
 
+# CODATA 2022 Bohr radius. Scene coordinates are in Bohr (as yambopy gives them);
+# lengths shown to the user are in angstrom
+BOHR_TO_ANGSTROM = 0.529177210544
+ANGSTROM_TO_BOHR = 1.0 / BOHR_TO_ANGSTROM
+
 chemical_symbols = [
     # 0
     'X',

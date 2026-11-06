@@ -5,9 +5,7 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
 from .gl_style import headlightShader, enableMultisampling
-
-
-BOHR_TO_ANGSTROM = 0.529177210544
+from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
 
 
 def arrowMeshData(length, shaftRadius, headRadius, headLength, segments=24):

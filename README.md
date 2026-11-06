@@ -159,7 +159,7 @@ Each isosurface type keeps its own transparency, set with `Isosurface opacity` a
 
 Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
 
-Atoms are drawn as lit spheres in their Jmol colors, sized by their covalent radii. Their chemical symbols are shown as labels on the surface of each atom, facing the viewer. Labels behave like the rest of the scene: they scale with zoom, are hidden by atoms in front of them, and are tinted by translucent surfaces in front of them.
+Atoms are drawn as lit spheres in their Jmol colors, sized by their covalent radii (see [Atoms and bonds](#atoms-and-bonds)). Their chemical symbols are shown as labels on the surface of each atom, facing the viewer. Labels behave like the rest of the scene: they scale with zoom, are hidden by atoms in front of them, and are tinted by translucent surfaces in front of them.
 
 The 3D view uses antialiasing, so edges of atoms, lines and surfaces are smooth.
 
@@ -202,6 +202,32 @@ Other view controls in the same group:
 - `Center view` centers the camera on the plotted cells.
 - `Orthographic projection` switches between orthographic projection (the default, where parallel lines stay parallel, convenient to inspect crystal structures) and perspective projection.
 - Checkboxes toggle the visibility of the lattice, the atom names and the cell boundaries.
+
+#### Atoms and bonds
+
+The `Atoms and bonds` group on the right shows the structure in ball-and-stick style.
+
+**Bonds.** Two atoms are bonded when their distance is at most `Bond tolerance` (default 1.15) times the sum of their covalent radii. This is the criterion used by [ASE](https://wiki.fysik.dtu.dk/ase/ase/neighborlist.html), Jmol and VESTA. The covalent radii are those of Cordero *et al.*, [Dalton Trans. 2832 (2008)](https://doi.org/10.1039/B801115J). Raise the tolerance to include longer bonds, and lower it to drop them. Bonds to atoms of neighbouring cells are found too, so periodic structures are fully connected.
+
+Each atom draws its own half of each of its bonds, from its center to the bond midpoint:
+
+- A bond between two atoms inside the supercell is drawn whole, in two halves.
+- A bond to an atom outside the supercell is drawn only up to its midpoint. Atoms at the boundary thus show their full coordination, without adding atoms beyond the supercell.
+
+Bond controls:
+
+- `View bonds`: toggles the bonds.
+- `Bond radius` (default 0.12 Å): the thickness of the bonds.
+- `Bond color`: either each half in the color of its atom (`Atom colors`, the default, as in VESTA), or `Uniform grey`.
+
+**Atom size.** Atoms are drawn with their covalent radius times `Atom radius scale` (default 0.5). A covalent radius is defined so that a bond length is about the sum of the radii of its two atoms. At scale 1, bonded atoms therefore touch each other, and their bonds are hidden inside them. Smaller scales reveal a bond's length times about `1 - scale`.
+
+The size of the spheres has no physical meaning, so choose it for what you want to see:
+
+- Small atoms hide less of the wave function and show the bonds clearly.
+- Scales close to 1, with the bonds off, show how the atoms pack, e.g. the van der Waals gaps of layered materials.
+
+**Units.** Lengths are in Bohr internally, as read from the Yambo databases. Lengths shown to the user, such as the bond radius and the cell parameters, are in Å.
 
 #### Axes gizmo and cell parameters
 

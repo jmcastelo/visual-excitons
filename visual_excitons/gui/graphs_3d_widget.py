@@ -1,12 +1,18 @@
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter
 import pyqtgraph.opengl as gl
+import numpy as np
 
 from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
+from visual_excitons.core.bonds import findBonds, halfBonds
+from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
+
+# Color of the bonds in uniform coloring mode
+BOND_GREY = (0.6, 0.6, 0.6)
 
 
 class Graphs3DWidget(QWidget):
@@ -38,6 +44,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
         self.parameters3DWidget.viewAtomNamesChanged.connect(self.excitonWfWidget.viewAtomNames)
         self.parameters3DWidget.viewBoundariesChanged.connect(self.excitonWfWidget.viewBoundaries)
+        self.parameters3DWidget.viewBondsChanged.connect(self.excitonWfWidget.viewBonds)
 
         gizmo = AxisGizmo(target=self.excitonWfWidget, size=200)
         self.excitonWfWidget.attach_gizmo(gizmo, 10)
@@ -117,7 +124,21 @@ class Graphs3DWidget(QWidget):
                 for k in range(supercell[2]):
                     offset = ucell['base_lattice_vectors'][0] * i + ucell['base_lattice_vectors'][1] * j + ucell['base_lattice_vectors'][2] * k
                     self.excitonWfWidget.plotUnitCellBoundaries(ucell['base_lattice_vectors'], offset)
-                    self.excitonWfWidget.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset)
+                    self.excitonWfWidget.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset,
+                                                           self.options.atomScale())
+
+        self.plotBonds(ucell, supercell)
+
+    def plotBonds(self, ucell, supercell):
+        lattice = ucell['base_lattice_vectors']
+        numbers = np.asarray(ucell['atomic_numbers'], dtype=int)
+        positions = np.asarray(ucell['atomic_positions'], dtype=float)[:len(numbers)]
+
+        bonds = findBonds(lattice, positions, numbers, self.options.bondTolerance())
+        starts, ends, atoms = halfBonds(lattice, positions, bonds, supercell)
+        uniformColor = BOND_GREY if self.options.bondColoring() == 1 else None
+        self.excitonWfWidget.plotBonds(starts, ends, numbers[atoms], self.options.bondRadius() * ANGSTROM_TO_BOHR,
+                                       uniformColor)
 
     @Slot()
     def translateFixedParticle(self):

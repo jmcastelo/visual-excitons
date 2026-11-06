@@ -81,6 +81,13 @@ class Options(QObject):
         self.volSliceDensity = 5
         self.volOpacity = 0.8
         self.volContrast = 1.0
+        # Atoms and bonds (ball-and-stick): atoms are drawn with their covalent
+        # radius times atomRadiusScale; bonds join atoms closer than
+        # bondToleranceFactor times the sum of their covalent radii
+        self.atomRadiusScale = 0.5
+        self.bondToleranceFactor = 1.15
+        self.bondRadiusAngstrom = 0.12
+        self.bondColorMode = 0  # 0: half bonds in the colors of their atoms, 1: uniform grey
         # View directions (VESTA convention: the direction of projection,
         # i.e. from the viewer into the screen). Vectors are given in the basis
         # of each group and converted to Cartesian with viewVectorToCartesian
@@ -276,6 +283,31 @@ class Options(QObject):
 
     def setVolumeContrast(self, contrast: float):
         self.volContrast = max(contrast, 0.01)
+
+    def atomScale(self):
+        return self.atomRadiusScale
+
+    def setAtomScale(self, scale: float):
+        self.atomRadiusScale = max(scale, 0.01)
+
+    def bondTolerance(self):
+        return self.bondToleranceFactor
+
+    def setBondTolerance(self, tolerance: float):
+        self.bondToleranceFactor = max(tolerance, 0.0)
+
+    def bondRadius(self):
+        """Bond radius in angstrom."""
+        return self.bondRadiusAngstrom
+
+    def setBondRadius(self, radius: float):
+        self.bondRadiusAngstrom = max(radius, 0.001)
+
+    def bondColoring(self):
+        return self.bondColorMode
+
+    def setBondColoring(self, mode: int):
+        self.bondColorMode = mode
 
     def isoOpacity(self):
         return self.wfIsoOpacity

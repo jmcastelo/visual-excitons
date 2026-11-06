@@ -15,8 +15,8 @@ from .atom_labels_item import AtomLabelsItem
 from .axes_3d_widget import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
 from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
-                       headlightShader, litEdgesShader, enableMultisampling, spheresMeshData)
-from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols
+                       headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData)
+from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols, ANGSTROM_TO_BOHR
 
 
 
@@ -54,6 +54,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.addItem(self.atomLabels)
         self.latticeVisible = True
         self.atomNamesVisible = True
+        # Bonds: one mesh for the whole supercell
+        self.bondsItem = None
+        self.bondsVisible = True
         self.fixedParticleItem = None
 
         self.plotFixedParticle()
@@ -162,6 +165,12 @@ class ExcitonWfWidget(gl.GLViewWidget):
             for item in self.latticeItems:
                 self.removeItem(item)
             self.latticeItems.clear()
+        self.clearBondsItem()
+
+    def clearBondsItem(self):
+        if self.bondsItem is not None:
+            self.removeItem(self.bondsItem)
+            self.bondsItem = None
 
     def clearAtomNamesItems(self):
         self.atomLabels.clear()
@@ -270,10 +279,11 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.latticeBoundaryItems.append(item)
         self.addItem(item)
 
-    def plotUnitCellAtoms(self, atomicNumbers, atomicPositions, offset):
+    def plotUnitCellAtoms(self, atomicNumbers, atomicPositions, offset, radiusScale=0.5):
         numAtoms = len(atomicNumbers)
         centers = offset + np.asarray(atomicPositions, dtype=float)[:numAtoms]
-        radii = [covalent_radii[z] for z in atomicNumbers]
+        # Covalent radii (angstrom) in scene units (Bohr), scaled for a ball-and-stick look
+        radii = covalent_radii[np.asarray(atomicNumbers, dtype=int)] * ANGSTROM_TO_BOHR * radiusScale
 
         # All atoms of the cell as a single mesh
         colors = [list(jmol_colors[z]) + [1.0] for z in atomicNumbers]
@@ -285,6 +295,27 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.addItem(meshItem)
 
         self.atomLabels.addLabels(centers, radii, [chemical_symbols[z] for z in atomicNumbers])
+
+    def plotBonds(self, starts, ends, atomicNumbers, radius, uniformColor=None):
+        """
+        Bonds as half-bond cylinders (see core.bonds.halfBonds): from `starts`
+        to `ends`, radius in Bohr, each half in the color of the atom of atomic
+        number `atomicNumbers` it belongs to, or all in `uniformColor` (RGB).
+        """
+        self.clearBondsItem()
+        if len(starts) == 0:
+            return
+
+        if uniformColor is None:
+            colors = np.column_stack([jmol_colors[np.asarray(atomicNumbers, dtype=int)], np.ones(len(starts))])
+        else:
+            colors = np.tile(list(uniformColor) + [1.0], (len(starts), 1))
+
+        self.bondsItem = gl.GLMeshItem(meshdata=cylindersMeshData(starts, ends, radius, colors), smooth=True,
+                                       shader=headlightShader, glOptions=OPAQUE_GL_OPTIONS, drawEdges=False)
+        self.bondsItem.setDepthValue(OPAQUE_STAGE)
+        self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
+        self.addItem(self.bondsItem)
 
     def plotFixedParticle(self):
         meshData = spheresMeshData([[0.0, 0.0, 0.0]], [0.3], [[1.0, 1.0, 1.0, 1.0]])
@@ -440,6 +471,14 @@ class ExcitonWfWidget(gl.GLViewWidget):
         for item in self.latticeItems:
             item.setVisible(self.latticeVisible)
         self.atomLabels.setVisible(self.latticeVisible and self.atomNamesVisible)
+        if self.bondsItem is not None:
+            self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
+
+    @Slot(bool)
+    def viewBonds(self, visible: bool):
+        self.bondsVisible = visible
+        if self.bondsItem is not None:
+            self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
 
     @Slot(Qt.CheckState)
     def viewAtomNames(self, state):
