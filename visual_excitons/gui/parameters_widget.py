@@ -52,6 +52,14 @@ class ParametersWidget(Inspector):
         self.energyStepSpinBox.setSingleStep(0.005)
         self.energyStepSpinBox.setMinimum(0.001)
 
+        self.autoRangeCheckBox = QCheckBox('Automatic range')
+        self.autoRangeCheckBox.setChecked(self.options.absorptionAutoRange)
+        self.autoRangeCheckBox.setToolTip('Each spectrum spans its excitons, plus a margin of five broadenings\n'
+                                          '(0.5 eV) on both sides. Untick to set the range by hand.')
+        self.autoRangeCheckBox.toggled.connect(self.setAutoRange)
+        self.rangeNote = NoteLabel()
+        self.rangeNote.hide()
+
         self.energyMinSpinBox.valueChanged.connect(self.updateEnergyMin)
         self.energyMaxSpinBox.valueChanged.connect(self.updateEnergyMax)
         self.energyStepSpinBox.valueChanged.connect(self.updateEnergyStep)
@@ -68,9 +76,11 @@ class ParametersWidget(Inspector):
         self.showLabelsCheckBox.setToolTip('Show (index, intensity) next to each bright exciton')
 
         form = formLayout()
+        form.addRow(self.autoRangeCheckBox)
         form.addRow('From:', self.energyMinSpinBox)
         form.addRow('To:', self.energyMaxSpinBox)
         form.addRow('Step:', self.energyStepSpinBox)
+        form.addRow(self.rangeNote)
         form.addRow('Bright threshold:', self.excMinIntensitySpinBox)
         form.addRow(self.showLabelsCheckBox)
         self.addSection('Absorption', form)
@@ -88,6 +98,8 @@ class ParametersWidget(Inspector):
         self.addSection('Selected exciton', layout)
 
         self.calculations.excitonSelected.connect(self.onExcitonSelected)
+        self.calculations.excitonAbsorptionReady.connect(self.updateRangeNote)
+        self.setAutoRange(self.autoRangeCheckBox.isChecked(), recompute=False)
         self.onExcitonSelected()
 
         # Appearance of the plots
@@ -122,6 +134,26 @@ class ParametersWidget(Inspector):
     def updateEnergyStep(self, value):
         self.options.setEnergyStep(value)
         self._syncEnergies()
+
+    @Slot(bool)
+    def setAutoRange(self, auto: bool, recompute: bool = True):
+        self.options.setAbsorptionAutoRange(auto)
+        self.energyMinSpinBox.setEnabled(not auto)
+        self.energyMaxSpinBox.setEnabled(not auto)
+        self.updateRangeNote()
+        if recompute:
+            self.absorptionParametersChanged.emit()
+
+    @Slot()
+    def updateRangeNote(self, *args):
+        """With the automatic range, show the range of the spectra plotted."""
+        ranges = [data['range'] for data in self.calculations.excAbsData if 'range' in data]
+        if self.options.absorptionAutoRange and ranges:
+            low, high = min(r[0] for r in ranges), max(r[1] for r in ranges)
+            self.rangeNote.setText(f'Spectra from {low:.1f} to {high:.1f} eV.')
+            self.rangeNote.show()
+        else:
+            self.rangeNote.hide()
 
     @Slot(float)
     def updateExcMinIntensity(self, value):

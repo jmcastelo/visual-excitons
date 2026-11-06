@@ -3,6 +3,7 @@ import pyqtgraph as pg
 import numpy as np
 
 from .theme import plotForeground
+from .highlight import ExcitonHighlight
 
 
 class DispersionWidget(pg.PlotWidget):
@@ -50,6 +51,7 @@ class DispersionWidget(pg.PlotWidget):
         self.style.axesStyle.axesWidthChanged.connect(self.setAxesWidth)
 
         self.curveItems = []
+        self.highlight = ExcitonHighlight()
 
     @Slot()
     def plotData(self, points, pointsData, xInter, yInter):
@@ -77,6 +79,13 @@ class DispersionWidget(pg.PlotWidget):
             scatterPlotItem = pg.ScatterPlotItem(pos=points[i], data=pointsData[i], symbol=pointSymbols[i], pxMode=True, size=pointSizes[i])
             scatterPlotItem.sigClicked.connect(self.getSelectedQPoints)
             self.addItem(scatterPlotItem)
+
+        self.highlight.addTo(self.getPlotItem())
+
+    def setHighlight(self, positions):
+        """Ring around the selected exciton, at its points (x, y)."""
+        self.highlight.setPositions(positions)
+        self.highlight.addTo(self.getPlotItem())
 
     @Slot()
     def getSelectedQPoints(self, item, points, event):

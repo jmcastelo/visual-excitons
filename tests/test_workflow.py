@@ -61,6 +61,10 @@ def test_absorption_selection_and_wave_function(bii3, monkeypatch):
     bii3.computeQPointAbsorptionSpectrum([Point(bii3.dispPointsData[0][0])], False)
     spectrum = bii3.excAbsData[0]
     assert spectrum['q'] == bii3.qIndices[0] and len(spectrum['brightExcEnergy']) > 0
+    # Automatic range: around the BiI3 excitons (2.1-2.5 eV), not the default 4-20 eV
+    low, high = spectrum['range']
+    assert 1.4 <= low <= 1.7 and 2.8 <= high <= 3.1
+    assert spectrum['energy'][0] == pytest.approx(low) and np.all(spectrum['brightExcEnergy'] > low)
 
     # Select its first bright exciton
     point = spectrum['data'][0]
@@ -110,7 +114,15 @@ def test_wave_function_in_the_background(qtbot, bii3):
     # The real-space loop reported its end
     assert any(stage == 'Real-space wave function' and done == total > 0 for stage, done, total in stages)
 
-    # Cancel in the middle of loading the wave functions
+    # Again: the wave-function database is reused, not loaded again
+    stages.clear()
+    with qtbot.waitSignal(calculations.wfComputed, timeout=120000):
+        calculations.computeExcitonWaveFunction(**dict(arguments, exc_index=2))
+    names = {stage for stage, done, total in stages}
+    assert 'Real-space wave function' in names and 'Loading the wave functions' not in names
+
+    # Cancel in the middle of loading the wave functions (not cached this time)
+    calculations.wavefunctionCache.clear()
     stages.clear()
     calculations.computeExcitonWaveFunction(**arguments)
     qtbot.waitUntil(lambda: any(stage == 'Loading the wave functions' and done > 0 for stage, done, total in stages),

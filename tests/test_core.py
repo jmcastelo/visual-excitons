@@ -182,3 +182,29 @@ def test_absorption_curves_keep_their_styles(calculations):
     assert click(1, ctrl=True) == [3]
     assert click(4) == [3, 4]
     assert click(3) == [3]                 # clicking a kept curve drops the temporary ones
+
+
+# Automatic absorption range, selection from both plots and its highlight
+
+def test_automatic_absorption_range():
+    from visual_excitons.core.calculations import automaticAbsorptionRange
+    assert automaticAbsorptionRange([2.09, 2.36, 2.47]) == (1.5, 3.0)
+    assert automaticAbsorptionRange([0.2, 0.3], margin=0.5) == (0.0, 0.8)   # never below zero
+
+
+def test_select_from_dispersion_and_highlight_positions(calculations):
+    # Two excitons along a three-point path; Q-point 9 is the middle one
+    calculations.qIndices = [4, 9, 2]
+    calculations.dispPoints = [[[0, 2.0], [1, 2.1], [2, 2.2]], [[0, 2.5], [1, 2.6], [2, 2.7]]]
+    calculations.excAbsData = [{'q': 9, 'brightExcEnergy': np.array([2.6, 3.0]), 'brightExcAbsorption': np.array([5.0, 1.0]),
+                                'brightExcIndices': np.array([2.0, 7.0])}]
+
+    point = Point(1, j=2)
+    point.pos = lambda: pg.Point(1.0, 2.6)   # dispersion: x along the path, y the energy
+    calculations.selectDispersionExciton([point], False)
+    assert calculations.selectedExciton == (9, 2, 2.6)
+    assert calculations.selectedExcitonPositions() == {'dispersion': [(1, 2.6)], 'absorption': [(2.6, 5.0)]}
+
+    # An exciton beyond the plotted ones, bright in the spectrum: only there
+    calculations.selectExciton([Point(1, j=7, x=3.0)], True)
+    assert calculations.selectedExcitonPositions() == {'dispersion': [], 'absorption': [(3.0, 1.0)]}

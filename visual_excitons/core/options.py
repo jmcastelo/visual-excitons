@@ -75,6 +75,8 @@ class Options(QObject):
         self.energyStep = 0.02
         self.energyMin = 4.0
         self.energyMax = 20.0
+        # Automatic range: the excitons of each spectrum, plus a margin (see calculations)
+        self.absorptionAutoRange = True
 
         # Excitons
         self.excMinIntensity = 0.1
@@ -223,6 +225,9 @@ class Options(QObject):
         if energy <= self.energyMin: energy = self.energyMin + self.energyStep
         if self.energyMin + self.energyStep > energy: energy = self.energyMin + self.energyStep
         self.energyMax = energy
+
+    def setAbsorptionAutoRange(self, auto: bool):
+        self.absorptionAutoRange = bool(auto)
 
     def setExcMinIntensity(self, intensity):
         if intensity < 0.0: intensity = 0.0

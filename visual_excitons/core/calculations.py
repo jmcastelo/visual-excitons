@@ -49,11 +49,30 @@ def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, nQpoints):
     }
 
 
-def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyMin, energyMax, minIntensity):
+# Broadening of the absorption spectra (yambopy's default), and the margin of
+# the automatic range around the exciton energies: five broadenings, where the
+# Lorentzian peaks have fallen to 4% of their height
+ABSORPTION_BROADENING = 0.1
+ABSORPTION_AUTO_MARGIN = 5 * ABSORPTION_BROADENING
+
+
+def automaticAbsorptionRange(excitonEnergies, margin=ABSORPTION_AUTO_MARGIN):
+    """Energy range covering all the excitons plus `margin`, rounded outwards to 0.1 eV."""
+    energies = np.asarray(excitonEnergies, dtype=float)
+    low = max(0.0, np.floor((energies.min() - margin) * 10) / 10)
+    high = np.ceil((energies.max() + margin) * 10) / 10
+    return float(low), float(high)
+
+
+def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyMin, energyMax, minIntensity,
+                      autoRange=False):
     filename = "ndb.BS_diago_Q%d" % (qPointIndex + 1)
     excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir)
+    if autoRange:
+        energyMin, energyMax = automaticAbsorptionRange(excitonDB.eigenvalues.real)
 
-    energyRange, epsilon = excitonDB.get_chi(estep=energyStep, emin=energyMin, emax=energyMax)
+    energyRange, epsilon = excitonDB.get_chi(estep=energyStep, emin=energyMin, emax=energyMax,
+                                             broad=ABSORPTION_BROADENING)
 
     excitonAbsorption = YamboBSEAbsorptionSpectra(excitonDB)
     allExcitons = np.array(excitonAbsorption.get_excitons(min_intensity=0.0, max_energy=energyMax)).real
@@ -72,7 +91,7 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
     return {'q': qPointIndex, 'index': index, 'energy': energyRange, 'absorption': epsilon.imag,
             'brightExcEnergy': brightExcitons[:, 0], 'brightExcAbsorption': brightExcAbsInterp,
             'brightExcIntensities': brightExcitons[:, 1], 'brightExcIndices': brightExcitons[:, 2],
-            'darkExcEnergy': darkExcitons[:, 0], 'data': pointsData}
+            'darkExcEnergy': darkExcitons[:, 0], 'data': pointsData, 'range': (energyMin, energyMax)}
 
 
 def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, excitonIndices):
@@ -91,11 +110,14 @@ def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, ex
 
 
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
-                        cutoff_ry, supercell):
+                        cutoff_ry, supercell, cache=None):
     """
     Real-space probability density of exciton `exc_index` (1-based) at Q-point
     `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>), with the effective
     parameters actually used (see below).
+
+    `cache`, a dict, keeps the wave-function database between calls: loading it
+    is the slowest step, and it is the same for all the excitons of a dataset.
     """
     if lattice is None:
         context.stage('Loading the lattice')
@@ -112,8 +134,16 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
 
     # Loading the wave functions and the real-space calculation report their own
     # stages and progress (tqdm hooks)
-    wavefunctionDB = YamboWFDB(path=saveDir, save='.', latdb=lattice,
-                               bands_range=[np.min(excitonDB.table[:, 1]) - 1, np.max(excitonDB.table[:, 2])])
+    bandsRange = [int(np.min(excitonDB.table[:, 1])) - 1, int(np.max(excitonDB.table[:, 2]))]
+    key = (saveDir, tuple(bandsRange))
+    if cache is not None and key in cache:
+        wavefunctionDB = cache[key]
+    else:
+        wavefunctionDB = YamboWFDB(path=saveDir, save='.', latdb=lattice, bands_range=bandsRange)
+        if cache is not None:
+            # One database at a time: they are large
+            cache.clear()
+            cache[key] = wavefunctionDB
 
     degen_states = np.array(excitonDB.get_degenerate(exc_index, eps=1e-2)) - 1
     Akcv = excitonDB.get_Akcv()[degen_states]
@@ -229,6 +259,10 @@ class Calculations(QObject):
 
         self.selectedExciton = None  # (q index, exciton index, energy)
 
+        # Wave-function database kept between calculations (see computeWaveFunction);
+        # only used from the worker thread
+        self.wavefunctionCache = {}
+
     # Tasks
 
     @Slot()
@@ -255,18 +289,50 @@ class Calculations(QObject):
         self.waveFunction = None
         self.wfAtomPositions = None
         self.selectedExciton = None
+        # A new dict: a task still running on the old dataset keeps the old one
+        self.wavefunctionCache = {}
 
     @Slot(list, bool)
     def selectExciton(self, points, dummy=None):
-        """Select the exciton of the first clicked point of an absorption spectrum."""
-        if not points or self.qIndices is None:
+        """Select the exciton of the first clicked point of an absorption spectrum (energy along x)."""
+        if points:
+            self._select(points[0], float(points[0].pos().x()))
+
+    @Slot(list, bool)
+    def selectDispersionExciton(self, points, dummy=None):
+        """Select the exciton of the first clicked point of the dispersion (energy along y)."""
+        if points:
+            self._select(points[0], float(points[0].pos().y()))
+
+    def _select(self, point, energy):
+        if self.qIndices is None:
             return
-        point = points[0]
         qIndex = int(self.qIndices[point.data().i])
         excIndex = int(point.data().j)
-        energy = float(point.pos().x())
         self.selectedExciton = (qIndex, excIndex, energy)
         self.excitonSelected.emit(qIndex, excIndex, energy)
+
+    def selectedExcitonPositions(self):
+        """
+        Where the selected exciton is drawn: points (x, y) in the dispersion
+        (at each path point of its Q-point, if it is one of the excitons
+        plotted) and in the absorption spectra (if it is bright there).
+        """
+        positions = {'dispersion': [], 'absorption': []}
+        if self.selectedExciton is None or self.qIndices is None:
+            return positions
+        qIndex, excIndex, _ = self.selectedExciton
+
+        if 1 <= excIndex <= len(self.dispPoints):
+            curve = self.dispPoints[excIndex - 1]
+            positions['dispersion'] = [tuple(curve[i]) for i, q in enumerate(self.qIndices) if q == qIndex]
+
+        for data in self.excAbsData:
+            if data['q'] == qIndex:
+                for energy, height, index in zip(data['brightExcEnergy'], data['brightExcAbsorption'], data['brightExcIndices']):
+                    if int(index) == excIndex:
+                        positions['absorption'].append((float(energy), float(height)))
+        return positions
 
     # Dispersion
 
@@ -313,7 +379,7 @@ class Calculations(QObject):
         """Snapshot of the inputs of the absorption spectra."""
         o = self.options
         return dict(lattice=self.lattice, diagoDir=o.diagoDir, energyStep=o.energyStep, energyMin=o.energyMin,
-                    energyMax=o.energyMax, minIntensity=o.excMinIntensity)
+                    energyMax=o.energyMax, minIntensity=o.excMinIntensity, autoRange=o.absorptionAutoRange)
 
     def computeAbsorptionSpectrum(self, index, qPointIndex, parameters):
         return computeAbsorption(qPointIndex=qPointIndex, index=index, **parameters)
@@ -450,7 +516,8 @@ class Calculations(QObject):
         arguments = dict(lattice=self.lattice, saveDir=self.options.saveDir, diagoDir=self.options.diagoDir,
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
-                         cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]))
+                         cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
+                         cache=self.wavefunctionCache)
         self.tasks.submit('Computing the exciton wave function…',
                           lambda context: computeWaveFunction(context, **arguments),
                           self._applyWaveFunction, key='wave-function')

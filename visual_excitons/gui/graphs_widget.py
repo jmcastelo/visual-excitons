@@ -31,6 +31,7 @@ class GraphsWidget(QWidget):
 
         dispersionWidget.qPointSelected.connect(calculations.computeQPointAbsorptionSpectrum)
         dispersionWidget.qPointSelected.connect(calculations.getExcitonBandStructure)
+        dispersionWidget.qPointSelected.connect(calculations.selectDispersionExciton)
         dispersionWidget.curveClicked.connect(dispersionStyle.setCurrentCurveIndex)
 
         # Band structure widget
@@ -68,6 +69,14 @@ class GraphsWidget(QWidget):
         self.parametersWidget.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
         self.parametersWidget.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
         self.inspector = self.parametersWidget
+
+        # Ring around the selected exciton, kept when the plots are redrawn
+        # (connected after the plots, so it is placed on the new data)
+        self.dispersionWidget = dispersionWidget
+        self.absorptionWidget = absorptionWidget
+        for signal in (calculations.excitonSelected, calculations.excitonDispersionReady,
+                       calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
+            signal.connect(self.updateHighlights)
         self.parametersWidget.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
 
         # Splitters
@@ -83,6 +92,12 @@ class GraphsWidget(QWidget):
         hSplitter.addWidget(absorptionWidget)
 
         self.setLayout(pageLayout(hSplitter, self.inspector))
+
+    @Slot()
+    def updateHighlights(self, *args):
+        positions = self.calculations.selectedExcitonPositions()
+        self.dispersionWidget.setHighlight(positions['dispersion'])
+        self.absorptionWidget.setHighlight(positions['absorption'])
 
     @Slot(bool)
     def setDarkTheme(self, dark: bool):

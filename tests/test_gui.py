@@ -200,3 +200,30 @@ def test_status_bar_shows_and_cancels_a_running_task(window, qtbot):
         window.cancelButton.click()
     assert window.taskWidget.isHidden() and QApplication.overrideCursor() is None
     assert window.statusBar().currentMessage() == 'Cancelled: computing something'
+
+
+def test_selection_is_highlighted(window):
+    calc = window.calculations
+    calc.qIndices = [4, 9]
+    calc.dispPoints = [[[0, 2.0], [1, 2.1]]]
+    calc.selectedExciton = (9, 1, 2.1)
+    calc.excitonSelected.emit(9, 1, 2.1)
+    ring = window.spectraPage.dispersionWidget.highlight.item
+    assert list(zip(*ring.getData())) == [(1.0, 2.1)] and ring.scene() is not None
+    assert len(window.spectraPage.absorptionWidget.highlight.item.getData()[0]) == 0
+    # Fake data, not to be replotted (e.g. by the theme reset at teardown)
+    calc.dispPoints, calc.qIndices = [], None
+
+
+def test_automatic_absorption_range_control(window, qtbot):
+    inspector = window.spectraPage.inspector
+    assert inspector.autoRangeCheckBox.isChecked() and not inspector.energyMinSpinBox.isEnabled()
+    with qtbot.waitSignal(inspector.absorptionParametersChanged):
+        inspector.autoRangeCheckBox.setChecked(False)
+    assert not window.options.absorptionAutoRange and inspector.energyMaxSpinBox.isEnabled()
+
+    inspector.autoRangeCheckBox.setChecked(True)
+    window.calculations.excAbsData = [{'q': 0, 'range': (1.5, 3.0)}, {'q': 1, 'range': (1.6, 3.2)}]
+    inspector.updateRangeNote()
+    assert inspector.rangeNote.text() == 'Spectra from 1.5 to 3.2 eV.' and not inspector.rangeNote.isHidden()
+    window.calculations.excAbsData = []

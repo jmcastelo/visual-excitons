@@ -2,6 +2,7 @@ from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
 
 from .theme import plotForeground
+from .highlight import ExcitonHighlight
 
 
 class AbsorptionWidget(pg.GraphicsLayoutWidget):
@@ -53,6 +54,7 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
         self.style.axesStyle.axesWidthChanged.connect(self.setAxesWidth)
 
         self.curveItems = []
+        self.highlight = ExcitonHighlight()
 
     @Slot()
     def plotData(self, excAbsData, showLabels):
@@ -72,7 +74,7 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
             pointSizes = self.style.pointStyle.pointSizes
 
             for i, data in enumerate(excAbsData):
-                dataItem = pg.PlotDataItem(data['energy'], data['absorption'], symbol = None, pen = curvePens[i], name = "q = %d"%(data['q']))
+                dataItem = pg.PlotDataItem(data['energy'], data['absorption'], symbol = None, pen = curvePens[i], name = "Q-point %d" % (data['q'] + 1))
                 dataItem.curve.setClickable(True)
                 dataItem.sigClicked.connect(self.curveSelected)
 
@@ -99,8 +101,15 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
                 plot.addItem(pg.BarGraphItem(x = data['brightExcEnergy'], width = 0.00001, height = 1.0, pen = curvePens[i].color(), brush = curvePens[i].color()))
                 plot.addItem(pg.BarGraphItem(x = data['darkExcEnergy'], width = 0.00001, height = 1.0, pen = plotForeground(), brush = plotForeground()))
                 self.excitonPlots.append(plot)
+
+            self.highlight.addTo(self.absorption)
         else:
             self.absorption.setRange(xRange = (0.0, 1.0), yRange = (0.0, 1.0), disableAutoRange = False)
+
+    def setHighlight(self, positions):
+        """Ring around the selected exciton, at its points (energy, absorption)."""
+        self.highlight.setPositions(positions)
+        self.highlight.addTo(self.absorption)
 
     @Slot()
     def clearData(self):

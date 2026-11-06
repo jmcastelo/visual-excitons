@@ -163,9 +163,9 @@ This page contains three plots: the excitonic dispersion and band structure on t
 
 Side panel:
 
-- **Dispersion**: choose the number of excitons and press `Compute dispersion`. Then click a point of the dispersion to plot the absorption spectrum at its Q-point; `Ctrl`-click to keep several spectra together.
-- **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
-- **Selected exciton**: click a bright exciton on an absorption spectrum to select it. Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected on the Wave function page too. `Wave function of this exciton` goes to that page.
+- **Dispersion**: choose the number of excitons and press `Compute dispersion`. Then click a point of the dispersion to plot the absorption spectrum at its Q-point; `Ctrl`-click to keep several spectra together. Clicking a point also selects its exciton (see below).
+- **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. With `Automatic range` (the default), each spectrum spans the energies of its own excitons, plus a margin of 0.5 eV (five times the broadening of the peaks) on both sides; the range of the spectra plotted is shown below. Untick it to set the range by hand with `From` and `To`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
+- **Selected exciton**: click an exciton on the dispersion, or a bright exciton on an absorption spectrum, to select it. It is marked with an orange ring on both plots (on the absorption spectrum, when it is bright there). Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected on the Wave function page too. `Wave function of this exciton` goes to that page.
 - **Appearance**: the style of the plots (colors, widths, fonts, etc. of the axes, curves, points, legend and the rest of the elements).
 
 Band structure:
@@ -193,7 +193,7 @@ Currently under active development, this page plots 3D visualizations of the pro
   - `Position (a, b, c)`: its position in crystal coordinates of the unit cell. After computing, it is moved to the nearest point of the real-space grid of the wave function, as explained in the note shown below it.
   - `Supercell`: the number of unit cells along each lattice vector. Only odd sizes are allowed, so that the fixed particle sits in the central cell.
   - `Cutoff`: the plane-wave cutoff of the wave function, in Ry. Higher values give a finer real-space grid, at a higher cost.
-  - Press `Compute wave function`.
+  - Press `Compute wave function`. The wave functions of the dataset are loaded the first time only: later calculations on the same dataset, for other excitons, positions, supercells or cutoffs, skip that step and are several times faster.
 
 #### Plot types and rendering
 
