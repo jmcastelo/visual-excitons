@@ -5,7 +5,7 @@ import pyqtgraph as pg
 import pytest
 
 from visual_excitons.core.options import Options
-from visual_excitons.core.calculations import Calculations, PointData, longTask
+from visual_excitons.core.calculations import Calculations, PointData
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
 from visual_excitons.core.style import AbsorptionStyle
 
@@ -101,7 +101,8 @@ class Point:
 
 @pytest.fixture
 def calculations():
-    calc = Calculations(Options())
+    # Calculations run inline: results are there when the call returns
+    calc = Calculations(Options(), synchronous=True)
     calc.qIndices = [4, 7, 9, 0, 2, 3, 5, 6, 8, 1]
     return calc
 
@@ -118,26 +119,19 @@ def test_select_exciton(qtbot, calculations):
         calculations.selectExciton([Point(1)], True)
 
 
-def test_long_task_reports_progress_and_errors(qtbot):
-    class Job(Calculations):
-        @longTask('Working…')
-        def fail(self):
-            raise ValueError('boom')
-
-        @longTask('Working…')
-        def succeed(self):
-            return 42
-
-    job = Job(Options())
+def test_calculation_signals(qtbot, calculations):
+    """Progress signals of a calculation, and a request that cannot run is rejected at once."""
     events = []
-    job.busyStarted.connect(lambda message: events.append(('start', message)))
-    job.busyFinished.connect(lambda: events.append(('finish',)))
-    job.errorOccurred.connect(lambda title, message: events.append(('error', title, message)))
+    calculations.busyStarted.connect(lambda message: events.append(('start', message)))
+    calculations.busyFinished.connect(lambda: events.append(('finish',)))
+    calculations.errorOccurred.connect(lambda title, message: events.append(('error', title, message)))
 
-    assert job.succeed() == 42
-    assert job.fail() is None
-    assert events == [('start', 'Working…'), ('finish',),
-                      ('start', 'Working…'), ('error', 'Working failed', 'boom'), ('finish',)]
+    calculations.getExcitonDispersion()   # no Q-path
+    assert events == [('error', 'Computing the excitonic dispersion failed', 'No Q-path: set one on the System page first.')]
+
+    events.clear()
+    calculations.tasks.submit('Working…', lambda context: 1, lambda result: None)
+    assert events == [('start', 'Working…'), ('finish',)]
 
 
 def test_wave_function_needs_existing_exciton_index(qtbot, calculations, monkeypatch, tmp_path):
@@ -169,7 +163,7 @@ def test_absorption_curves_keep_their_styles(calculations):
     calculations.excitonAbsorptionCurveAppended.connect(style.appendCurveStyle)
     calculations.excitonAbsorptionCurveRemoved.connect(style.removeCurveStyle)
     calculations.qIndices = list(range(10))
-    calculations.computeAbsorptionSpectrum = lambda index: {'q': index, 'index': index}
+    calculations.computeAbsorptionSpectrum = lambda index, q, parameters: {'q': q, 'index': index}
 
     def click(i, ctrl=False):
         calculations.computeQPointAbsorptionSpectrum([Point(i)], ctrl)

@@ -119,7 +119,7 @@ def test_errors_are_shown(window, monkeypatch):
     monkeypatch.setattr(main_window.QMessageBox, 'critical', lambda parent, title, text: shown.append((title, text)))
     window.calculations.getExcitonDispersion()   # no Q-path yet
     assert shown and 'Q-path' in shown[0][1]
-    assert QApplication.overrideCursor() is None and window.busyDepth == 0
+    assert QApplication.overrideCursor() is None and not window.taskWidget.isVisible()
 
 
 # Inspector
@@ -174,3 +174,29 @@ def test_switching_datasets_resets_calculations(window):
     assert window.calculations.selectedExciton is None and window.calculations.waveFunction is None
     assert not window.options.gw and window.systemPage.calcTypeComboBox.currentText() == 'DFT+BSE'
     assert [action.text() for action in window.recentMenu.actions()] == ['BN', 'BiI3_Bulk_8x8x8']
+
+
+def test_status_bar_shows_and_cancels_a_running_task(window, qtbot):
+    import threading, time
+    started = threading.Event()
+
+    def compute(context):
+        started.set()
+        context.stage('Crunching', 1000)
+        for _ in range(1000):
+            context.advance()
+            time.sleep(0.01)
+
+    tasks = window.calculations.tasks
+    tasks.submit('Computing something…', compute, lambda result: None)
+    tasks.submit('Computing more…', lambda context: None, lambda result: None)
+    assert started.wait(5)
+    qtbot.waitUntil(lambda: window.taskProgressBar.maximum() == 1000, timeout=5000)
+    assert not window.taskWidget.isHidden()
+    assert window.taskLabel.text() == 'Computing something — Crunching  (+1 queued)'
+    assert QApplication.overrideCursor().shape() == Qt.CursorShape.BusyCursor
+
+    with qtbot.waitSignal(window.calculations.busyChanged, timeout=5000, check_params_cb=lambda busy: not busy):
+        window.cancelButton.click()
+    assert window.taskWidget.isHidden() and QApplication.overrideCursor() is None
+    assert window.statusBar().currentMessage() == 'Cancelled: computing something'

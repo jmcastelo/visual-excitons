@@ -27,7 +27,8 @@ def bii3():
     options.setLatticeData(options.ibrav)
     options.setBrillouinZone(path='LGZF', npoints=100)
 
-    calculations = Calculations(options)
+    # Inline: each call returns with its result applied
+    calculations = Calculations(options, synchronous=True)
     errors = []
     calculations.errorOccurred.connect(lambda title, message: errors.append(message))
     calculations.getExcitonDispersion()
@@ -92,3 +93,33 @@ def test_absorption_selection_and_wave_function(bii3, monkeypatch):
     snapped = np.array(bii3.wfFixedPosition)
     np.testing.assert_allclose(snapped * grid, np.round(snapped * grid), atol=1e-6)
     np.testing.assert_allclose(snapped, np.round(np.array([0.3, 0.1, 0.0]) * grid) / grid, atol=1e-6)
+
+
+def test_wave_function_in_the_background(qtbot, bii3):
+    """Real threads: progress comes from yambopy's own loops, and cancelling stops them."""
+    calculations = Calculations(bii3.options)
+    calculations.lattice = bii3.lattice
+    stages = []
+    calculations.progressChanged.connect(lambda done, total, stage: stages.append((stage, done, total)))
+    arguments = dict(q_index=0, exc_index=1, fixed_particle='h', fixed_position=[0, 0, 0], cutoff_ry=5, supercell=[1, 1, 1])
+
+    with qtbot.waitSignal(calculations.wfComputed, timeout=120000):
+        calculations.computeExcitonWaveFunction(**arguments)
+    names = [stage for stage, done, total in stages]
+    assert {'Loading the wave functions', 'Real-space wave function'} <= set(names)
+    # The real-space loop reported its end
+    assert any(stage == 'Real-space wave function' and done == total > 0 for stage, done, total in stages)
+
+    # Cancel in the middle of loading the wave functions
+    stages.clear()
+    calculations.computeExcitonWaveFunction(**arguments)
+    qtbot.waitUntil(lambda: any(stage == 'Loading the wave functions' and done > 0 for stage, done, total in stages),
+                    timeout=60000)
+    computed = []
+    calculations.wfComputed.connect(lambda: computed.append(True))
+    with qtbot.waitSignal(calculations.taskCancelled, timeout=10000):
+        calculations.cancel()
+    qtbot.waitUntil(lambda: not calculations.isBusy(), timeout=10000)
+    assert not computed
+    # It stopped before the real-space calculation
+    assert 'Real-space wave function' not in [stage for stage, done, total in stages]

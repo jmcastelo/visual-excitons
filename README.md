@@ -107,8 +107,9 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_bonds.py`: bond detection on crystals with known coordination, periodic images, half bonds in supercells.
 - `test_rendering.py`: sphere and cylinder meshes, the opacity calibration of the volume, cell parameters.
 - `test_core.py`: datasets, options, exciton selection, error reporting of calculations, absorption curves and their styles.
+- `test_tasks.py`: background calculations (worker thread, ordering, progress, cancellation, queue replacement, the hooks into yambopy's progress).
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
-- `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function).
+- `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
 
 Tests that read the datasets in `data/` (not in the repository; marked `data`) are skipped when these are missing. The end-to-end tests are slow (marked `slow`, about half a minute) and do not run by default:
 
@@ -127,7 +128,9 @@ The main window has a navigation bar on the left with three pages, following the
 
 `Ctrl+1`, `Ctrl+2` and `Ctrl+3` switch between them too. The pages with plots have a side panel on the right made of collapsible sections. Click a section header to open or close it; the panel scrolls when its open sections do not fit. `View › Show side panel` (`Ctrl+B`) hides it to give the plots the whole window.
 
-The status bar shows the dataset loaded (name, Bravais lattice and number of Q-points) and what is being computed. During a calculation the cursor turns into a wait cursor; errors are reported in a dialog.
+The status bar shows the dataset loaded (name, Bravais lattice and number of Q-points) and what is being computed.
+
+**Calculations run in the background**, so the window stays usable while they run: you can switch pages, rotate the 3D view or change display settings meanwhile. The status bar shows the running calculation, its current stage (e.g. `Loading the wave functions`, `Real-space wave function`) with a progress bar, and how many more are queued. `Cancel` or `Esc` stops it and drops the queued ones; it stops within a fraction of a second. Calculations run one at a time, in the order requested; requesting the same kind of calculation again (e.g. editing the absorption range several times) replaces the queued one instead of piling up. Opening another dataset cancels the calculations on the previous one. Errors are reported in a dialog.
 
 **Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen under `Appearance` are kept.
 

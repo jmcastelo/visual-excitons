@@ -4,6 +4,8 @@ from yambopy import IBRAV_REQUIRED_PARAMETERS, get_lattice_data, YamboLatticeDB,
 from glob import glob
 import numpy as np
 
+from .tasks import databaseAccess
+
 
 
 def get_angle_between(ai, aj):
@@ -30,7 +32,8 @@ class Options(QObject):
     diagoDirChanged = Signal(str, str)
     qpDirChanged = Signal(str, str)
 
-    # Database signal
+    # Database signals: a new SAVE directory is about to be read; it was read
+    datasetAboutToChange = Signal()
     databaseFound = Signal(bool)
 
     numQPointsChanged = Signal(int)
@@ -134,6 +137,7 @@ class Options(QObject):
         }
 
     def setSaveDir(self, dir):
+        self.datasetAboutToChange.emit()
         file = Path(dir + '/ns.db1')
         if file.is_file():
             self.saveDir = dir
@@ -166,7 +170,8 @@ class Options(QObject):
             self.qpDirChanged.emit(dir, "ndb.QP not found!")
 
     def setLatticeParameters(self):
-        lattice = YamboLatticeDB.from_db(self.saveDir + '/ns.db1', Expand=False)
+        with databaseAccess():
+            lattice = YamboLatticeDB.from_db(self.saveDir + '/ns.db1', Expand=False)
         self.cell = lattice.lat
         self.latticeParameters = get_cell_params(self.cell)
 

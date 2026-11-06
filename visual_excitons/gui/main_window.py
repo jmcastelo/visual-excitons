@@ -6,10 +6,10 @@ Spectra, Wavefunction); menus, a status bar and persistent settings frame them.
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot, QSettings, QEventLoop
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtCore import Qt, Slot, QSettings
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox,
-                               QApplication)
+                               QApplication, QProgressBar, QToolButton)
 
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
@@ -54,11 +54,12 @@ class MainWindow(QMainWindow):
         self.options.numQPointsChanged.connect(self.updateDatasetLabel)
         self.options.saveDirChanged.connect(self.updateDatasetLabel)
 
-        self.calculations.busyStarted.connect(self.onBusyStarted)
-        self.calculations.busyFinished.connect(self.onBusyFinished)
+        self.calculations.busyStarted.connect(self.onTaskStarted)
+        self.calculations.busyChanged.connect(self.onBusyChanged)
+        self.calculations.progressChanged.connect(self.onProgress)
+        self.calculations.taskCancelled.connect(self.onTaskCancelled)
         self.calculations.errorOccurred.connect(self.onError)
         self.calculations.excitonSelected.connect(self.onExcitonSelected)
-        self.busyDepth = 0
 
         self.theme.themeChanged.connect(self.spectraPage.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunctionPage.setDarkTheme)
@@ -177,6 +178,29 @@ class MainWindow(QMainWindow):
         helpMenu.addAction(aboutAction)
 
     def createStatusBar(self):
+        # Running calculation: its message and stage, progress, and a cancel button
+        self.taskLabel = QLabel()
+        self.taskProgressBar = QProgressBar()
+        self.taskProgressBar.setFixedWidth(160)
+        self.taskProgressBar.setMaximumHeight(16)
+        self.cancelButton = QToolButton()
+        self.cancelButton.setText('Cancel')
+        self.cancelButton.setToolTip('Stop the calculation and the queued ones (Esc)')
+        self.cancelButton.setAutoRaise(True)
+        self.cancelButton.clicked.connect(self.calculations.cancel)
+
+        self.taskWidget = QWidget()
+        layout = QHBoxLayout(self.taskWidget)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.addWidget(self.taskLabel)
+        layout.addWidget(self.taskProgressBar)
+        layout.addWidget(self.cancelButton)
+        self.taskWidget.hide()
+        self.statusBar().addPermanentWidget(self.taskWidget)
+
+        cancelShortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        cancelShortcut.activated.connect(self.calculations.cancel)
+
         self.datasetLabel = QLabel()
         self.datasetLabel.setContentsMargins(8, 0, 8, 0)
         self.statusBar().addPermanentWidget(self.datasetLabel)
@@ -279,21 +303,46 @@ class MainWindow(QMainWindow):
 
     # Calculations
 
-    @Slot(str)
-    def onBusyStarted(self, message: str):
-        self.busyDepth += 1
-        if self.busyDepth == 1:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        self.statusBar().showMessage(message)
-        # Show the message before the calculation blocks the event loop
-        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-
-    @Slot()
-    def onBusyFinished(self):
-        self.busyDepth = max(self.busyDepth - 1, 0)
-        if self.busyDepth == 0:
+    @Slot(bool)
+    def onBusyChanged(self, busy: bool):
+        self.taskWidget.setVisible(busy)
+        # The window stays usable: a busy cursor, not a wait cursor
+        if busy:
+            QApplication.setOverrideCursor(Qt.CursorShape.BusyCursor)
+        else:
             QApplication.restoreOverrideCursor()
-            self.statusBar().showMessage('Ready', 2000)
+            if not self.statusBar().currentMessage():
+                self.statusBar().showMessage('Ready', 2000)
+
+    @Slot(str)
+    def onTaskStarted(self, message: str):
+        self.taskMessage = message
+        self.taskStage = ''
+        self.taskProgressBar.setRange(0, 0)  # unknown length until a stage reports it
+        self.updateTaskLabel()
+
+    @Slot(int, int, str)
+    def onProgress(self, done: int, total: int, stage: str):
+        if total > 0:
+            self.taskProgressBar.setRange(0, total)
+            self.taskProgressBar.setValue(min(done, total))
+        else:
+            self.taskProgressBar.setRange(0, 0)
+        self.taskStage = stage
+        self.updateTaskLabel()
+
+    def updateTaskLabel(self):
+        text = getattr(self, 'taskMessage', '')
+        if getattr(self, 'taskStage', ''):
+            text = f'{text.rstrip("…")} — {self.taskStage}'
+        queued = self.calculations.tasks.queuedCount()
+        if queued:
+            text += f'  (+{queued} queued)'
+        self.taskLabel.setText(text)
+
+    @Slot(str)
+    def onTaskCancelled(self, message: str):
+        self.statusBar().showMessage(f'Cancelled: {message.rstrip("…").lower()}', 4000)
 
     @Slot(str, str)
     def onError(self, title: str, message: str):
@@ -311,6 +360,9 @@ class MainWindow(QMainWindow):
                           '<a href="https://www.yambo-code.eu/">Yambo</a>, read through YamboPy.')
 
     def closeEvent(self, event):
+        # Stop the calculations; the running one ends at its next progress check
+        self.calculations.cancel()
+        self.calculations.tasks.waitForDone(10000)
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('page', self.stack.currentIndex())
         self.settings.setValue('theme', self.theme.mode)
