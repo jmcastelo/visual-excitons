@@ -1,11 +1,12 @@
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter
+from PySide6.QtWidgets import QWidget
 import pyqtgraph.opengl as gl
 import numpy as np
 
 from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
+from .inspector import pageLayout
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.bonds import findBonds, halfBonds
@@ -58,17 +59,20 @@ class Graphs3DWidget(QWidget):
         # Initial view from the view widgets' default state
         self.parameters3DWidget.applyView()
 
-        hSplitter = QSplitter()
-        hSplitter.setOrientation(Qt.Orientation.Horizontal)
-        hSplitter.addWidget(self.excitonWfWidget)
-        hSplitter.addWidget(self.parameters3DWidget)
-        hSplitter.setStretchFactor(0, 2)
-        hSplitter.setStretchFactor(1, 1)
+        self.inspector = self.parameters3DWidget
+        self.setLayout(pageLayout(self.excitonWfWidget, self.inspector))
 
-        layout = QVBoxLayout()
-        layout.addWidget(hSplitter)
+    @Slot(bool)
+    def setDarkTheme(self, dark: bool):
+        self.excitonWfWidget.setDarkTheme(dark)
 
-        self.setLayout(layout)
+    @Slot(bool)
+    def onDatasetChanged(self, found: bool):
+        """Drop the wave function of the previous dataset and draw the new lattice."""
+        self.excitonWfWidget.clearWfItems()
+        if found:
+            self.plotLattice()
+            self.excitonWfWidget.centerView()
 
     @Slot()
     def plotWf(self):

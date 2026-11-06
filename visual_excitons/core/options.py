@@ -35,8 +35,19 @@ class Options(QObject):
 
     numQPointsChanged = Signal(int)
 
+    # Calculation type: True for DFT+GW+BSE, False for DFT+BSE
+    gwChanged = Signal(bool)
+
     def __init__(self):
         super().__init__()
+
+        # Data directories (see setSaveDir, setDiagoDir, setQPDir)
+        self.saveDir = ''
+        self.diagoDir = ''
+        self.qpDir = ''
+        self.parentDir = ''
+        self.jobString = ''
+        self.nQpoints = 0
 
         # ibrav
         self.ibrav = -1
@@ -174,6 +185,11 @@ class Options(QObject):
     def setLatticeData(self, ibrav):
         cell, self.variant, self.highSymmetryPoints, self.defaultPath = get_lattice_data(ibrav, self.latticeParameters)
         self.availableHighSymmetryPoints = [label for label in self.highSymmetryPoints.keys()]
+
+    def setGW(self, gw: bool):
+        if gw != self.gw:
+            self.gw = gw
+            self.gwChanged.emit(gw)
 
     def setIbrav(self, i):
         self.ibrav = i

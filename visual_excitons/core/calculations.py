@@ -1,3 +1,6 @@
+import functools
+import traceback
+
 from PySide6.QtCore import QObject, Signal, Slot
 from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra, YamboQPDB
 from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
@@ -10,6 +13,28 @@ class PointData:
     def __init__(self, i, j):
         self.i = i
         self.j = j
+
+
+
+def longTask(message):
+    """
+    Decorator for slow calculation methods: announces them with busyStarted /
+    busyFinished (the main window shows a message and a wait cursor), and turns
+    exceptions into errorOccurred instead of losing them in a Qt slot.
+    """
+    def decorator(method):
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            self.busyStarted.emit(message)
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as error:
+                traceback.print_exc()
+                self.errorOccurred.emit(f'{message[:-1] if message.endswith("…") else message} failed', str(error))
+            finally:
+                self.busyFinished.emit()
+        return wrapper
+    return decorator
 
 
 
@@ -32,6 +57,15 @@ class Calculations(QObject):
     excitonAbsorptionCurveRemoved = Signal(int)
 
     wfComputed = Signal()
+
+    # Exciton chosen in the spectra, shared with the wave-function page:
+    # Q-point index (0-based, as in ndb.BS_diago_Q<index + 1>), exciton index (1-based), energy (eV)
+    excitonSelected = Signal(int, int, float)
+
+    # Progress and errors of slow calculations (see longTask)
+    busyStarted = Signal(str)
+    busyFinished = Signal()
+    errorOccurred = Signal(str, str)
 
     def __init__(self, options):
         super().__init__()
@@ -65,8 +99,39 @@ class Calculations(QObject):
         self.wfGrid = None
         self.tr4x4 = np.eye(4, dtype=float)
 
+        self.selectedExciton = None  # (q index, exciton index, energy)
+
     @Slot()
+    def resetDataset(self):
+        """Forget everything computed from the previous dataset."""
+        self.lattice = None
+        self.excitonDispersion = None
+        self.collinear_qpoints = None
+        self.qIndices = None
+        self.excAbsData = []
+        self.waveFunction = None
+        self.wfAtomPositions = None
+        self.selectedExciton = None
+
+    @Slot(list, bool)
+    def selectExciton(self, points, dummy=None):
+        """Select the exciton of the first clicked point of an absorption spectrum."""
+        if not points or self.qIndices is None:
+            return
+        point = points[0]
+        qIndex = int(self.qIndices[point.data().i])
+        excIndex = int(point.data().j)
+        energy = float(point.pos().x())
+        self.selectedExciton = (qIndex, excIndex, energy)
+        self.excitonSelected.emit(qIndex, excIndex, energy)
+
+    @Slot()
+    @longTask('Computing the excitonic dispersion…')
     def getExcitonDispersion(self):
+        if self.options.qBZ is None:
+            raise ValueError('No Q-path: set one on the System page first.')
+        if not self.options.diagoDir:
+            raise ValueError('No BSE directory: choose one on the System page first.')
         self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
         self.excitonDispersion = ExcitonDispersion(self.lattice, self.options.nExcitons, self.options.diagoDir)
 
@@ -160,6 +225,7 @@ class Calculations(QObject):
         return {'q': qPointIndex, 'index': index, 'energy': energyRange, 'absorption': epsilon.imag, 'brightExcEnergy': brightExcitons[:, 0], 'brightExcAbsorption': brightExcAbsInterp, 'brightExcIntensities': brightExcitons[:, 1], 'brightExcIndices': brightExcitons[:, 2], 'darkExcEnergy': darkExcitons[:, 0], 'data': pointsData}
 
     @Slot()
+    @longTask('Computing the absorption spectrum…')
     def computeQPointAbsorptionSpectrum(self, points, toggleCurve):
         index = points[0].data().i
         # qPointIndex = self.dispersionData['qindices'][index]
@@ -187,6 +253,7 @@ class Calculations(QObject):
         self.excitonAbsorptionReady.emit(self.excAbsData, self.showExcitonLabels)
 
     @Slot()
+    @longTask('Computing the absorption spectra…')
     def recomputeAbsorptionSpectra(self):
         newExcAbsData = []
 
@@ -222,6 +289,7 @@ class Calculations(QObject):
     """
 
     @Slot()
+    @longTask('Interpolating the excitonic band structure…')
     def getExcitonBandStructure(self, points, dummy):
         if np.all(self.collinear_qpoints[points[0].data().i] == [0.0, 0.0, 0.0]):
             excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename='ndb.BS_diago_Q1', folder=self.options.diagoDir)
@@ -267,8 +335,12 @@ class Calculations(QObject):
         self.showExcitonLabels = visible
         self.excitonAbsorptionReady.emit(self.excAbsData, visible)
 
-    @Slot(int)
-    def computeExcitonWaveFunction(self, exc_index=1, fixed_particle='h', fixed_position=None, cutoff_ry=-1, supercell=None):
+    @longTask('Computing the exciton wave function…')
+    def computeExcitonWaveFunction(self, q_index=0, exc_index=1, fixed_particle='h', fixed_position=None, cutoff_ry=-1, supercell=None):
+        """
+        Real-space wave function of exciton `exc_index` (1-based) at Q-point
+        `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>).
+        """
         if fixed_position is None:
             fixed_position = [0, 0, 0]
 
@@ -278,8 +350,14 @@ class Calculations(QObject):
         if self.lattice is None:
             self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
 
-        filename = 'ndb.BS_diago_Q%d' % exc_index
-        excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.options.diagoDir, neigs=20)
+        filename = 'ndb.BS_diago_Q%d' % (q_index + 1)
+        # Load the states up to the requested one, plus a margin for the states
+        # degenerate with it
+        excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.options.diagoDir,
+                                                neigs=exc_index + 20)
+        numStates = len(excitonDB.eigenvalues)
+        if exc_index > numStates:
+            raise ValueError(f'Exciton {exc_index} does not exist: {filename} has {numStates} excitons')
 
         wavefunctionDB = YamboWFDB(path=self.options.saveDir, save='.', latdb=self.lattice, bands_range=[np.min(excitonDB.table[:, 1]) - 1, np.max(excitonDB.table[:, 2])])
 

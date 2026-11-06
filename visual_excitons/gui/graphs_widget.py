@@ -1,15 +1,23 @@
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QWidget, QSplitter
 
 from .dispersion_widget import DispersionWidget
 from .band_structure_widget import BandStructureWidget
 from .absorption_widget import AbsorptionWidget
 from .parameters_widget import ParametersWidget
+from .inspector import pageLayout
+from .theme import PLOT_COLORS
 
 
 class GraphsWidget(QWidget):
     def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle):
         QWidget.__init__(self)
+
+        self.calculations = calculations
+        self.styles = (dispersionStyle, absorptionStyle, bandStructureStyle)
+        # Default color of the curves: black (the light theme's foreground)
+        self.foreground = PLOT_COLORS[False]['foreground']
 
         # Dispersion widget
 
@@ -45,6 +53,7 @@ class GraphsWidget(QWidget):
         calculations.excitonAbsorptionClear.connect(absorptionWidget.clearData)
 
         absorptionWidget.excitonsSelected.connect(calculations.getExcitonBandStructure)
+        absorptionWidget.excitonsSelected.connect(calculations.selectExciton)
         absorptionWidget.curveClicked.connect(absorptionStyle.setCurrentCurveIndex)
 
         absorptionStyle.legendStyle.textColorChanged.connect(absorptionWidget.setLegendTextColor)
@@ -55,9 +64,10 @@ class GraphsWidget(QWidget):
 
         # Parameters widget
 
-        self.parametersWidget = ParametersWidget(options, dispersionStyle, absorptionStyle, bandStructureStyle)
+        self.parametersWidget = ParametersWidget(options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle)
         self.parametersWidget.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
-        self.parametersWidget.showLabelsButton.clicked.connect(calculations.toggleExcitonLabelsVisibility)
+        self.parametersWidget.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
+        self.inspector = self.parametersWidget
         self.parametersWidget.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
 
         # Splitters
@@ -72,15 +82,26 @@ class GraphsWidget(QWidget):
         hSplitter.addWidget(vSplitter)
         hSplitter.addWidget(absorptionWidget)
 
-        v2Splitter = QSplitter()
-        v2Splitter.setOrientation(Qt.Orientation.Horizontal)
-        v2Splitter.addWidget(hSplitter)
-        v2Splitter.addWidget(self.parametersWidget)
-        v2Splitter.setStretchFactor(0, 2)
-        v2Splitter.setStretchFactor(1, 1)
+        self.setLayout(pageLayout(hSplitter, self.inspector))
 
-        # Layout
-
-        vLayout = QVBoxLayout()
-        vLayout.addWidget(v2Splitter)
-        self.setLayout(vLayout)
+    @Slot(bool)
+    def setDarkTheme(self, dark: bool):
+        """Plot colors for a dark or light theme (they can still be changed under Appearance)."""
+        colors = PLOT_COLORS[dark]
+        foreground, background = colors['foreground'], colors['background']
+        for style in self.styles:
+            axes = style.axesStyle
+            for color in (axes.titleColor, axes.labelsColor, axes.ticksColor, axes.axesColor):
+                color.setColor(foreground)
+            axes.backgroundColor.setColor(background)
+        self.styles[1].legendStyle.setTextColor(foreground)
+        # Curves still in the default color follow the theme
+        for style in self.styles:
+            style.curveStyle.replaceColor(QColor('black'), foreground)
+            style.curveStyle.replaceColor(self.foreground, foreground)
+        self.foreground = foreground
+        # Replot, for the items drawn in the foreground color
+        if self.calculations.dispPoints:
+            self.calculations.emitExcitonDispersionReady()
+        if self.calculations.excAbsData:
+            self.calculations.emitExcitonAbsorption()

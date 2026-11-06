@@ -69,8 +69,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
         self.cellInfoLabel = QLabel(self)
         self.cellInfoLabel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.cellInfoLabel.setTextFormat(Qt.TextFormat.RichText)
-        self.cellInfoLabel.setStyleSheet('QLabel { background-color: rgba(255, 255, 255, 210); color: #222;'
-                                         ' border: 1px solid #bbb; border-radius: 4px; padding: 4px; }')
+        self.setDarkTheme(False)
         self.cellInfoLabel.move(10, 10)
         self.cellInfoLabel.hide()
 
@@ -238,6 +237,19 @@ class ExcitonWfWidget(gl.GLViewWidget):
         if self.gizmo is not None:
             self.gizmo.setLatticeVectors(self.cellLattice)
         self.updateCellInfo()
+
+    @Slot(bool)
+    def setDarkTheme(self, dark: bool):
+        """Background of the scene and colors of the overlays for a dark or light theme."""
+        if dark:
+            self.setBackgroundColor((30, 31, 34, 255))
+            style = 'background-color: rgba(43, 45, 48, 220); color: #dfe1e5; border: 1px solid #55585e;'
+        else:
+            self.setBackgroundColor((255, 255, 255, 255))
+            style = 'background-color: rgba(255, 255, 255, 210); color: #222; border: 1px solid #bbb;'
+        self.cellInfoLabel.setStyleSheet(f'QLabel {{ {style} border-radius: 4px; padding: 4px; }}')
+        if self.gizmo is not None:
+            self.gizmo.setDarkTheme(dark)
 
     def updateCellInfo(self):
         if self.cellLattice is None:
@@ -474,9 +486,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
         if self.bondsItem is not None:
             self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
 
-    @Slot(bool)
-    def viewBonds(self, visible: bool):
-        self.bondsVisible = visible
+    @Slot(Qt.CheckState)
+    def viewBonds(self, state):
+        self.bondsVisible = (state == Qt.CheckState.Checked)
         if self.bondsItem is not None:
             self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
 

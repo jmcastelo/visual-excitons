@@ -1,0 +1,318 @@
+"""
+Main window: a navigation bar on the left switches between the pages (System,
+Spectra, Wavefunction); menus, a status bar and persistent settings frame them.
+"""
+
+import json
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Slot, QSettings, QEventLoop
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox,
+                               QApplication)
+
+from visual_excitons.core.options import Options
+from visual_excitons.core.calculations import Calculations
+from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
+from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
+from .options_widget import OptionsWidget
+from .graphs_widget import GraphsWidget
+from .graphs_3d_widget import Graphs3DWidget
+from .navigation_bar import NavigationBar
+from .theme import themeManager, THEME_MODES
+
+
+# Opened on the first run, when there is no recent dataset (relative to the repository)
+DEFAULT_DATASET_FOLDER = Path(__file__).resolve().parents[2] / 'data' / 'BiI3_Bulk_8x8x8'
+
+MAX_RECENT_DATASETS = 8
+
+SYSTEM_PAGE, SPECTRA_PAGE, WAVEFUNCTION_PAGE = range(3)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.settings = QSettings('VisualExcitons', 'VisualExcitons')
+        self.theme = themeManager()
+
+        self.options = Options()
+        self.calculations = Calculations(self.options)
+        self.dataset = None
+
+        self.createStyles()
+        self.createPages()
+        self.createMenus()
+        self.createStatusBar()
+
+        # A new SAVE directory invalidates everything computed before; reset
+        # first, then redraw the lattice
+        self.options.databaseFound.connect(lambda found: self.calculations.resetDataset())
+        self.options.databaseFound.connect(self.wavefunctionPage.onDatasetChanged)
+        self.options.databaseFound.connect(self.updateDatasetLabel)
+        self.options.numQPointsChanged.connect(self.updateDatasetLabel)
+        self.options.saveDirChanged.connect(self.updateDatasetLabel)
+
+        self.calculations.busyStarted.connect(self.onBusyStarted)
+        self.calculations.busyFinished.connect(self.onBusyFinished)
+        self.calculations.errorOccurred.connect(self.onError)
+        self.calculations.excitonSelected.connect(self.onExcitonSelected)
+        self.busyDepth = 0
+
+        self.theme.themeChanged.connect(self.spectraPage.setDarkTheme)
+        self.theme.themeChanged.connect(self.wavefunctionPage.setDarkTheme)
+        self.setTheme(self.settings.value('theme', 'System'))
+
+        if not self.restoreGeometry(self.settings.value('geometry', b'')):
+            self.resize(1600, 1000)
+        self.setPage(int(self.settings.value('page', SYSTEM_PAGE)))
+        self.openInitialDataset()
+
+    # Construction
+
+    def createStyles(self):
+        self.dispersionStyle = DispersionStyle()
+        self.absorptionStyle = AbsorptionStyle()
+        self.bandStructureStyle = BandStructureStyle()
+
+        self.dispersionStyle.setLinkedStyles([self.absorptionStyle, self.bandStructureStyle])
+        self.absorptionStyle.setLinkedStyles([self.dispersionStyle, self.bandStructureStyle])
+        self.bandStructureStyle.setLinkedStyles([self.dispersionStyle, self.absorptionStyle])
+
+        calc = self.calculations
+        self.dispersionStyle.styleChanged.connect(calc.emitExcitonDispersionReady)
+        self.absorptionStyle.styleChanged.connect(calc.emitExcitonAbsorption)
+        self.bandStructureStyle.styleChanged.connect(calc.emitExcitonBandStructure)
+
+        calc.excitonDispersionNumCurvesChanged.connect(self.dispersionStyle.setNumCurves)
+        calc.excitonDispersionInit.connect(self.dispersionStyle.applyDefaultStyle)
+        calc.excitonAbsorptionCurveAppended.connect(self.absorptionStyle.appendCurveStyle)
+        calc.excitonAbsorptionCurveRemoved.connect(self.absorptionStyle.removeCurveStyle)
+        calc.excitonBandStructureNumCurvesChanged.connect(self.bandStructureStyle.setNumCurves)
+        calc.excitonBandStructureInit.connect(self.bandStructureStyle.applyDefaultStyle)
+
+    def createPages(self):
+        self.systemPage = OptionsWidget(self.options)
+        self.spectraPage = GraphsWidget(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
+                                        self.bandStructureStyle)
+        self.wavefunctionPage = Graphs3DWidget(self.options, self.calculations)
+        self.spectraPage.inspector.showWavefunctionRequested.connect(lambda: self.setPage(WAVEFUNCTION_PAGE))
+
+        self.stack = QStackedWidget()
+        for page in (self.systemPage, self.spectraPage, self.wavefunctionPage):
+            self.stack.addWidget(page)
+
+        self.navigation = NavigationBar()
+        self.navigation.addPage('System', 'crystal', 'Data, crystal lattice and Q-path (Ctrl+1)')
+        self.navigation.addPage('Spectra', 'spectrum', 'Dispersion, absorption and band structure (Ctrl+2)')
+        self.navigation.addPage('Wave\nfunction', 'orbital', 'Exciton wave function in real space (Ctrl+3)')
+        self.navigation.pageSelected.connect(self.setPage)
+
+        central = QWidget()
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.navigation)
+        layout.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
+
+    def createMenus(self):
+        # File
+        fileMenu = self.menuBar().addMenu('&File')
+
+        openAction = QAction('&Open dataset…', self)
+        openAction.setShortcut(QKeySequence.StandardKey.Open)
+        openAction.setStatusTip('Open the folder of a calculation; its SAVE, BSE and GW directories are found automatically')
+        openAction.triggered.connect(self.chooseDataset)
+        fileMenu.addAction(openAction)
+
+        self.recentMenu = fileMenu.addMenu('Open &recent')
+        self.updateRecentMenu()
+
+        fileMenu.addSeparator()
+        quitAction = QAction('&Quit', self)
+        quitAction.setShortcut(QKeySequence.StandardKey.Quit)
+        quitAction.triggered.connect(self.close)
+        fileMenu.addAction(quitAction)
+
+        # View
+        viewMenu = self.menuBar().addMenu('&View')
+
+        pageGroup = QActionGroup(self)
+        self.pageActions = []
+        for index, text in enumerate(('&System', 'S&pectra', '&Wave function')):
+            action = QAction(text, self)
+            action.setCheckable(True)
+            action.setShortcut(QKeySequence(f'Ctrl+{index + 1}'))
+            action.triggered.connect(lambda checked=False, index=index: self.setPage(index))
+            pageGroup.addAction(action)
+            viewMenu.addAction(action)
+            self.pageActions.append(action)
+
+        viewMenu.addSeparator()
+        self.inspectorAction = QAction('Show &side panel', self)
+        self.inspectorAction.setCheckable(True)
+        self.inspectorAction.setChecked(self.settings.value('showInspector', True, type=bool))
+        self.inspectorAction.setShortcut(QKeySequence('Ctrl+B'))
+        self.inspectorAction.toggled.connect(self.setInspectorVisible)
+        viewMenu.addAction(self.inspectorAction)
+        self.setInspectorVisible(self.inspectorAction.isChecked())
+
+        themeMenu = viewMenu.addMenu('&Theme')
+        themeGroup = QActionGroup(self)
+        self.themeActions = {}
+        for mode in THEME_MODES:
+            action = QAction(mode, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, mode=mode: self.setTheme(mode))
+            themeGroup.addAction(action)
+            themeMenu.addAction(action)
+            self.themeActions[mode] = action
+
+        # Help
+        helpMenu = self.menuBar().addMenu('&Help')
+        aboutAction = QAction('&About Visual Excitons', self)
+        aboutAction.triggered.connect(self.showAbout)
+        helpMenu.addAction(aboutAction)
+
+    def createStatusBar(self):
+        self.datasetLabel = QLabel()
+        self.datasetLabel.setContentsMargins(8, 0, 8, 0)
+        self.statusBar().addPermanentWidget(self.datasetLabel)
+        self.updateDatasetLabel()
+
+    # Pages and panels
+
+    @Slot(int)
+    def setPage(self, index: int):
+        index = min(max(int(index), 0), self.stack.count() - 1)
+        self.stack.setCurrentIndex(index)
+        self.navigation.setCurrentIndex(index)
+        if hasattr(self, 'pageActions'):
+            self.pageActions[index].setChecked(True)
+
+    @Slot(bool)
+    def setInspectorVisible(self, visible: bool):
+        for page in (self.spectraPage, self.wavefunctionPage):
+            page.inspector.setVisible(visible)
+
+    @Slot(str)
+    def setTheme(self, mode: str):
+        self.theme.setMode(mode)
+        if hasattr(self, 'themeActions'):
+            self.themeActions[self.theme.mode].setChecked(True)
+
+    # Datasets
+
+    def recentDatasets(self):
+        try:
+            recent = json.loads(self.settings.value('recentDatasets', '[]'))
+        except (TypeError, ValueError):
+            recent = []
+        return [dataset for dataset in recent if isinstance(dataset, dict)]
+
+    def addRecentDataset(self, dataset):
+        recent = [d for d in self.recentDatasets() if d.get('save') != dataset.get('save')]
+        recent.insert(0, dataset)
+        self.settings.setValue('recentDatasets', json.dumps(recent[:MAX_RECENT_DATASETS]))
+        self.updateRecentMenu()
+
+    def updateRecentMenu(self):
+        self.recentMenu.clear()
+        recent = self.recentDatasets()
+        for dataset in recent:
+            action = QAction(datasetName(dataset), self)
+            action.setToolTip(dataset.get('save') or '')
+            action.setEnabled(datasetExists(dataset))
+            action.triggered.connect(lambda checked=False, dataset=dataset: self.openDataset(dataset))
+            self.recentMenu.addAction(action)
+        self.recentMenu.setEnabled(bool(recent))
+
+    def openInitialDataset(self):
+        for dataset in self.recentDatasets():
+            if datasetExists(dataset):
+                self.openDataset(dataset)
+                return
+        if DEFAULT_DATASET_FOLDER.is_dir():
+            dataset = findDataset(DEFAULT_DATASET_FOLDER)
+            if datasetExists(dataset):
+                self.openDataset(dataset)
+
+    @Slot()
+    def chooseDataset(self):
+        start = str(Path(self.dataset['save']).parent.parent) if self.dataset and self.dataset.get('save') else str(Path.cwd())
+        folder = QFileDialog.getExistingDirectory(self, 'Open dataset', start, QFileDialog.Option.ShowDirsOnly)
+        if not folder:
+            return
+        dataset = findDataset(folder)
+        if not datasetExists(dataset):
+            QMessageBox.warning(self, 'Open dataset', f'No SAVE directory (with ns.db1) found in\n{folder}')
+            return
+        if dataset['diago'] is None:
+            QMessageBox.warning(self, 'Open dataset', 'No BSE directory (with ndb.BS_diago_Q* files) found next to\n'
+                                f'{dataset["save"]}\n\nYou can choose it on the System page.')
+        self.openDataset(dataset)
+
+    def openDataset(self, dataset):
+        self.dataset = dict(dataset)
+        self.options.setGW(bool(dataset.get('gw')))
+        self.options.setSaveDir(dataset['save'])
+        if dataset.get('diago'):
+            self.options.setDiagoDir(dataset['diago'])
+        if dataset.get('qp'):
+            self.options.setQPDir(dataset['qp'])
+        self.addRecentDataset(self.dataset)
+        self.updateDatasetLabel()
+
+    @Slot()
+    def updateDatasetLabel(self, *args):
+        name = datasetName({'save': self.options.saveDir, 'diago': self.options.diagoDir,
+                            'qp': self.options.qpDir if self.options.gw else None})
+        parts = [name] if name else ['No dataset']
+        if self.options.variant:
+            parts.append(f'ibrav {self.options.ibrav} ({self.options.variant})' if self.options.ibrav != -1 else self.options.variant)
+        if self.options.nQpoints:
+            parts.append(f'{self.options.nQpoints} Q-points')
+        self.datasetLabel.setText('  ·  '.join(parts))
+        self.setWindowTitle(f'{name} — Visual Excitons' if name else 'Visual Excitons')
+
+    # Calculations
+
+    @Slot(str)
+    def onBusyStarted(self, message: str):
+        self.busyDepth += 1
+        if self.busyDepth == 1:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.statusBar().showMessage(message)
+        # Show the message before the calculation blocks the event loop
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
+    @Slot()
+    def onBusyFinished(self):
+        self.busyDepth = max(self.busyDepth - 1, 0)
+        if self.busyDepth == 0:
+            QApplication.restoreOverrideCursor()
+            self.statusBar().showMessage('Ready', 2000)
+
+    @Slot(str, str)
+    def onError(self, title: str, message: str):
+        QMessageBox.critical(self, title, message)
+
+    @Slot(int, int, float)
+    def onExcitonSelected(self, qIndex: int, excIndex: int, energy: float):
+        self.statusBar().showMessage(f'Selected exciton {excIndex} at Q-point {qIndex + 1} (E = {energy:.4f} eV)', 8000)
+
+    # Misc
+
+    def showAbout(self):
+        QMessageBox.about(self, 'About Visual Excitons',
+                          '<b>Visual Excitons</b><br>Visualization of excitonic properties computed with '
+                          '<a href="https://www.yambo-code.eu/">Yambo</a>, read through YamboPy.')
+
+    def closeEvent(self, event):
+        self.settings.setValue('geometry', self.saveGeometry())
+        self.settings.setValue('page', self.stack.currentIndex())
+        self.settings.setValue('theme', self.theme.mode)
+        self.settings.setValue('showInspector', self.inspectorAction.isChecked())
+        super().closeEvent(event)

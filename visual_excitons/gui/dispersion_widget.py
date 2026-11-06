@@ -2,6 +2,8 @@ from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
 import numpy as np
 
+from .theme import plotForeground
+
 
 class DispersionWidget(pg.PlotWidget):
     qPointSelected = Signal(list, bool)
@@ -68,7 +70,7 @@ class DispersionWidget(pg.PlotWidget):
 
         if self.singleQPoint:
             for i, y in enumerate(np.array(points)[:, 1]):
-                line = pg.InfiniteLine(pos = y, angle = 0, movable = False, pen = 'k')
+                line = pg.InfiniteLine(pos = y, angle = 0, movable = False, pen = plotForeground())
                 self.addItem(line)
 
         for i in range(len(points)):

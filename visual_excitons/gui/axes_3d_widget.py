@@ -140,6 +140,7 @@ class AxisGizmo(gl.GLViewWidget):
         self.showLattice = True
         self.showReciprocal = False
         self.showLabels = True
+        self.darkTheme = False
 
         self.arrowItems = []
         self.labelItems = []
@@ -180,6 +181,11 @@ class AxisGizmo(gl.GLViewWidget):
         for item in self.labelItems:
             item.setVisible(show)
 
+    def setDarkTheme(self, dark: bool):
+        """Label colors with enough contrast on a dark or light background."""
+        self.darkTheme = dark
+        self.rebuild()
+
     def clearArrows(self):
         for item in self.arrowItems + self.labelItems:
             self.removeItem(item)
@@ -217,7 +223,11 @@ class AxisGizmo(gl.GLViewWidget):
             self.addItem(arrow)
             self.arrowItems.append(arrow)
 
-            labelColor = style.get('labelColor', tuple(int(255 * 0.75 * c) for c in color[:3]) + (255,))
+            if self.darkTheme:
+                # Arrow color lightened towards white
+                labelColor = tuple(int(255 * (0.45 + 0.55 * c)) for c in color[:3]) + (255,)
+            else:
+                labelColor = style.get('labelColor', tuple(int(255 * 0.75 * c) for c in color[:3]) + (255,))
             font = QFont()
             font.setPointSize(11)
             font.setBold(True)

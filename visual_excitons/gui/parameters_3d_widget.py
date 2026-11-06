@@ -1,38 +1,15 @@
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDoubleValidator
-from PySide6.QtWidgets import QWidget, QPushButton, QSizePolicy, QVBoxLayout, QSpinBox, QLineEdit, QFormLayout
-from PySide6.QtWidgets import QSlider, QComboBox, QHBoxLayout, QGroupBox, QCheckBox, QLabel, QDoubleSpinBox
+from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
-
-class WrappedLabel(QLabel):
-    """
-    Word-wrapped label that always gets the height its text needs at its current
-    width. QFormLayout does not ask labels for their height for a given width, so
-    a plain word-wrapped QLabel gets clipped when the panel is narrow.
-    """
-
-    def __init__(self, text='', parent=None):
-        super().__init__(text, parent)
-        self.setWordWrap(True)
-
-    def _fitHeight(self):
-        height = self.heightForWidth(self.width())
-        if height > 0 and height != self.minimumHeight():
-            self.setMinimumHeight(height)
-
-    def setText(self, text):
-        super().setText(text)
-        self._fitHeight()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._fitHeight()
+from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 
 
-class Parameters3DWidget(QWidget):
+class Parameters3DWidget(Inspector):
     plotTypeChanged = Signal(int)
     signalReplotLattice = Signal()
     fixedParticlePosChanged = Signal()
@@ -48,7 +25,7 @@ class Parameters3DWidget(QWidget):
     viewLatticeChanged = Signal(Qt.CheckState)
     viewAtomNamesChanged = Signal(Qt.CheckState)
     viewBoundariesChanged = Signal(Qt.CheckState)
-    viewBondsChanged = Signal(bool)
+    viewBondsChanged = Signal(Qt.CheckState)
     showCartesianAxesChanged = Signal(bool)
     showLatticeVectorsChanged = Signal(bool)
     showReciprocalVectorsChanged = Signal(bool)
@@ -57,210 +34,160 @@ class Parameters3DWidget(QWidget):
     isoSetStyleChanged = Signal(int)
 
     def __init__(self, options: Options, calculations: Calculations):
-        QWidget.__init__(self)
+        Inspector.__init__(self)
 
         self.options = options
         self.calculations = calculations
         self.calculations.wfComputed.connect(self.onWfComputed)
+        self.calculations.excitonSelected.connect(self.onExcitonSelected)
 
-        # Calculation parameters
+        self.buildExcitonSection()
+        self.buildCalculationSection()
+        self.buildDisplaySection()
+        self.buildViewSection()
+        self.buildStructureSection()
+        self.buildAxesSection()
 
-        # Exciton index selector
+        self.alignLabels()
 
-        self.excitonIndexSpinBox = QSpinBox(minimum=1, maximum=10)
-        self.excitonIndexSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.excitonIndexSpinBox.setValue(1)
+    # Sections
 
-        # Particle type selector
+    def buildExcitonSection(self):
+        self.qPointSpinBox = QSpinBox(minimum=1, maximum=max(1, self.options.nQpoints))
+        self.qPointSpinBox.setToolTip('Q-point of the exciton: the file ndb.BS_diago_Q<n> of the BSE directory')
+        self.options.numQPointsChanged.connect(lambda n: self.qPointSpinBox.setMaximum(max(1, n)))
 
+        self.excitonIndexSpinBox = QSpinBox(minimum=1, maximum=99999)
+        self.excitonIndexSpinBox.setToolTip('Index of the exciton at that Q-point, in increasing energy')
+
+        for spinBox in (self.qPointSpinBox, self.excitonIndexSpinBox):
+            spinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            spinBox.valueChanged.connect(self.updateExcitonNote)
+
+        self.excitonNote = NoteLabel()
+
+        form = formLayout()
+        form.addRow('Q-point:', self.qPointSpinBox)
+        form.addRow('Exciton:', self.excitonIndexSpinBox)
+        form.addRow(self.excitonNote)
+        self.addSection('Exciton', form)
+        self.updateExcitonNote()
+
+    def buildCalculationSection(self):
         self.particleTypeComboBox = QComboBox()
-        self.particleTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.particleTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.particleTypeComboBox.addItems(['Hole', 'Electron'])
         self.particleTypeComboBox.currentIndexChanged.connect(self.updateParticlePositionWidgets)
 
-        # Particle position widgets
-
-        self.xParticlePosLineEdit = QLineEdit()
-        self.xParticlePosLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.xParticlePosLineEdit.setValidator(QDoubleValidator(0.0, 1.0, 4))
-        self.xParticlePosLineEdit.editingFinished.connect(self.particlePositionChanged)
-
-        self.yParticlePosLineEdit = QLineEdit()
-        self.yParticlePosLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.yParticlePosLineEdit.setValidator(QDoubleValidator(0.0, 1.0, 4))
-        self.yParticlePosLineEdit.editingFinished.connect(self.particlePositionChanged)
-
-        self.zParticlePosLineEdit = QLineEdit()
-        self.zParticlePosLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.zParticlePosLineEdit.setValidator(QDoubleValidator(0.0, 1.0, 4))
-        self.zParticlePosLineEdit.editingFinished.connect(self.particlePositionChanged)
-
+        # Fixed particle position, in crystal coordinates of the unit cell
+        self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit = (self.newCoordinateLineEdit() for _ in range(3))
+        for lineEdit in (self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit):
+            lineEdit.setValidator(QDoubleValidator(0.0, 1.0, 4))
+            lineEdit.setToolTip('Crystal coordinates (fractions of a, b, c) in the unit cell')
+            lineEdit.editingFinished.connect(self.particlePositionChanged)
         self.updateParticlePositionWidgets(self.particleTypeComboBox.currentIndex())
 
         particleLayout = QHBoxLayout()
-        particleLayout.addWidget(self.xParticlePosLineEdit)
-        particleLayout.addWidget(self.yParticlePosLineEdit)
-        particleLayout.addWidget(self.zParticlePosLineEdit)
+        for lineEdit in (self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit):
+            particleLayout.addWidget(lineEdit)
 
-        # Supercell widgets
-
-        self.xSupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
-        self.xSupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.xSupercellSpinBox.setValue(1)
-        self.xSupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
-        self.xSupercellSpinBox.valueChanged.connect(self.supercellChanged)
-
-        self.ySupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
-        self.ySupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.ySupercellSpinBox.setValue(1)
-        self.ySupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
-        self.ySupercellSpinBox.valueChanged.connect(self.supercellChanged)
-
-        self.zSupercellSpinBox = QSpinBox(minimum=1, maximum=999, singleStep=2)
-        self.zSupercellSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.zSupercellSpinBox.setValue(1)
-        self.zSupercellSpinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
-        self.zSupercellSpinBox.valueChanged.connect(self.supercellChanged)
-
+        # Supercell: odd sizes only
+        self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox = (QSpinBox(minimum=1, maximum=999, singleStep=2) for _ in range(3))
         supercellLayout = QHBoxLayout()
-        supercellLayout.addWidget(self.xSupercellSpinBox)
-        supercellLayout.addWidget(self.ySupercellSpinBox)
-        supercellLayout.addWidget(self.zSupercellSpinBox)
+        for spinBox in (self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox):
+            spinBox.setValue(1)
+            spinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
+            spinBox.valueChanged.connect(self.supercellChanged)
+            supercellLayout.addWidget(spinBox)
 
-        # Wavefunction cutoff (Ry)
-
-        self.wfCutoffLineEdit = QLineEdit()
-        self.wfCutoffLineEdit.setValidator(QDoubleValidator())
-        self.wfCutoffLineEdit.setText(f"{self.options.wfCutoffRy}")
-        self.wfCutoffLineEdit.editingFinished.connect(self.updateWfCutoff)
-        self.wfCutoffLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-
-        # Wavefunction form layout
-
-        wfFormLayout = QFormLayout()
-        wfFormLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        wfFormLayout.addRow('Exciton index:', self.excitonIndexSpinBox)
-        wfFormLayout.addRow('Fixed particle type:', self.particleTypeComboBox)
-        wfFormLayout.addRow('Particle position [X,Y,Z]:', particleLayout)
+        self.wfCutoffSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10000.0, singleStep=1.0, decimals=1, suffix=' Ry')
+        self.wfCutoffSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.wfCutoffSpinBox.setValue(self.options.wfCutoffRy)
+        self.wfCutoffSpinBox.setToolTip('Plane-wave cutoff of the wave function: higher values give a finer real-space grid')
+        self.wfCutoffSpinBox.valueChanged.connect(self.options.setWfCutoff)
 
         # Shown after computing: the position is snapped to the wave-function grid
-        self.particleGridLabel = WrappedLabel()
-        self.particleGridLabel.setStyleSheet('color: gray')
+        self.particleGridLabel = NoteLabel()
         self.particleGridLabel.hide()
-        # Spanning both columns, so the wrapped text has the full width of the form
-        wfFormLayout.addRow(self.particleGridLabel)
-        wfFormLayout.addRow('Supercell [X,Y,Z]:', supercellLayout)
-        wfFormLayout.addRow('Wave-function cutoff (Ry):', self.wfCutoffLineEdit)
 
-        # Compute wavefunction button
-
-        computeWfButton = QPushButton('Compute WF')
-        computeWfButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        computeWfButton = QPushButton('Compute wave function')
         computeWfButton.clicked.connect(self.computeWf)
 
-        # Layout and groupbox
+        form = formLayout()
+        form.addRow('Fixed particle:', self.particleTypeComboBox)
+        form.addRow('Position (a, b, c):', particleLayout)
+        # Spanning both columns, so the wrapped text has the full width of the form
+        form.addRow(self.particleGridLabel)
+        form.addRow('Supercell:', supercellLayout)
+        form.addRow('Cutoff:', self.wfCutoffSpinBox)
+        form.addRow(computeWfButton)
+        self.addSection('Calculation', form)
 
-        calcParamsLayout = QVBoxLayout()
-        calcParamsLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        calcParamsLayout.addLayout(wfFormLayout)
-        calcParamsLayout.addWidget(computeWfButton)
-
-        calcParamsGroupBox = QGroupBox('Calculation parameters')
-        calcParamsGroupBox.setLayout(calcParamsLayout)
-
-        # Plot parameters
-
-        # Representation type
-
+    def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
-        self.plotTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.plotTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.plotTypeComboBox.addItems(['Isosurface', 'Isosurface set', 'Volumetric'])
         self.plotTypeComboBox.currentIndexChanged.connect(self.plotTypeChanged)
 
-        # Isosurface level widget
-
         self.isoLevelTickMax = 1000
+        self.opacityTickMax = 1000
 
-        isoLevelSlider = QSlider()
-        isoLevelSlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        isoLevelSlider.setOrientation(Qt.Orientation.Horizontal)
-        isoLevelSlider.setRange(0, self.isoLevelTickMax + 1)
-        isoLevelSlider.setValue(self.options.isoLevel() * self.isoLevelTickMax)
+        def fraction(tickMax):
+            return lambda tick: f'{tick / tickMax:.2f}'
+
+        isoLevelSlider = ValueSlider(0, self.isoLevelTickMax, round(self.options.isoLevel() * self.isoLevelTickMax), fraction(self.isoLevelTickMax))
+        isoLevelSlider.setToolTip('Probability density of the isosurface, relative to its maximum')
         isoLevelSlider.valueChanged.connect(self.setIsoLevel)
 
-        # Isosurface set cardinality widget
-
         numIsoLevelsSpinBox = QSpinBox(minimum=1, maximum=999)
-        numIsoLevelsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        numIsoLevelsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         numIsoLevelsSpinBox.setValue(self.options.numIsoLevels())
         numIsoLevelsSpinBox.valueChanged.connect(self.setNumIsoLevels)
 
-        # Opacity widgets of the single isosurface and of the isosurface set
+        isoSetStyleComboBox = QComboBox()
+        isoSetStyleComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        isoSetStyleComboBox.addItems(['Lit, edges emphasized', 'Edges only (x-ray)'])
+        isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
+        isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
 
-        self.opacityTickMax = 1000
-
-        isoOpacitySlider = QSlider()
-        isoOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        isoOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
-        isoOpacitySlider.setRange(0, self.opacityTickMax)
-        isoOpacitySlider.setValue(round(self.options.isoOpacity() * self.opacityTickMax))
+        isoOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.isoOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
         isoOpacitySlider.valueChanged.connect(self.setIsoOpacity)
 
-        isoSetOpacitySlider = QSlider()
-        isoSetOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        isoSetOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
-        isoSetOpacitySlider.setRange(0, self.opacityTickMax)
-        isoSetOpacitySlider.setValue(round(self.options.isoSetOpacity() * self.opacityTickMax))
+        isoSetOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.isoSetOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
         isoSetOpacitySlider.valueChanged.connect(self.setIsoSetOpacity)
 
-        # Slice density widget
-
-        sliceDensitySpinBox = QSpinBox(minimum=1, maximum=999)
-        sliceDensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        sliceDensitySpinBox.setValue(self.options.sliceDensity())
-        sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
-
-        # Volume opacity and contrast widgets
-
-        volumeOpacitySlider = QSlider()
-        volumeOpacitySlider.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        volumeOpacitySlider.setOrientation(Qt.Orientation.Horizontal)
-        volumeOpacitySlider.setRange(0, self.opacityTickMax)
-        volumeOpacitySlider.setValue(round(self.options.volumeOpacity() * self.opacityTickMax))
+        volumeOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.volumeOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
         volumeOpacitySlider.setToolTip('Opacity along the densest line of sight through the density')
         volumeOpacitySlider.valueChanged.connect(self.setVolumeOpacity)
 
         volumeContrastSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10.0, singleStep=0.1, decimals=2)
-        volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         volumeContrastSpinBox.setValue(self.options.volumeContrast())
         volumeContrastSpinBox.setToolTip('Power applied to the density for the opacity:\n'
                                          'above 1 fades low densities so the core stands out,\n'
                                          'below 1 brings out the low-density tails')
         volumeContrastSpinBox.valueChanged.connect(self.setVolumeContrast)
 
-        # Plot form layout
+        sliceDensitySpinBox = QSpinBox(minimum=1, maximum=999)
+        sliceDensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        sliceDensitySpinBox.setValue(self.options.sliceDensity())
+        sliceDensitySpinBox.setToolTip('Rendering quality: more slices give a smoother volume')
+        sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
 
-        plotFormLayout = QFormLayout()
-        plotFormLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        plotFormLayout.addRow('Plot type:', self.plotTypeComboBox)
-        plotFormLayout.addRow('Iso level:', isoLevelSlider)
-        plotFormLayout.addRow('Number of levels:', numIsoLevelsSpinBox)
-
-        isoSetStyleComboBox = QComboBox()
-        isoSetStyleComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        isoSetStyleComboBox.addItems(['Lit, edges emphasized', 'Edges only (x-ray)'])
-        isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
-        isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
-        plotFormLayout.addRow('Isosurface set style:', isoSetStyleComboBox)
-        plotFormLayout.addRow('Isosurface opacity:', isoOpacitySlider)
-        plotFormLayout.addRow('Isosurface set opacity:', isoSetOpacitySlider)
-        plotFormLayout.addRow('Volume opacity:', volumeOpacitySlider)
-        plotFormLayout.addRow('Volume contrast:', volumeContrastSpinBox)
-        plotFormLayout.addRow('Slices per voxel:', sliceDensitySpinBox)
+        form = formLayout()
+        form.addRow('Plot type:', self.plotTypeComboBox)
+        form.addRow('Iso level:', isoLevelSlider)
+        form.addRow('Levels:', numIsoLevelsSpinBox)
+        form.addRow('Style:', isoSetStyleComboBox)
+        form.addRow('Opacity:', isoOpacitySlider)
+        form.addRow('Opacity:', isoSetOpacitySlider)
+        form.addRow('Opacity:', volumeOpacitySlider)
+        form.addRow('Contrast:', volumeContrastSpinBox)
+        form.addRow('Slices per voxel:', sliceDensitySpinBox)
 
         # Rows shown only for the plot types they apply to
         # (0: isosurface, 1: isosurface set, 2: volumetric)
-        self.plotFormLayout = plotFormLayout
+        self.plotFormLayout = form
         self.plotTypeRows = [
             (isoLevelSlider, {0}),
             (numIsoLevelsSpinBox, {1}),
@@ -274,21 +201,12 @@ class Parameters3DWidget(QWidget):
         self.plotTypeComboBox.currentIndexChanged.connect(self.updatePlotTypeRows)
         self.updatePlotTypeRows(self.plotTypeComboBox.currentIndex())
 
-        # Groupbox
+        self.addSection('Display', form)
 
-        plotParamsGroupBox = QGroupBox('Plot parameters')
-        plotParamsGroupBox.setLayout(plotFormLayout)
-
-        # View parameters
-
-        centerViewButton = QPushButton('Center view')
-        centerViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        centerViewButton.clicked.connect(self.centerViewClicked)
-
+    def buildViewSection(self):
         # View direction: basis, presets and custom direction / up vectors
-
         self.viewBasisComboBox = QComboBox()
-        self.viewBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.viewBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.viewBasisComboBox.addItems(self.options.viewBases)
         self.viewBasisComboBox.setToolTip('Basis of the direction and up vectors:\n'
                                           'Cartesian: x, y, z\n'
@@ -297,7 +215,7 @@ class Parameters3DWidget(QWidget):
         self.viewBasisComboBox.currentIndexChanged.connect(self.onViewBasisChanged)
 
         self.viewPresetComboBox = QComboBox()
-        self.viewPresetComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.viewPresetComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.viewPresetComboBox.activated.connect(self.onViewPresetActivated)
 
         self.viewDirLineEdits = [self.newVectorLineEdit() for _ in range(3)]
@@ -314,25 +232,40 @@ class Parameters3DWidget(QWidget):
             viewUpLayout.addWidget(lineEdit)
 
         applyViewButton = QPushButton('Apply')
-        applyViewButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         applyViewButton.clicked.connect(self.applyView)
-        viewDirLayout.addWidget(applyViewButton)
+
+        centerViewButton = QPushButton('Center')
+        centerViewButton.setToolTip('Center the view on the plotted cells')
+        centerViewButton.clicked.connect(self.centerViewClicked)
+
+        buttonsLayout = QHBoxLayout()
+        buttonsLayout.addWidget(applyViewButton)
+        buttonsLayout.addWidget(centerViewButton)
+        buttonsLayout.addStretch(1)
 
         self.reverseViewCheckBox = QCheckBox('View from the opposite side')
-        self.reverseViewCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.reverseViewCheckBox.setToolTip('Look along minus the direction, i.e. with it pointing towards the viewer')
         self.reverseViewCheckBox.setChecked(True)
         self.reverseViewCheckBox.toggled.connect(self.applyView)
 
+        projectionCheckBox = QCheckBox('Orthographic projection')
+        projectionCheckBox.setCheckState(Qt.CheckState.Checked)
+        projectionCheckBox.checkStateChanged.connect(self.projectionChanged)
+
         self.viewStatusLabel = QLabel()
-        self.viewStatusLabel.setStyleSheet('color: red')
+        self.viewStatusLabel.setStyleSheet('color: #e05050')
+        self.viewStatusLabel.setWordWrap(True)
         self.viewStatusLabel.setVisible(False)
 
-        viewFormLayout = QFormLayout()
-        viewFormLayout.addRow('Basis:', self.viewBasisComboBox)
-        viewFormLayout.addRow('Preset:', self.viewPresetComboBox)
-        viewFormLayout.addRow('Direction:', viewDirLayout)
-        viewFormLayout.addRow('Up (optional):', viewUpLayout)
+        form = formLayout()
+        form.addRow('Basis:', self.viewBasisComboBox)
+        form.addRow('Preset:', self.viewPresetComboBox)
+        form.addRow('Direction:', viewDirLayout)
+        form.addRow('Up:', viewUpLayout)
+        form.addRow('', buttonsLayout)
+        form.addRow(self.viewStatusLabel)
+        form.addRow(self.reverseViewCheckBox)
+        form.addRow(projectionCheckBox)
 
         # Lattice bases need the cell from the SAVE database
         self.setLatticeBasesEnabled(self.options.hasCell())
@@ -342,125 +275,99 @@ class Parameters3DWidget(QWidget):
         self.viewPresetComboBox.setCurrentText('x + y + z')
         self.onViewPresetActivated(self.viewPresetComboBox.currentIndex(), apply=False)
 
-        projectionCheckBox = QCheckBox('Orthographic projection')
-        projectionCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        projectionCheckBox.setCheckState(Qt.CheckState.Checked)
-        projectionCheckBox.checkStateChanged.connect(self.projectionChanged)
+        self.addSection('View', form)
 
-        viewLatticeCheckBox = QCheckBox('View lattice')
-        viewLatticeCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        viewLatticeCheckBox.setCheckState(Qt.CheckState.Checked)
-        viewLatticeCheckBox.checkStateChanged.connect(self.viewLatticeChanged)
-
-        viewAtomNamesCheckBox = QCheckBox('View atom names')
-        viewAtomNamesCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        viewAtomNamesCheckBox.setCheckState(Qt.CheckState.Checked)
-        viewAtomNamesCheckBox.checkStateChanged.connect(self.viewAtomNamesChanged)
-
-        viewBoundariesCheckBox = QCheckBox('View boundaries')
-        viewBoundariesCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        viewBoundariesCheckBox.setCheckState(Qt.CheckState.Checked)
-        viewBoundariesCheckBox.checkStateChanged.connect(self.viewBoundariesChanged)
-
-        # View sublayout
-
-        # View layout
-
-        viewLayout = QVBoxLayout()
-        viewLayout.addWidget(centerViewButton)
-        viewLayout.addLayout(viewFormLayout)
-        viewLayout.addWidget(self.reverseViewCheckBox)
-        viewLayout.addWidget(self.viewStatusLabel)
-        viewLayout.addWidget(projectionCheckBox)
-        viewLayout.addWidget(viewLatticeCheckBox)
-        viewLayout.addWidget(viewAtomNamesCheckBox)
-        viewLayout.addWidget(viewBoundariesCheckBox)
-
-        # Groupbox
-
-        viewParamsGroupBox = QGroupBox('View')
-        viewParamsGroupBox.setLayout(viewLayout)
-
-        # Atoms and bonds
-
-        viewBondsCheckBox = QCheckBox('View bonds')
-        viewBondsCheckBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        viewBondsCheckBox.setChecked(True)
-        viewBondsCheckBox.setToolTip('Bonds crossing the supercell boundary are drawn up to their midpoint')
-        viewBondsCheckBox.toggled.connect(self.viewBondsChanged)
+    def buildStructureSection(self):
+        visibilityLayout = QGridLayout()
+        visibilityLayout.setContentsMargins(0, 0, 0, 0)
+        for i, (text, signal, toolTip) in enumerate([
+            ('Atoms', self.viewLatticeChanged, ''),
+            ('Atom names', self.viewAtomNamesChanged, ''),
+            ('Bonds', self.viewBondsChanged, 'Bonds crossing the supercell boundary are drawn up to their midpoint'),
+            ('Cell boundaries', self.viewBoundariesChanged, ''),
+        ]):
+            box = QCheckBox(text)
+            box.setChecked(True)
+            box.setToolTip(toolTip)
+            box.checkStateChanged.connect(signal)
+            visibilityLayout.addWidget(box, i // 2, i % 2)
 
         atomScaleSpinBox = QDoubleSpinBox(minimum=0.05, maximum=1.5, singleStep=0.05, decimals=2)
-        atomScaleSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         atomScaleSpinBox.setValue(self.options.atomScale())
         atomScaleSpinBox.setToolTip('Atom radius as a fraction of its covalent radius\n'
                                     '(1: atoms bonded at their covalent radii touch)')
         atomScaleSpinBox.valueChanged.connect(self.setAtomScale)
 
         bondToleranceSpinBox = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2)
-        bondToleranceSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         bondToleranceSpinBox.setValue(self.options.bondTolerance())
         bondToleranceSpinBox.setToolTip('Atoms are bonded when closer than this factor\n'
                                         'times the sum of their covalent radii')
         bondToleranceSpinBox.valueChanged.connect(self.setBondTolerance)
 
         bondRadiusSpinBox = QDoubleSpinBox(minimum=0.01, maximum=0.5, singleStep=0.01, decimals=2, suffix=' Å')
-        bondRadiusSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         bondRadiusSpinBox.setValue(self.options.bondRadius())
         bondRadiusSpinBox.valueChanged.connect(self.setBondRadius)
 
         bondColorComboBox = QComboBox()
-        bondColorComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         bondColorComboBox.addItems(['Atom colors', 'Uniform grey'])
         bondColorComboBox.setCurrentIndex(self.options.bondColoring())
         bondColorComboBox.setToolTip('Atom colors: each half of a bond in the color of its atom')
         bondColorComboBox.currentIndexChanged.connect(self.setBondColoring)
 
-        atomsFormLayout = QFormLayout()
-        atomsFormLayout.addRow(viewBondsCheckBox)
-        atomsFormLayout.addRow('Atom radius scale:', atomScaleSpinBox)
-        atomsFormLayout.addRow('Bond tolerance:', bondToleranceSpinBox)
-        atomsFormLayout.addRow('Bond radius:', bondRadiusSpinBox)
-        atomsFormLayout.addRow('Bond color:', bondColorComboBox)
+        for widget in (atomScaleSpinBox, bondToleranceSpinBox, bondRadiusSpinBox, bondColorComboBox):
+            widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
-        atomsGroupBox = QGroupBox('Atoms and bonds')
-        atomsGroupBox.setLayout(atomsFormLayout)
+        form = formLayout()
+        form.addRow(visibilityLayout)
+        form.addRow('Atom radius scale:', atomScaleSpinBox)
+        form.addRow('Bond tolerance:', bondToleranceSpinBox)
+        form.addRow('Bond radius:', bondRadiusSpinBox)
+        form.addRow('Bond color:', bondColorComboBox)
+        self.addSection('Structure', form, expanded=False)
 
-        # Axes gizmo and cell parameters
-
-        axesLayout = QVBoxLayout()
-        for text, signal, checked, tooltip in [
-            ('Cartesian axes x, y, z', self.showCartesianAxesChanged, True, 'Grey arrows in the axes gizmo'),
-            ('Lattice vectors a, b, c', self.showLatticeVectorsChanged, True, 'Red, green and blue arrows in the axes gizmo'),
-            ('Reciprocal vectors a*, b*, c*', self.showReciprocalVectorsChanged, False, 'Light red, green and blue arrows in the axes gizmo'),
+    def buildAxesSection(self):
+        layout = QGridLayout()
+        for i, (text, signal, checked, tooltip) in enumerate([
+            ('Cartesian x, y, z', self.showCartesianAxesChanged, True, 'Grey arrows in the axes gizmo'),
+            ('Lattice a, b, c', self.showLatticeVectorsChanged, True, 'Red, green and blue arrows in the axes gizmo'),
+            ('Reciprocal a*, b*, c*', self.showReciprocalVectorsChanged, False, 'Light red, green and blue arrows in the axes gizmo'),
             ('Axis labels', self.showAxisLabelsChanged, True, 'Labels at the tips of the gizmo arrows'),
             ('Cell parameters', self.showCellInfoChanged, True, 'Lattice constants and angles in the top-left corner'),
-        ]:
-            checkBox = QCheckBox(text)
-            checkBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-            checkBox.setToolTip(tooltip)
-            checkBox.setChecked(checked)
-            checkBox.toggled.connect(signal)
-            axesLayout.addWidget(checkBox)
+        ]):
+            box = QCheckBox(text)
+            box.setToolTip(tooltip)
+            box.setChecked(checked)
+            box.toggled.connect(signal)
+            layout.addWidget(box, i // 2, i % 2)
 
-        axesNoteLabel = QLabel('Each set of arrows is scaled so that its longest vector has the same length.')
-        axesNoteLabel.setWordWrap(True)
-        axesNoteLabel.setStyleSheet('color: gray')
-        axesLayout.addWidget(axesNoteLabel)
+        layout.addWidget(NoteLabel('Each set of arrows is scaled so that its longest vector has the same length.'), 3, 0, 1, 2)
+        self.addSection('Axes', layout, expanded=False)
 
-        axesGroupBox = QGroupBox('Axes')
-        axesGroupBox.setLayout(axesLayout)
+    def newCoordinateLineEdit(self):
+        lineEdit = QLineEdit()
+        lineEdit.setMaximumWidth(70)
+        return lineEdit
 
-        # Main layout
+    # Exciton
 
-        mainLayout = QVBoxLayout()
-        mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        mainLayout.addWidget(calcParamsGroupBox)
-        mainLayout.addWidget(plotParamsGroupBox)
-        mainLayout.addWidget(viewParamsGroupBox)
-        mainLayout.addWidget(atomsGroupBox)
-        mainLayout.addWidget(axesGroupBox)
+    @Slot(int, int, float)
+    def onExcitonSelected(self, qIndex: int, excIndex: int, energy: float):
+        for spinBox, value in ((self.qPointSpinBox, qIndex + 1), (self.excitonIndexSpinBox, excIndex)):
+            spinBox.blockSignals(True)
+            spinBox.setValue(value)
+            spinBox.blockSignals(False)
+        self.updateExcitonNote()
 
-        self.setLayout(mainLayout)
+    def qPointIndex(self):
+        return self.qPointSpinBox.value() - 1
+
+    @Slot()
+    def updateExcitonNote(self):
+        selected = self.calculations.selectedExciton
+        if selected is not None and selected[:2] == (self.qPointIndex(), self.excitonIndexSpinBox.value()):
+            self.excitonNote.setText(f'Selected in Spectra: E = {selected[2]:.4f} eV')
+        else:
+            self.excitonNote.setText('Click a bright exciton in an absorption spectrum to select it here.')
 
     @Slot(int)
     def updateParticlePositionWidgets(self, index: int):
@@ -503,18 +410,15 @@ class Parameters3DWidget(QWidget):
         self.fixedParticlePosChanged.emit()
 
     @Slot()
-    def updateWfCutoff(self):
-        self.options.setWfCutoff(float(self.wfCutoffLineEdit.text()))
-
-    @Slot()
     def computeWf(self):
+        q_index = self.qPointIndex()
         exc_index = self.excitonIndexSpinBox.value()
         fixed_particle = self.options.particleType()
         fixed_position = self.options.particlePosition()
         cutoff = self.options.wfCutoff()
         supercell = [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
 
-        self.calculations.computeExcitonWaveFunction(exc_index=exc_index, fixed_particle=fixed_particle, fixed_position=fixed_position, cutoff_ry=cutoff, supercell=supercell)
+        self.calculations.computeExcitonWaveFunction(q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle, fixed_position=fixed_position, cutoff_ry=cutoff, supercell=supercell)
 
     @Slot(int)
     def setIsoLevel(self, tick: int):

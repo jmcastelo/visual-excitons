@@ -90,45 +90,56 @@ python visual_excitons/main.py
 
 ## Usage instructions
 
-Visual Excitons provides the user with three tabs: `Options`, `2D Graphs` and `3D Graphs`.
+The main window has a navigation bar on the left with three pages, following the usual workflow:
 
-### Options
+- **System**: the data of a calculation, its crystal lattice and the Q-path.
+- **Spectra**: excitonic dispersion, absorption spectra and band structure.
+- **Wave function**: the exciton wave function in real space, with the crystal structure.
 
-Within this tab you can select three directories where to find the relevant files containing the data of your calculations:
+`Ctrl+1`, `Ctrl+2` and `Ctrl+3` switch between them too. The pages with plots have a side panel on the right made of collapsible sections. Click a section header to open or close it; the panel scrolls when its open sections do not fit. `View › Show side panel` (`Ctrl+B`) hides it to give the plots the whole window.
 
-- **SAVE** Directory: contains a valid `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters should be automatically detected from it.
-- **Diago** Directory: contains several valid `ndb.BS_diago_Q*` files corresponding to a Q-point each.
-- **QP** Directory: contains a valid `ndb.QP` file.
+The status bar shows the dataset loaded (name, Bravais lattice and number of Q-points) and what is being computed. During a calculation the cursor turns into a wait cursor; errors are reported in a dialog.
 
-Note that this set of files must be coherent, so they must correspond to calculations performed on the same system.
+**Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen under `Appearance` are kept.
 
-To each Bravais lattice type, a Brillouin zone corresponds, with a set of high-symmetry points which are identified by a label and three fractional coordinates relative to the reciprocal basis vectors, all displayed on a table. You can add and remove extra special points if you right-click on the table to open a corresponding action menu.
+The window remembers its size, the page, the theme and the recent datasets between sessions.
 
-Also, you can choose a Q-path different from the default one, consistent with your calculations, by specifying the labels that identify the high-symmetry points, and possibly the extra special points you may have defined. Since interpolation of the relevant magnitudes is performed on this Q-path, the number of points comprising it or their density can be selected. When you are happy with your choices, press the `Set Q-Path` button.
+### Datasets
 
-#### Default datasets
+A dataset is the set of directories with the databases of one calculation:
 
-By default, and for testing purposes, data files corresponding to a `BiI3` calculation (not included in the repository) are selected, the Q-path of which must be chosen as `LGZF` instead of the default one.
+- **SAVE** directory: contains `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters are detected from it.
+- **BSE** directory: contains the `ndb.BS_diago_Q*` files, one per Q-point.
+- **GW** directory: contains `ndb.QP`, for DFT+GW+BSE calculations.
 
-### 2D Graphs
+These files must be coherent, i.e. correspond to calculations of the same system.
 
-This tab contains three customizable plots for the excitons, and several options and actions widgets. They are arranged on regions of the tab which can be resized and hidden by dragging the handle on the borders between regions.
+`File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. The calculation type is set from whether a GW directory was found. `File › Open recent` lists the last datasets.
 
-- **Dispersion**:
-  - Choose the number of excitons contributing to this graph on the text box and press the `Compute Dispersion` button.
-  - Left-click on its points to plot their contribution to the absorption of the system.
-  - Press the `CTRL` key while clicking to select a set of points whose absorption plots will be displayed together.
+On start, the most recent dataset is opened again. On the first run, the `BiI3` test dataset in `data/BiI3_Bulk_8x8x8` is opened if present (it is not included in the repository). Its Q-path must be set to `LGZF` instead of the default one.
 
-- **Absorption**:
-  - The range and resolution (in eV) of this graph can be changed with associated text boxes.
-  - You can filter by intensity the points corresponding to the excitons on the absorption curves.
-  - Their labels can be toggled with the `Show Labels` button.
+### System
 
-- **Band structure**:
-  - Excitonic weights are displayed.
-  - Only for Gamma points, at the moment.
+- **Data**: the calculation type and the three directories, which can also be chosen one by one with `Browse…` or typed in. A green tick or a red cross below each shows whether its databases were found.
+- **Crystal lattice**: the detected `ibrav` and variant, and the lattice parameters `a`, `b`, `c` in Å (hover over them for their value in Bohr) and `α`, `β`, `γ` in degrees.
+- **Q-path**: the labels of the high-symmetry points along the path, as a string such as `GLB1,BZGX` (commas separate disconnected sections), and its sampling, by number of points or by density. Press `Set Q-path` to apply it.
+- **High-symmetry points**: the points of the Brillouin zone of the lattice, with their fractional coordinates `k₁`, `k₂`, `k₃` relative to the reciprocal lattice vectors. Right-click the table to add extra points, which can then be used in the Q-path, or to delete them.
 
-The visual style of the graphs can be changed via a set of widgets on the right. You can explore them to customize the colors, widths, fonts, etc. of the axes, curves, points and the rest of the elements of the graphs.
+### Spectra
+
+This page contains three plots: the excitonic dispersion and band structure on the left, and the absorption spectra on the right. Their regions can be resized by dragging the handles between them.
+
+Side panel:
+
+- **Dispersion**: choose the number of excitons and press `Compute dispersion`. Then click a point of the dispersion to plot the absorption spectrum at its Q-point; `Ctrl`-click to keep several spectra together.
+- **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
+- **Selected exciton**: click a bright exciton on an absorption spectrum to select it. Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected on the Wave function page too. `Wave function of this exciton` goes to that page.
+- **Appearance**: the style of the plots (colors, widths, fonts, etc. of the axes, curves, points, legend and the rest of the elements).
+
+Band structure:
+
+- Excitonic weights are displayed.
+- Only for Gamma points, at the moment.
 
 Thanks to PyQtGraph, you can explore the 2D graphs using the mouse. Left-clicking on a graph and dragging you can move it, and with the wheel you can scale it proportionally on both axes. The same is true for each individual axis. Also, several plot options can be changed, and you can take some actions on the graphs too, by right-clicking on them, which opens a menu with the following entries:
 
@@ -138,13 +149,23 @@ Thanks to PyQtGraph, you can explore the 2D graphs using the mouse. Left-clickin
 - **Plot Options**: feel free to explore them!
 - **Export**: allows exporting the plot to different formats (CSV, HDF5, Image File, Matplotlib Window or SVG).
 
-### 3D Graphs
+### Wave function
 
-Currently under active development, this tabs plots 3D visualizations of the probability density of the wave function of excitons. Several types of plots are being developed: isosurfaces, isosurfaces-set and volumetric graphs.
+Currently under active development, this page plots 3D visualizations of the probability density of the wave function of excitons, together with the crystal structure.
+
+#### Computing the wave function
+
+- **Exciton**: the `Q-point` (the file `ndb.BS_diago_Q<n>`) and the index of the `Exciton` at that Q-point, in increasing energy. Selecting an exciton on the Spectra page fills them in, and its energy is then shown below.
+- **Calculation**:
+  - `Fixed particle`: the hole or the electron, whose position is fixed while the probability density of the other one is computed.
+  - `Position (a, b, c)`: its position in crystal coordinates of the unit cell. After computing, it is moved to the nearest point of the real-space grid of the wave function, as explained in the note shown below it.
+  - `Supercell`: the number of unit cells along each lattice vector. Only odd sizes are allowed, so that the fixed particle sits in the central cell.
+  - `Cutoff`: the plane-wave cutoff of the wave function, in Ry. Higher values give a finer real-space grid, at a higher cost.
+  - Press `Compute wave function`.
 
 #### Plot types and rendering
 
-The `Plot parameters` group on the right controls how the probability density is displayed. Choose the display mode with `Plot type`; only the controls of the selected mode are shown:
+The `Display` section of the side panel controls how the probability density is displayed. Choose the display mode with `Plot type`; only the controls of the selected mode are shown:
 
 - **Isosurface**: a single translucent surface at the level set with the `Iso level` slider, with lighting that reveals its 3D shape.
 - **Isosurface set**: a number of nested translucent surfaces (`Number of levels`), evenly spaced between the lowest and highest density and colored with the viridis colormap. Their look is chosen with `Isosurface set style`:
@@ -165,7 +186,7 @@ The 3D view uses antialiasing, so edges of atoms, lines and surfaces are smooth.
 
 #### View directions
 
-The `View` group on the right lets you look at the lattice and the wave function from well-defined directions, given either in Cartesian coordinates or in terms of the crystal lattice.
+The `View` section of the side panel lets you look at the lattice and the wave function from well-defined directions, given either in Cartesian coordinates or in terms of the crystal lattice.
 
 **Convention.** A view direction is the *direction of projection*: the direction from the viewer into the screen, as in [VESTA](http://jp-minerals.org/vesta/en/doc/VESTAch10.html). For example, viewing along lattice direction `[0 0 1]` means looking down the `c` axis, with `c` pointing away from you. The literature is not unanimous on this sign. In transmission electron microscopy, for instance, the zone axis is usually taken antiparallel to the electron beam, i.e. pointing towards the observer ([JEMS](https://www.jems-swiss.ch/Home/Help/ZoneAxis.htm), [Wikipedia: Zone axis](https://en.wikipedia.org/wiki/Zone_axis)). The `View from the opposite side` checkbox flips the direction, so both conventions are available. It is checked by default, so the initial view (Cartesian `x + y + z`) places the camera in the positive octant, looking towards the origin.
 
@@ -197,15 +218,14 @@ Note that lattice directions are defined with respect to the cell stored in `ns.
 - `quaternion` (current default): mouse dragging rotates freely, like a trackball, and any up vector is honored.
 - `euler`: mouse dragging works like a turntable that keeps `z` vertical on the screen, so a custom up vector only takes effect when looking along `±z`.
 
-Other view controls in the same group:
+Other view controls in the same section:
 
-- `Center view` centers the camera on the plotted cells.
+- `Center` centers the camera on the plotted cells.
 - `Orthographic projection` switches between orthographic projection (the default, where parallel lines stay parallel, convenient to inspect crystal structures) and perspective projection.
-- Checkboxes toggle the visibility of the lattice, the atom names and the cell boundaries.
 
 #### Atoms and bonds
 
-The `Atoms and bonds` group on the right shows the structure in ball-and-stick style.
+The `Structure` section of the side panel shows the crystal structure in ball-and-stick style. Its checkboxes toggle the atoms, their names, the bonds and the cell boundaries.
 
 **Bonds.** Two atoms are bonded when their distance is at most `Bond tolerance` (default 1.15) times the sum of their covalent radii. This is the criterion used by [ASE](https://wiki.fysik.dtu.dk/ase/ase/neighborlist.html), Jmol and VESTA. The covalent radii are those of Cordero *et al.*, [Dalton Trans. 2832 (2008)](https://doi.org/10.1039/B801115J). Raise the tolerance to include longer bonds, and lower it to drop them. Bonds to atoms of neighbouring cells are found too, so periodic structures are fully connected.
 
@@ -216,7 +236,6 @@ Each atom draws its own half of each of its bonds, from its center to the bond m
 
 Bond controls:
 
-- `View bonds`: toggles the bonds.
 - `Bond radius` (default 0.12 Å): the thickness of the bonds.
 - `Bond color`: either each half in the color of its atom (`Atom colors`, the default, as in VESTA), or `Uniform grey`.
 
@@ -243,7 +262,7 @@ The **cell parameters** box in the top-left corner of the 3D view shows the latt
 
 Arrows pointing towards or away from the viewer look short, since they are seen foreshortened. Their labels may overlap the center of the gizmo.
 
-All of this can be toggled from the `Axes` group on the right:
+All of this can be toggled from the `Axes` section of the side panel:
 
 - `Cartesian axes x, y, z`
 - `Lattice vectors a, b, c`

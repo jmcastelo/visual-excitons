@@ -32,6 +32,15 @@ class CurveStyle(QObject):
         self.startHue = 0
         self.endHue = 300
 
+    def replaceColor(self, old, new):
+        """
+        Give the pens of color `old` (e.g. the default foreground of the previous
+        theme) the color `new`, leaving the colors chosen by the user alone.
+        """
+        for pen in [self.commonPen] + self.curvePens:
+            if pen.color().rgb() == QColor(old).rgb():
+                pen.setColor(QColor(new))
+
     def allCurvePensEqual(self):
         return all(pen == self.curvePens[0] for pen in self.curvePens)
 

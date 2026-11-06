@@ -1,148 +1,140 @@
 from PySide6.QtCore import Signal, Slot, Qt
-from PySide6.QtGui import QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QGroupBox, QGridLayout, QSizePolicy
+from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QVBoxLayout, QSizePolicy
 
+from .inspector import Inspector, formLayout, NoteLabel
 from .style_widget import StyleWidget
 
-class ParametersWidget(QWidget):
-    weightFactorChanged = Signal(float)
-    absorptionParametersChanged = Signal()
-    showStyleDialog = Signal(bool)
 
-    def __init__(self, options, dispersionStyle, absorptionStyle, bandStructureStyle):
-        QWidget.__init__(self)
+class ParametersWidget(Inspector):
+    """Inspector of the spectra page."""
+
+    absorptionParametersChanged = Signal()
+    # Asks the main window to switch to the wave-function page
+    showWavefunctionRequested = Signal()
+
+    def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle):
+        Inspector.__init__(self)
 
         # All options are contained in this object
         self.options = options
+        self.calculations = calculations
 
-        # Dispersion widgets
+        # Dispersion
 
-        nExcitonsLabel = QLabel("Number of Excitons")
+        self.nExcitonsSpinBox = QSpinBox(minimum=1, maximum=999)
+        self.nExcitonsSpinBox.setValue(self.options.nExcitons)
+        self.nExcitonsSpinBox.setToolTip('Number of lowest-energy excitons whose dispersion is computed')
+        self.nExcitonsSpinBox.valueChanged.connect(self.options.setNExcitons)
+        self.nExcitonsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
-        self.nExcitonsLineEdit = QLineEdit()
-        self.nExcitonsLineEdit.setValidator(QIntValidator())
-        self.nExcitonsLineEdit.setText(str(self.options.nExcitons))
-        self.nExcitonsLineEdit.editingFinished.connect(self.updateNExcitons)
-        self.nExcitonsLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.calculateDispersionButton = QPushButton('Compute dispersion')
 
-        self.calculateDispersionButton = QPushButton("Compute Dispersion")
-        self.calculateDispersionButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        form = formLayout()
+        form.addRow('Excitons:', self.nExcitonsSpinBox)
+        form.addRow(self.calculateDispersionButton)
+        form.addRow(NoteLabel('Click a point of the dispersion to show the absorption spectrum at its Q-point; '
+                              'Ctrl-click to keep several spectra.'))
+        self.addSection('Dispersion', form)
 
-        dispersionLayout = QGridLayout()
-        dispersionLayout.addWidget(nExcitonsLabel, 0, 0)
-        dispersionLayout.addWidget(self.nExcitonsLineEdit, 0, 1)
-        dispersionLayout.addWidget(self.calculateDispersionButton, 1, 0, 1, 2)
+        # Absorption
 
-        dispersionGroupBox = QGroupBox("Excitonic Dispersion")
-        dispersionGroupBox.setLayout(dispersionLayout)
+        def energySpinBox(value):
+            spinBox = QDoubleSpinBox(minimum=0.0, maximum=1000.0, singleStep=0.1, decimals=3, suffix=' eV')
+            spinBox.setValue(value)
+            # Recompute when editing is finished or an arrow is clicked, not on every key
+            spinBox.setKeyboardTracking(False)
+            spinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            return spinBox
 
-        # Absorption spectrum widgets
+        self.energyMinSpinBox = energySpinBox(self.options.energyMin)
+        self.energyMaxSpinBox = energySpinBox(self.options.energyMax)
+        self.energyStepSpinBox = energySpinBox(self.options.energyStep)
+        self.energyStepSpinBox.setSingleStep(0.005)
+        self.energyStepSpinBox.setMinimum(0.001)
 
-        energyMinLabel = QLabel("Minimum Energy (eV)")
-        energyMaxLabel = QLabel("Maximum Energy (eV)")
-        energyStepLabel = QLabel("Energy Step (eV)")
+        self.energyMinSpinBox.valueChanged.connect(self.updateEnergyMin)
+        self.energyMaxSpinBox.valueChanged.connect(self.updateEnergyMax)
+        self.energyStepSpinBox.valueChanged.connect(self.updateEnergyStep)
 
-        self.energyMinLineEdit = QLineEdit()
-        self.energyMinLineEdit.setValidator(QDoubleValidator())
-        self.energyMinLineEdit.setText(f"{self.options.energyMin}")
-        self.energyMinLineEdit.editingFinished.connect(self.updateEnergyMin)
-        self.energyMinLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.excMinIntensitySpinBox = QDoubleSpinBox(minimum=0.0, maximum=1.0, singleStep=0.05, decimals=3)
+        self.excMinIntensitySpinBox.setValue(self.options.excMinIntensity)
+        self.excMinIntensitySpinBox.setKeyboardTracking(False)
+        self.excMinIntensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.excMinIntensitySpinBox.setToolTip('Excitons with at least this intensity (relative to the brightest)\n'
+                                               'are marked as bright on the spectrum; the rest are dark')
+        self.excMinIntensitySpinBox.valueChanged.connect(self.updateExcMinIntensity)
 
-        self.energyMaxLineEdit = QLineEdit()
-        self.energyMaxLineEdit.setValidator(QDoubleValidator())
-        self.energyMaxLineEdit.setText(f"{self.options.energyMax}")
-        self.energyMaxLineEdit.editingFinished.connect(self.updateEnergyMax)
-        self.energyMaxLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.showLabelsCheckBox = QCheckBox('Label bright excitons')
+        self.showLabelsCheckBox.setToolTip('Show (index, intensity) next to each bright exciton')
 
-        self.energyStepLineEdit = QLineEdit()
-        self.energyStepLineEdit.setValidator(QDoubleValidator())
-        self.energyStepLineEdit.setText(f"{self.options.energyStep}")
-        self.energyStepLineEdit.editingFinished.connect(self.updateEnergyStep)
-        self.energyStepLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        form = formLayout()
+        form.addRow('From:', self.energyMinSpinBox)
+        form.addRow('To:', self.energyMaxSpinBox)
+        form.addRow('Step:', self.energyStepSpinBox)
+        form.addRow('Bright threshold:', self.excMinIntensitySpinBox)
+        form.addRow(self.showLabelsCheckBox)
+        self.addSection('Absorption', form)
 
-        absorptionGridLayout = QGridLayout()
-        absorptionGridLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        absorptionGridLayout.addWidget(energyMinLabel, 0, 0)
-        absorptionGridLayout.addWidget(energyMaxLabel, 1, 0)
-        absorptionGridLayout.addWidget(energyStepLabel, 2, 0)
-        absorptionGridLayout.addWidget(self.energyMinLineEdit, 0, 1)
-        absorptionGridLayout.addWidget(self.energyMaxLineEdit, 1, 1)
-        absorptionGridLayout.addWidget(self.energyStepLineEdit, 2, 1)
+        # Selected exciton, shared with the wave-function page
 
-        absorptionGroupBox = QGroupBox("Excitonic Absorption")
-        absorptionGroupBox.setLayout(absorptionGridLayout)
+        self.selectedExcitonNote = NoteLabel()
+        self.showWavefunctionButton = QPushButton('Wave function of this exciton')
+        self.showWavefunctionButton.setToolTip('Go to the wave-function page with this exciton selected')
+        self.showWavefunctionButton.clicked.connect(self.showWavefunctionRequested)
 
-        # Excitons widgets
+        layout = QVBoxLayout()
+        layout.addWidget(self.selectedExcitonNote)
+        layout.addWidget(self.showWavefunctionButton)
+        self.addSection('Selected exciton', layout)
 
-        excMinIntensityLabel = QLabel("Minimum Intensity")
+        self.calculations.excitonSelected.connect(self.onExcitonSelected)
+        self.onExcitonSelected()
 
-        self.excMinIntensityLineEdit = QLineEdit()
-        self.excMinIntensityLineEdit.setValidator(QDoubleValidator())
-        self.excMinIntensityLineEdit.setText(f"{self.options.excMinIntensity}")
-        self.excMinIntensityLineEdit.editingFinished.connect(self.updateExcMinIntensity)
-        self.excMinIntensityLineEdit.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        # Appearance of the plots
 
-        self.showLabelsButton = QPushButton("Show Labels")
-        self.showLabelsButton.setCheckable(True)
-        self.showLabelsButton.setChecked(False)
-        self.showLabelsButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout()
+        layout.addWidget(StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle))
+        self.addSection('Appearance', layout, expanded=False)
 
-        excitonsGridLayout = QGridLayout()
-        excitonsGridLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        excitonsGridLayout.addWidget(excMinIntensityLabel, 0, 0)
-        excitonsGridLayout.addWidget(self.excMinIntensityLineEdit, 0, 1)
-        excitonsGridLayout.addWidget(self.showLabelsButton, 2, 0, 1, 2)
+        self.alignLabels()
 
-        excitonsGroupBox = QGroupBox("Excitons")
-        excitonsGroupBox.setLayout(excitonsGridLayout)
+    def _syncEnergies(self):
+        """Show the energies as clamped by the options."""
+        for spinBox, value in ((self.energyMinSpinBox, self.options.energyMin),
+                               (self.energyMaxSpinBox, self.options.energyMax),
+                               (self.energyStepSpinBox, self.options.energyStep)):
+            spinBox.blockSignals(True)
+            spinBox.setValue(value)
+            spinBox.blockSignals(False)
+        self.absorptionParametersChanged.emit()
 
-        # Style widget
+    @Slot(float)
+    def updateEnergyMin(self, value):
+        self.options.setEnergyMin(value)
+        self._syncEnergies()
 
-        styleWidget = StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle)
+    @Slot(float)
+    def updateEnergyMax(self, value):
+        self.options.setEnergyMax(value)
+        self._syncEnergies()
 
-        styleLayout = QVBoxLayout()
-        styleLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        styleLayout.addWidget(styleWidget)
+    @Slot(float)
+    def updateEnergyStep(self, value):
+        self.options.setEnergyStep(value)
+        self._syncEnergies()
 
-        styleGroupBox = QGroupBox("Style")
-        styleGroupBox.setLayout(styleLayout)
-
-        # Main layout
-
-        mainLayout = QGridLayout()
-        mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        mainLayout.addWidget(dispersionGroupBox, 0, 0)
-        mainLayout.addWidget(absorptionGroupBox, 1, 0)
-        mainLayout.addWidget(excitonsGroupBox, 2, 0)
-        mainLayout.addWidget(styleGroupBox, 3, 0)
-
-        self.setLayout(mainLayout)
-
-    @Slot()
-    def updateNExcitons(self):
-        self.options.setNExcitons(int(self.nExcitonsLineEdit.text()))
-        self.nExcitonsLineEdit.setText(str(self.options.nExcitons))
-
-    @Slot()
-    def updateEnergyMin(self):
-        self.options.setEnergyMin(float(self.energyMinLineEdit.text()))
-        self.energyMinLineEdit.setText(f"{self.options.energyMin}")
+    @Slot(float)
+    def updateExcMinIntensity(self, value):
+        self.options.setExcMinIntensity(value)
         self.absorptionParametersChanged.emit()
 
     @Slot()
-    def updateEnergyMax(self):
-        self.options.setEnergyMax(float(self.energyMaxLineEdit.text()))
-        self.energyMaxLineEdit.setText(f"{self.options.energyMax}")
-        self.absorptionParametersChanged.emit()
-
-    @Slot()
-    def updateEnergyStep(self):
-        self.options.setEnergyStep(float(self.energyStepLineEdit.text()))
-        self.energyStepLineEdit.setText(f"{self.options.energyStep}")
-        self.absorptionParametersChanged.emit()
-
-    @Slot()
-    def updateExcMinIntensity(self):
-        self.options.setExcMinIntensity(float(self.excMinIntensityLineEdit.text()))
-        self.excMinIntensityLineEdit.setText(f"{self.options.excMinIntensity}")
-        self.absorptionParametersChanged.emit()
+    def onExcitonSelected(self, *args):
+        selected = self.calculations.selectedExciton
+        if selected is None:
+            self.selectedExcitonNote.setText('Click a bright exciton in an absorption spectrum to select it.')
+            self.showWavefunctionButton.setEnabled(False)
+        else:
+            qIndex, excIndex, energy = selected
+            self.selectedExcitonNote.setText(f'Exciton {excIndex} at Q-point {qIndex + 1}, E = {energy:.4f} eV')
+            self.showWavefunctionButton.setEnabled(True)

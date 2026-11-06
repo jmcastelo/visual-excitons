@@ -4,8 +4,13 @@ from PySide6.QtWidgets import QComboBox, QGroupBox, QFormLayout, QGridLayout, QS
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QMenu, QHeaderView
 from pathlib import Path
 
+from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
+from .inspector import NoteLabel
+
 
 class OptionsWidget(QWidget):
+    """System page: data directories, crystal lattice and Brillouin-zone path."""
+
     def __init__(self, options):
         QWidget.__init__(self)
 
@@ -15,227 +20,174 @@ class OptionsWidget(QWidget):
 
         # Calculation type
 
-        calcTypeComboBox = QComboBox()
-        calcTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        calcTypeComboBox.addItems(['DFT+BSE', 'DFT+GW+BSE'])
-        calcTypeComboBox.setCurrentIndex(1)
-        calcTypeComboBox.currentIndexChanged.connect(self.setGW)
+        self.calcTypeComboBox = QComboBox()
+        self.calcTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.calcTypeComboBox.addItems(['DFT+BSE', 'DFT+GW+BSE'])
+        self.calcTypeComboBox.setCurrentIndex(1 if self.options.gw else 0)
+        self.calcTypeComboBox.currentIndexChanged.connect(self.setGW)
+        self.options.gwChanged.connect(lambda gw: self.calcTypeComboBox.setCurrentIndex(1 if gw else 0))
 
-        calcTypeLayout = QFormLayout()
-        calcTypeLayout.addRow('Calculation type', calcTypeComboBox)
+        # Directory rows: label, path, browse button, and a status line below
 
-        # SAVE Dir widgets
+        dirLayout = QGridLayout()
+        dirLayout.setColumnStretch(1, 1)
+        dirLayout.setVerticalSpacing(4)
+        dirLayout.addWidget(QLabel('Calculation:'), 0, 0)
+        dirLayout.addWidget(self.calcTypeComboBox, 0, 1)
 
-        saveDirLabel = QLabel('SAVE Directory:')
+        def directoryRow(row, text, toolTip, browse, edit):
+            label = QLabel(text)
+            label.setToolTip(toolTip)
+            lineEdit = QLineEdit()
+            lineEdit.setToolTip(toolTip)
+            lineEdit.editingFinished.connect(edit)
+            button = QPushButton('Browse…')
+            button.clicked.connect(browse)
+            status = QLabel()
+            status.setTextFormat(Qt.TextFormat.RichText)
+            dirLayout.addWidget(label, 2 * row + 1, 0)
+            dirLayout.addWidget(lineEdit, 2 * row + 1, 1)
+            dirLayout.addWidget(button, 2 * row + 1, 2)
+            dirLayout.addWidget(status, 2 * row + 2, 1, 1, 2)
+            return label, lineEdit, button, status
 
-        selectSaveDirButton = QPushButton('Select')
-        selectSaveDirButton.clicked.connect(self.selectSaveDir)
-        selectSaveDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        _, self.saveDirEdit, _, self.saveLabel = directoryRow(
+            0, 'SAVE:', 'Directory with the ns.db1 database of the DFT calculation', self.selectSaveDir, self.editSaveDir)
+        _, self.diagoDirEdit, _, self.diagoLabel = directoryRow(
+            1, 'BSE:', 'Directory with the ndb.BS_diago_Q* databases, one per Q-point', self.selectDiagoDir, self.editDiagoDir)
+        self.qpDirLabel, self.qpDirEdit, self.selectQPDirButton, self.qpLabel = directoryRow(
+            2, 'GW:', 'Directory with the ndb.QP database of the GW calculation', self.selectQPDir, self.editQPDir)
 
-        self.saveDirEdit = QLineEdit()
-        self.saveDirEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        self.saveDirEdit.editingFinished.connect(self.editSaveDir)
+        self.setStatus(self.saveLabel, 'ns.db1 not found!')
+        self.setStatus(self.diagoLabel, 'ndb.BS_diago_Q* not found!')
+        self.setStatus(self.qpLabel, 'ndb.QP not found!')
 
-        saveLayout = QHBoxLayout()
-        saveLayout.addWidget(saveDirLabel)
-        saveLayout.addWidget(self.saveDirEdit)
-        saveLayout.addWidget(selectSaveDirButton)
-
-        self.saveLabel = QLabel('ns.db1 not found!')
         self.options.saveDirChanged.connect(self.setSaveLabel)
-
+        self.options.diagoDirChanged.connect(self.setDiagoLabel)
+        self.options.qpDirChanged.connect(self.setQPLabel)
         self.options.databaseFound.connect(self.onDatabaseFound)
 
-        # Diago Dir widgets
-
-        diagoDirLabel = QLabel('Diago Directory:')
-
-        selectDiagoDirButton = QPushButton('Select')
-        selectDiagoDirButton.clicked.connect(self.selectDiagoDir)
-        selectDiagoDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-
-        self.diagoDirEdit = QLineEdit()
-        self.diagoDirEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        self.diagoDirEdit.editingFinished.connect(self.editDiagoDir)
-
-        diagoLayout = QHBoxLayout()
-        diagoLayout.addWidget(diagoDirLabel)
-        diagoLayout.addWidget(self.diagoDirEdit)
-        diagoLayout.addWidget(selectDiagoDirButton)
-
-        self.diagoLabel = QLabel('ndb.BS_diago_Q* not found!')
-        self.options.diagoDirChanged.connect(self.setDiagoLabel)
-
-        # QP Dir widgets
-
-        self.qpDirLabel = QLabel('QP Directory:')
-
-        self.selectQPDirButton = QPushButton('Select')
-        self.selectQPDirButton.clicked.connect(self.selectQPDir)
-        self.selectQPDirButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-
-        self.qpDirEdit = QLineEdit()
-        self.qpDirEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
-        self.qpDirEdit.editingFinished.connect(self.editQPDir)
-
-        qpLayout = QHBoxLayout()
-        qpLayout.addWidget(self.qpDirLabel)
-        qpLayout.addWidget(self.qpDirEdit)
-        qpLayout.addWidget(self.selectQPDirButton)
-
-        self.qpLabel = QLabel('ndb.QP not found!')
-        self.options.qpDirChanged.connect(self.setQPLabel)
-
-        # Dir group
-
-        dirLayout = QVBoxLayout()
-        dirLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        dirLayout.addLayout(calcTypeLayout)
-        dirLayout.addLayout(saveLayout)
-        dirLayout.addWidget(self.saveLabel)
-        dirLayout.addLayout(diagoLayout)
-        dirLayout.addWidget(self.diagoLabel)
-        dirLayout.addLayout(qpLayout)
-        dirLayout.addWidget(self.qpLabel)
-
-        dirGroupBox = QGroupBox('Directories')
+        dirGroupBox = QGroupBox('Data')
         dirGroupBox.setLayout(dirLayout)
 
-        # Bravais lattice widgets
-
-        bravaisLayout = QFormLayout()
-
-        # ibrav selector
+        # Bravais lattice
 
         self.ibravComboBox = QComboBox()
-        self.ibravComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.ibravComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.ibravComboBox.addItems([str(ibrav) for ibrav in self.options.availableIbrav])
+        self.ibravComboBox.setToolTip('Bravais lattice type (Quantum ESPRESSO ibrav), detected from ns.db1')
         self.ibravComboBox.currentTextChanged.connect(self.getLatticeData)
-
         self.ibravComboBox.setEnabled(False)
         self.options.databaseFound.connect(self.setIbrav)
 
-        bravaisLayout.addRow('ibrav', self.ibravComboBox)
-
-        # Variant label
-
         self.variantLabel = QLabel()
-        bravaisLayout.addRow('Variant', self.variantLabel)
 
-        # Parameter labels
+        self.parameterLabels = {name: QLabel() for name in ('a', 'b', 'c', 'alpha', 'beta', 'gamma')}
+        for label in self.parameterLabels.values():
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self.parameterLabels = {
-            'a': QLabel(),
-            'b': QLabel(),
-            'c': QLabel(),
-            'alpha': QLabel(),
-            'beta': QLabel(),
-            'gamma': QLabel()
-        }
+        bravaisLayout = QGridLayout()
+        bravaisLayout.setColumnStretch(4, 1)
+        bravaisLayout.setHorizontalSpacing(12)
+        bravaisLayout.addWidget(QLabel('ibrav:'), 0, 0)
+        bravaisLayout.addWidget(self.ibravComboBox, 0, 1)
+        bravaisLayout.addWidget(QLabel('Variant:'), 0, 2)
+        bravaisLayout.addWidget(self.variantLabel, 0, 3)
+        for row, (length, angle, angleSymbol) in enumerate((('a', 'alpha', 'α'), ('b', 'beta', 'β'), ('c', 'gamma', 'γ')), start=1):
+            bravaisLayout.addWidget(QLabel(f'{length}:'), row, 0)
+            bravaisLayout.addWidget(self.parameterLabels[length], row, 1)
+            bravaisLayout.addWidget(QLabel(f'{angleSymbol}:'), row, 2)
+            bravaisLayout.addWidget(self.parameterLabels[angle], row, 3)
 
-        for param, label in self.parameterLabels.items():
-            bravaisLayout.addRow(param, label)
-
-        # Bravais lattice group
-
-        bravaisGroup = QGroupBox('Bravais lattice')
+        bravaisGroup = QGroupBox('Crystal lattice')
         bravaisGroup.setLayout(bravaisLayout)
 
-        # Q-Path widgets
-
-        qPathLayout = QVBoxLayout()
-        qPathLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        # Path line edit
+        # Q-path
 
         self.qPathLineEdit = QLineEdit()
-        self.qPathLineEdit.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Maximum)
+        self.qPathLineEdit.setToolTip('Labels of the high-symmetry points along the path;\n'
+                                      'commas separate disconnected sections')
 
-        formLayout = QFormLayout()
-        formLayout.addRow('Path', self.qPathLineEdit)
-        qPathLayout.addLayout(formLayout)
-
-        # Interpolation widgets
-
-        self.numPointsSpin = QSpinBox()
-        self.numPointsSpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.numPointsSpin.setMinimum(0)
-        self.numPointsSpin.setMaximum(999999)
+        self.numPointsSpin = QSpinBox(minimum=0, maximum=999999)
         self.numPointsSpin.setValue(100)
 
-        self.densitySpin = QDoubleSpinBox()
-        self.densitySpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.densitySpin.setMinimum(0)
-        self.densitySpin.setMaximum(9999)
-        self.densitySpin.setSingleStep(0.1)
+        self.densitySpin = QDoubleSpinBox(minimum=0, maximum=9999, singleStep=0.1)
         self.densitySpin.setValue(10.0)
         self.densitySpin.setVisible(False)
 
         self.interpolationComboBox = QComboBox()
-        self.interpolationComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.interpolationComboBox.addItems(['Number of points', 'Density'])
+        self.interpolationComboBox.currentIndexChanged.connect(self.updateInterpolationEdit)
 
         self.interpolationLayout = QHBoxLayout()
-        self.interpolationLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.interpolationLayout.addWidget(self.interpolationComboBox, 0, Qt.AlignmentFlag.AlignLeft)
-        self.interpolationLayout.addWidget(self.numPointsSpin, 0, Qt.AlignmentFlag.AlignLeft)
-        self.interpolationLayout.addWidget(self.densitySpin, 0, Qt.AlignmentFlag.AlignLeft)
-        self.interpolationComboBox.currentIndexChanged.connect(self.updateInterpolationEdit)
-        qPathLayout.addLayout(self.interpolationLayout)
+        self.interpolationLayout.addWidget(self.interpolationComboBox)
+        self.interpolationLayout.addWidget(self.numPointsSpin)
+        self.interpolationLayout.addWidget(self.densitySpin)
+        self.interpolationLayout.addStretch(1)
 
-        # Set path button
-
-        self.setPathButton = QPushButton('Set Q-Path')
-        self.setPathButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.setPathButton = QPushButton('Set Q-path')
+        self.setPathButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.setPathButton.clicked.connect(self.setBrillouinZone)
-        qPathLayout.addWidget(self.setPathButton)
 
-        # Q-Path group
+        qPathLayout = QFormLayout()
+        qPathLayout.addRow('Path:', self.qPathLineEdit)
+        qPathLayout.addRow('Sampling:', self.interpolationLayout)
+        qPathLayout.addRow('', self.setPathButton)
 
-        qPathGroupBox = QGroupBox('Q-Path')
+        qPathGroupBox = QGroupBox('Q-path')
         qPathGroupBox.setLayout(qPathLayout)
 
-        # High symmetry points widgets
-
-        hspLayout = QVBoxLayout()
-        hspLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        # High symmetry points table
+        # High-symmetry points
 
         self.hspTable = QTableWidget()
-        self.hspTable.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
         self.hspTable.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.hspTable.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.hspTable.setColumnCount(4)
-        self.hspTable.setHorizontalHeaderLabels(['Label', 'Kx', 'Ky', 'Kz'])
+        self.hspTable.setHorizontalHeaderLabels(['Label', 'k₁', 'k₂', 'k₃'])
+        for column in range(1, 4):
+            self.hspTable.horizontalHeaderItem(column).setToolTip(f'Fractional coordinate along the reciprocal vector b{column}')
+        self.hspTable.setAlternatingRowColors(True)
 
         self.hspTable.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.hspTable.customContextMenuRequested.connect(self.showContextMenu)
 
         self.hspTable.cellChanged.connect(self.validateCell)
 
+        hspLayout = QVBoxLayout()
         hspLayout.addWidget(self.hspTable)
+        hspLayout.addWidget(NoteLabel('Coordinates are fractions of the reciprocal lattice vectors. '
+                                      'Right-click the table to add or delete extra points.'))
 
-        # Special points group
-
-        hspGroupBox = QGroupBox('High symmetry points')
+        hspGroupBox = QGroupBox('High-symmetry points')
         hspGroupBox.setLayout(hspLayout)
 
-        # Main layout
+        # Main layout: setup on the left, points on the right
 
-        mainLayout = QGridLayout()
-        mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        mainLayout.addWidget(dirGroupBox, 0, 0, 1, 2)
-        mainLayout.addWidget(bravaisGroup, 1, 0, 1, 1)
-        mainLayout.addWidget(qPathGroupBox, 1, 1, 1, 1)
-        mainLayout.addWidget(hspGroupBox, 0, 2, 3, 1)
+        leftLayout = QVBoxLayout()
+        leftLayout.addWidget(dirGroupBox)
+        leftLayout.addWidget(bravaisGroup)
+        leftLayout.addWidget(qPathGroupBox)
+        leftLayout.addStretch(1)
+
+        mainLayout = QHBoxLayout()
+        mainLayout.setContentsMargins(16, 12, 16, 12)
+        mainLayout.setSpacing(16)
+        mainLayout.addLayout(leftLayout, 3)
+        mainLayout.addWidget(hspGroupBox, 2)
 
         self.setLayout(mainLayout)
+
+    @staticmethod
+    def setStatus(label, text):
+        """Status of a directory, with a green tick or a red cross."""
+        ok = 'not found' not in text
+        symbol, color = ('✓', '#2e9e4f') if ok else ('✗', '#d9453b')
+        label.setText(f'<span style="color:{color}; font-weight:bold">{symbol}</span>&nbsp;{text}')
 
     @Slot(int)
     def setGW(self, index):
         gw = (index == 1)
-        self.options.gw = gw
+        self.options.setGW(gw)
         self.qpDirLabel.setVisible(gw)
         self.qpDirEdit.setVisible(gw)
         self.selectQPDirButton.setVisible(gw)
@@ -257,7 +209,7 @@ class OptionsWidget(QWidget):
 
     @Slot()
     def selectQPDir(self):
-        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
+        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.qpDir or self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
         if directory != '':
             self.options.setQPDir(directory)
             self.qpDirEdit.setText(directory)
@@ -286,17 +238,17 @@ class OptionsWidget(QWidget):
     @Slot()
     def setSaveLabel(self, dir, text):
         self.saveDirEdit.setText(dir)
-        self.saveLabel.setText(text)
+        self.setStatus(self.saveLabel, text)
 
     @Slot()
     def setDiagoLabel(self, dir, text):
         self.diagoDirEdit.setText(dir)
-        self.diagoLabel.setText(text)
+        self.setStatus(self.diagoLabel, text)
 
     @Slot()
     def setQPLabel(self, dir, text):
         self.qpDirEdit.setText(dir)
-        self.qpLabel.setText(text)
+        self.setStatus(self.qpLabel, text)
 
     @Slot(bool)
     def setIbrav(self, found):
@@ -343,8 +295,14 @@ class OptionsWidget(QWidget):
             self.variantLabel.setText(self.options.variant)
             self.qPathLineEdit.setText(self.options.defaultPath)
 
+            # Lengths are in Bohr in the database
             for paramName, label in self.parameterLabels.items():
-                label.setText(f"{self.options.latticeParameters[paramName]:.5f}")
+                value = self.options.latticeParameters[paramName]
+                if paramName in ('a', 'b', 'c'):
+                    label.setText(f'{value * BOHR_TO_ANGSTROM:.5f} Å')
+                    label.setToolTip(f'{value:.5f} Bohr')
+                else:
+                    label.setText(f'{value:.4f}°')
 
         else:
             self.variantLabel.clear()

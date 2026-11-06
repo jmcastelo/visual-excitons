@@ -1,6 +1,8 @@
 from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
 
+from .theme import plotForeground
+
 
 class AbsorptionWidget(pg.GraphicsLayoutWidget):
     excitonsSelected = Signal(list, bool)
@@ -83,7 +85,7 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
 
                 if showLabels:
                     for i in range(len(data['brightExcIndices'])):
-                        textItem = pg.TextItem("(%d, %.3f)"%(data['brightExcIndices'][i], data['brightExcIntensities'][i]), anchor = (0.5, 1.0), color = 'k')
+                        textItem = pg.TextItem("(%d, %.3f)"%(data['brightExcIndices'][i], data['brightExcIntensities'][i]), anchor = (0.5, 1.0), color = plotForeground())
                         textItem.setPos(data['brightExcEnergy'][i], data['brightExcAbsorption'][i])
                         self.absorption.addItem(textItem)
 
@@ -95,7 +97,7 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
                 plot.showAxes(False)
                 plot.hideButtons()
                 plot.addItem(pg.BarGraphItem(x = data['brightExcEnergy'], width = 0.00001, height = 1.0, pen = curvePens[i].color(), brush = curvePens[i].color()))
-                plot.addItem(pg.BarGraphItem(x = data['darkExcEnergy'], width = 0.00001, height = 1.0, pen = 'black', brush = 'black'))
+                plot.addItem(pg.BarGraphItem(x = data['darkExcEnergy'], width = 0.00001, height = 1.0, pen = plotForeground(), brush = plotForeground()))
                 self.excitonPlots.append(plot)
         else:
             self.absorption.setRange(xRange = (0.0, 1.0), yRange = (0.0, 1.0), disableAutoRange = False)
