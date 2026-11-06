@@ -94,3 +94,22 @@ def test_cell_parameters_hexagonal():
 def test_cell_info_is_in_angstrom():
     html = cellInfoHtml(np.eye(3) * 2.0 * ANGSTROM_TO_BOHR, showReciprocal=True)
     assert 'a = 2.0000 Å' in html and 'α = 90.000°' in html and 'a* = 3.1416 Å⁻¹' in html
+
+
+# Colormaps of the density
+
+def test_colormaps():
+    from visual_excitons.gui.colormaps import COLORMAPS, makeColormap, colormapIcon, DEFAULT_COLORMAP
+    assert DEFAULT_COLORMAP in COLORMAPS
+    for label in COLORMAPS:
+        colormap = makeColormap(label)
+        low, high = colormap.map(np.array([0.0, 1.0]), mode='float')[:, :3]
+        assert not np.allclose(low, high), label
+
+    plain, reversed_ = makeColormap('Fire'), makeColormap('Fire', reverse=True)
+    np.testing.assert_allclose(plain.map(np.array([0.0]), mode='float'), reversed_.map(np.array([1.0]), mode='float'))
+    # Reversing a copy leaves PyQtGraph's shared colormap alone
+    np.testing.assert_allclose(makeColormap('Fire').map(np.array([0.0]), mode='float'), plain.map(np.array([0.0]), mode='float'))
+    # Unknown labels (e.g. from old settings) fall back to the default
+    np.testing.assert_allclose(makeColormap('No such map').getLookupTable(nPts=8), makeColormap(DEFAULT_COLORMAP).getLookupTable(nPts=8))
+    assert not colormapIcon(plain).isNull()

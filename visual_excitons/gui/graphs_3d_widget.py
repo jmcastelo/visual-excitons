@@ -36,6 +36,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.isoOpacityChanged.connect(self.excitonWfWidget.setIsoOpacity)
         self.parameters3DWidget.isoSetOpacityChanged.connect(self.excitonWfWidget.setIsoSetOpacity)
         self.parameters3DWidget.isoSetStyleChanged.connect(self.excitonWfWidget.setIsoSetStyle)
+        self.parameters3DWidget.colormapChanged.connect(self.setColormap)
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
         self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
@@ -79,6 +80,13 @@ class Graphs3DWidget(QWidget):
         if found:
             self.plotLattice()
             self.excitonWfWidget.centerView()
+
+    @Slot(object)
+    def setColormap(self, colormap):
+        """Recolor the density: the shown plot now, the others when shown (see plotWfIfMissing)."""
+        self.excitonWfWidget.colormap = colormap
+        if self.calculations.probabilityDensity() is not None:
+            self.plotWf()
 
     @Slot()
     def plotWf(self):

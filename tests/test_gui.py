@@ -312,3 +312,24 @@ def test_export_density_from_the_window(window, qtbot, monkeypatch, tmp_path):
     assert 'saved' in window.statusBar().currentMessage()
     assert QSettings('VisualExcitons', 'VisualExcitons').value('exportDir') == str(tmp_path)
     calc.waveFunction = None
+
+
+def test_colormap_choice(window, qtbot):
+    p3 = window.wavefunctionPage.parameters3DWidget
+    view = window.wavefunctionPage.excitonWfWidget
+    with qtbot.waitSignal(p3.colormapChanged):
+        p3.colormapComboBox.setCurrentText('Inferno')
+    from visual_excitons.gui.colormaps import makeColormap
+    np.testing.assert_allclose(view.colormap.getLookupTable(nPts=16), makeColormap('Inferno').getLookupTable(nPts=16))
+    p3.reverseColormapCheckBox.setChecked(True)
+    np.testing.assert_allclose(view.colormap.getLookupTable(nPts=16), makeColormap('Inferno', True).getLookupTable(nPts=16))
+    # Separators are not colormaps
+    assert '' in [p3.colormapComboBox.itemText(i) for i in range(p3.colormapComboBox.count())]
+    values = p3.persistence.values('global')
+    assert values['colormap'] == 'Inferno' and values['colormapReversed'] is True
+
+
+def test_side_panels_fit_their_content(window):
+    for inspector in (window.spectraPage.inspector, window.wavefunctionPage.inspector):
+        for section in inspector.sections.values():
+            assert inspector.minimumWidth() >= section.content.minimumSizeHint().width()

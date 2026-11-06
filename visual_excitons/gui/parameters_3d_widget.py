@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot, QSize
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox
@@ -8,6 +8,7 @@ from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.options import Options
 from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 from .persistence import DATASET
+from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
 
 
 class Parameters3DWidget(Inspector):
@@ -34,6 +35,7 @@ class Parameters3DWidget(Inspector):
     showCellInfoChanged = Signal(bool)
     isoSetStyleChanged = Signal(int)
     exportImageRequested = Signal()
+    colormapChanged = Signal(object)   # pyqtgraph ColorMap
     exportDensityRequested = Signal()
 
     def __init__(self, options: Options, calculations: Calculations):
@@ -198,8 +200,34 @@ class Parameters3DWidget(Inspector):
         sliceDensitySpinBox.setToolTip('Rendering quality: more slices give a smoother volume')
         sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
 
+        # Colormap of the density, for all plot types
+        self.colormapComboBox = QComboBox()
+        self.colormapComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.colormapComboBox.setIconSize(QSize(48, 12))
+        for group, maps in COLORMAP_GROUPS:
+            if self.colormapComboBox.count():
+                self.colormapComboBox.insertSeparator(self.colormapComboBox.count())
+            for label, name, description in maps:
+                self.colormapComboBox.addItem(label)
+                self.colormapComboBox.setItemData(self.colormapComboBox.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
+        self.colormapComboBox.setCurrentText(DEFAULT_COLORMAP)
+        self.colormapComboBox.setToolTip('Colors of the probability density, from low to high')
+
+        self.reverseColormapCheckBox = QCheckBox('Reverse')
+        self.reverseColormapCheckBox.setToolTip('High densities in the colors of low ones and vice versa')
+
+        colormapLayout = QHBoxLayout()
+        colormapLayout.addWidget(self.colormapComboBox)
+        colormapLayout.addWidget(self.reverseColormapCheckBox)
+        colormapLayout.addStretch(1)
+
+        self.colormapComboBox.currentIndexChanged.connect(self.onColormapChanged)
+        self.reverseColormapCheckBox.toggled.connect(self.onColormapChanged)
+        self.updateColormapIcons()
+
         form = formLayout()
         form.addRow('Plot type:', self.plotTypeComboBox)
+        form.addRow('Colormap:', colormapLayout)
         form.addRow('Iso level:', isoLevelSlider)
         form.addRow('Levels:', numIsoLevelsSpinBox)
         form.addRow('Style:', isoSetStyleComboBox)
@@ -226,12 +254,29 @@ class Parameters3DWidget(Inspector):
         self.updatePlotTypeRows(self.plotTypeComboBox.currentIndex())
 
         self.addSection('Display', form)
-        for key, widget in (('plotType', self.plotTypeComboBox), ('isoLevel', isoLevelSlider),
+        for key, widget in (('plotType', self.plotTypeComboBox), ('colormap', self.colormapComboBox),
+                            ('colormapReversed', self.reverseColormapCheckBox), ('isoLevel', isoLevelSlider),
                             ('isoLevels', numIsoLevelsSpinBox), ('isoSetStyle', isoSetStyleComboBox),
                             ('isoOpacity', isoOpacitySlider), ('isoSetOpacity', isoSetOpacitySlider),
                             ('volumeOpacity', volumeOpacitySlider), ('volumeContrast', volumeContrastSpinBox),
                             ('slicesPerVoxel', sliceDensitySpinBox)):
             self.remember(key, widget)
+
+    def colormap(self):
+        """The ColorMap chosen."""
+        return makeColormap(self.colormapComboBox.currentText(), self.reverseColormapCheckBox.isChecked())
+
+    def updateColormapIcons(self):
+        reverse = self.reverseColormapCheckBox.isChecked()
+        for index in range(self.colormapComboBox.count()):
+            label = self.colormapComboBox.itemText(index)
+            if label:   # not a separator
+                self.colormapComboBox.setItemIcon(index, colormapIcon(makeColormap(label, reverse)))
+
+    @Slot()
+    def onColormapChanged(self, *args):
+        self.updateColormapIcons()
+        self.colormapChanged.emit(self.colormap())
 
     def buildViewSection(self):
         # View direction: basis, presets and custom direction / up vectors
@@ -467,7 +512,7 @@ class Parameters3DWidget(Inspector):
         self.options.setParticlePositionOf(calc.wfFixedParticle, calc.wfFixedPosition)
         if calc.wfFixedParticle == self.options.particleType():
             for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit), calc.wfFixedPosition):
-                lineEdit.setText(f'{value:.4f}')
+                lineEdit.setText(f'{value + 0.0:.4f}')   # + 0.0: no "-0.0000"
 
         particle = 'Hole' if calc.wfFixedParticle == 'h' else 'Electron'
         self.particleGridLabel.setText(f'{particle} position snapped to the nearest point of the wave-function grid '

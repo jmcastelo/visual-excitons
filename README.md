@@ -218,6 +218,13 @@ The `Display` section of the side panel controls how the probability density is 
 
 Each isosurface type keeps its own transparency, set with `Isosurface opacity` and `Isosurface set opacity` respectively.
 
+**Colormap.** The colors of the density, for all plot types, are chosen with `Colormap`; each entry shows its gradient, from low to high density. The density is never negative, so the colormaps offered are sequential:
+
+- Perceptually uniform, from matplotlib: `Viridis` (default), `Plasma`, `Inferno`, `Magma`, and `Cividis`, readable with color-vision deficiencies. Equal steps in density look like equal steps in color, so they do not create false features.
+- Others, from the [CET collection](https://colorcet.com/) of perceptually uniform colormaps: `Fire`, `Blues`, `Sunset` (light at low densities, which suits the light theme), `Blue-magenta-yellow` and `Greys`; and `Turbo`, an improved rainbow with high contrast but not perceptually uniform.
+
+`Reverse` swaps the ends of the colormap. Colormaps that start dark (e.g. `Inferno`, `Magma`, `Fire`) hide the low densities on the dark theme, and those that start light (`Blues`, `Sunset`) on the light one: reverse them, or pick another, to suit the background. The choice is remembered between sessions.
+
 Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
 
 Atoms are drawn as lit spheres in their Jmol colors, sized by their covalent radii (see [Atoms and bonds](#atoms-and-bonds)). Their chemical symbols are shown as labels on the surface of each atom, facing the viewer. Labels behave like the rest of the scene: they scale with zoom, are hidden by atoms in front of them, and are tinted by translucent surfaces in front of them.

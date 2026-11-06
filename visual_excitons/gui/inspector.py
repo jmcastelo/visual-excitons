@@ -109,6 +109,17 @@ class Inspector(QScrollArea):
             width = max(label.sizeHint().width() for label in labels)
             for label in labels:
                 label.setMinimumWidth(width)
+        self.updateMinimumWidth()
+
+    def updateMinimumWidth(self):
+        """
+        Never narrower than its widest section, open or closed: the panel only
+        scrolls vertically, so anything wider would be cut off on the right.
+        """
+        margins = self.bodyLayout.contentsMargins()
+        content = max((section.content.minimumSizeHint().width() for section in self.sections.values()), default=0)
+        self.setMinimumWidth(content + margins.left() + margins.right() + self.verticalScrollBar().sizeHint().width()
+                             + 2 * self.frameWidth())
 
 
 INSPECTOR_WIDTH = 360
@@ -125,7 +136,7 @@ def pageLayout(view: QWidget, inspector: QWidget) -> QHBoxLayout:
     splitter.setStretchFactor(0, 1)
     splitter.setStretchFactor(1, 0)
     splitter.setCollapsible(0, False)
-    inspector.setMinimumWidth(260)
+    inspector.setMinimumWidth(max(260, inspector.minimumWidth()))
     splitter.setSizes([10 * INSPECTOR_WIDTH, INSPECTOR_WIDTH])
 
     layout = QHBoxLayout()
