@@ -3,7 +3,8 @@ from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEA
 from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
 import numpy as np
 
-from .tasks import TaskRunner, databaseAccess
+from .tasks import TaskRunner, databaseAccess, DATABASE_LOCK
+from .memory import PlaneWaves, estimateMemory, chooseBlockSize, availableMemory
 from .export import supercellAtoms, writeDensity
 from .analysis import voxelVectors
 from .atomic_data import BOHR_TO_ANGSTROM
@@ -113,7 +114,7 @@ def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, ex
 
 
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
-                        cutoff_ry, supercell, cache=None):
+                        cutoff_ry, supercell, cache=None, block_size=256):
     """
     Real-space probability density of exciton `exc_index` (1-based) at Q-point
     `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>), with the effective
@@ -142,10 +143,12 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
     if cache is not None and key in cache:
         wavefunctionDB = cache[key]
     else:
+        if cache is not None:
+            # One database at a time, they are large: free the previous one
+            # before loading, not after
+            cache.clear()
         wavefunctionDB = YamboWFDB(path=saveDir, save='.', latdb=lattice, bands_range=bandsRange)
         if cache is not None:
-            # One database at a time: they are large
-            cache.clear()
             cache[key] = wavefunctionDB
 
     degen_states = np.array(excitonDB.get_degenerate(exc_index, eps=1e-2)) - 1
@@ -160,7 +163,7 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
     sc_latvecs, atom_nums, atomPositions, real_wfc = ex_wf2Real(
         Akcv, Qpt, wavefunctionDB, [np.min(excitonDB.table[:, 1]), np.max(excitonDB.table[:, 2])],
         fixed_position=list(fixed_position), fix_particle=fixed_particle, supercell=supercell,
-        wfcCutoffRy=cutoff_ry, block_size=256)
+        wfcCutoffRy=cutoff_ry, block_size=block_size)
 
     context.stage('Computing the probability density')
     density = np.sum(np.abs(real_wfc) ** 2, axis=(0, 1, 2, 3))
@@ -269,6 +272,9 @@ class Calculations(QObject):
         # Wave-function database kept between calculations (see computeWaveFunction);
         # only used from the worker thread
         self.wavefunctionCache = {}
+        # For the estimates of size (see estimateWaveFunction)
+        self.planeWaves = None
+        self.excitonSizes = {}
 
     # Tasks
 
@@ -298,6 +304,8 @@ class Calculations(QObject):
         self.selectedExciton = None
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
+        self.planeWaves = None
+        self.excitonSizes = {}
 
     @Slot(list, bool)
     def selectExciton(self, points, dummy=None):
@@ -514,7 +522,7 @@ class Calculations(QObject):
     # Wave function
 
     def computeExcitonWaveFunction(self, q_index=0, exc_index=1, fixed_particle='h', fixed_position=None, cutoff_ry=-1,
-                                   supercell=None):
+                                   supercell=None, block_size=256):
         """
         Compute, in the background, the real-space wave function of exciton
         `exc_index` (1-based) at Q-point `q_index` (0-based, the file
@@ -524,7 +532,7 @@ class Calculations(QObject):
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
                          cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
-                         cache=self.wavefunctionCache)
+                         cache=self.wavefunctionCache, block_size=block_size)
         self.tasks.submit('Computing the exciton wave function…',
                           lambda context: computeWaveFunction(context, **arguments),
                           self._applyWaveFunction, key='wave-function')
@@ -540,6 +548,57 @@ class Calculations(QObject):
         self.wfFixedPosition = result['fixedPosition']
         self.wfExciton = (result['qIndex'], result['excIndex'])
         self.wfComputed.emit()
+
+    # Size of a wave-function calculation (see memory.py)
+
+    def estimateWaveFunction(self, q_index, exc_index, cutoff_ry, supercell, displayFactor=1):
+        """
+        Grid and memory of computing exciton `exc_index` at Q-point `q_index`;
+        None when the databases are busy (a calculation is reading them) or
+        missing. Raises ValueError for an exciton that does not exist.
+        """
+        if not self.options.saveDir or not self.options.diagoDir:
+            return None
+        if not DATABASE_LOCK.acquire(blocking=False):
+            return None
+        try:
+            if self.lattice is None:
+                self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+            if self.planeWaves is None:
+                self.planeWaves = PlaneWaves(self.options.saveDir, self.lattice)
+            key = (self.options.diagoDir, q_index, exc_index)
+            if key not in self.excitonSizes:
+                filename = 'ndb.BS_diago_Q%d' % (q_index + 1)
+                excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.options.diagoDir,
+                                                        neigs=exc_index + 20)
+                if exc_index > len(excitonDB.eigenvalues):
+                    raise ValueError(f'Exciton {exc_index} does not exist: {filename} has '
+                                     f'{len(excitonDB.eigenvalues)} excitons')
+                bands = int(np.max(excitonDB.table[:, 2])) - (int(np.min(excitonDB.table[:, 1])) - 1)
+                self.excitonSizes[key] = {
+                    'states': len(excitonDB.get_degenerate(exc_index, eps=1e-2)),
+                    'bands': bands,
+                    # Coefficients: (states, ..., k-points, conduction, valence)
+                    'kpoints': excitonDB.get_Akcv().shape[-3],
+                }
+        except (OSError, KeyError, IndexError) as error:
+            raise ValueError(str(error))
+        finally:
+            DATABASE_LOCK.release()
+
+        size = self.excitonSizes[key]
+        fftBox = self.planeWaves.fftBox(cutoff_ry)
+        supercell = [s + 1 - s % 2 for s in supercell]   # odd, as computed
+        # A snapshot of the keys: the worker thread may be changing the cache
+        loaded = any(saveDir == self.options.saveDir and bands[1] - bands[0] == size['bands']
+                     for saveDir, bands in list(self.wavefunctionCache.keys()))
+        memory = availableMemory()
+        blockSize = chooseBlockSize(self.planeWaves, fftBox, size['states'], size['kpoints'],
+                                    memory[1] if memory else None)
+        estimate = estimateMemory(self.planeWaves, fftBox, supercell, size['states'], size['bands'], size['kpoints'],
+                                  wavefunctionsLoaded=loaded, displayFactor=displayFactor, blockSize=blockSize)
+        estimate.update(fftBox=fftBox, supercell=supercell, states=size['states'], loaded=loaded, blockSize=blockSize)
+        return estimate
 
     # Geometry of the last wave function (lengths in Bohr)
 

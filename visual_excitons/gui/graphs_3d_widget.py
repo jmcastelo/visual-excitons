@@ -8,7 +8,8 @@ from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
 from .inspector import pageLayout
 from .analysis_widget import AnalysisWidget
-from visual_excitons.core.analysis import planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon
+from visual_excitons.core.analysis import (planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon,
+                                           upsampleDensity)
 from .persistence import PersistentState
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
@@ -26,6 +27,10 @@ class Graphs3DWidget(QWidget):
         self.options = options
 
         self.calculations = calculations
+        # Display upsampling (see displayDensity), cleared with each new wave function
+        self.smoothing = 1
+        self.displayCache = {}
+        self.calculations.wfComputed.connect(self.displayCache.clear)
         self.calculations.wfComputed.connect(self.plotWf)
 
         self.excitonWfWidget = ExcitonWfWidget()
@@ -39,6 +44,7 @@ class Graphs3DWidget(QWidget):
         self.parameters3DWidget.isoSetOpacityChanged.connect(self.excitonWfWidget.setIsoSetOpacity)
         self.parameters3DWidget.isoSetStyleChanged.connect(self.excitonWfWidget.setIsoSetStyle)
         self.parameters3DWidget.colormapChanged.connect(self.setColormap)
+        self.parameters3DWidget.smoothingChanged.connect(self.setSmoothing)
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
         self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
@@ -153,10 +159,32 @@ class Graphs3DWidget(QWidget):
         self.excitonWfWidget.clearWfItems()
         self.excitonWfWidget.setCutPlane(None)
         self.radialResult = None
+        self.displayCache.clear()
         self.analysisWidget.clear()
         if found:
             self.plotLattice()
             self.excitonWfWidget.centerView()
+
+    # Display resolution
+
+    def displayDensity(self):
+        """The density as displayed (upsampled if smoothing is on), and its grid-to-space transform."""
+        density = self.calculations.probabilityDensity()
+        transform = np.array(self.calculations.tr4x4, dtype=float)
+        if self.smoothing == 1:
+            return density, transform.tolist()
+        key = (id(density), self.smoothing)
+        if key not in self.displayCache:
+            self.displayCache.clear()   # one copy at a time
+            self.displayCache[key] = upsampleDensity(density, self.smoothing)
+        transform[:3, :3] /= self.smoothing
+        return self.displayCache[key], transform.tolist()
+
+    @Slot(int)
+    def setSmoothing(self, factor):
+        self.smoothing = factor
+        if self.calculations.probabilityDensity() is not None:
+            self.plotWf()
 
     @Slot(object)
     def setColormap(self, colormap):
@@ -189,17 +217,20 @@ class Graphs3DWidget(QWidget):
     @Slot()
     def plotWfIso(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIso(self.calculations.probabilityDensity(), self.options.isoLevel(), self.calculations.tr4x4.tolist(), self.options.isoOpacity())
+            density, transform = self.displayDensity()
+            self.excitonWfWidget.plotWfIso(density, self.options.isoLevel(), transform, self.options.isoOpacity())
 
     @Slot()
     def plotWfIsoSet(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfIsoSet(self.calculations.probabilityDensity(), self.options.numIsoLevels(), self.calculations.tr4x4.tolist(), self.options.isoSetOpacity())
+            density, transform = self.displayDensity()
+            self.excitonWfWidget.plotWfIsoSet(density, self.options.numIsoLevels(), transform, self.options.isoSetOpacity())
 
     @Slot()
     def plotWfVol(self):
         if self.calculations.probabilityDensity() is not None:
-            self.excitonWfWidget.plotWfVol(self.calculations.probabilityDensity(), self.options.sliceDensity(), self.calculations.tr4x4.tolist(),
+            density, transform = self.displayDensity()
+            self.excitonWfWidget.plotWfVol(density, self.options.sliceDensity(), transform,
                                            self.options.volumeOpacity(), self.options.volumeContrast())
 
     @Slot()

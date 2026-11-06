@@ -42,7 +42,7 @@ Create virtual environment, activate it and install dependencies:
 cd ~/visual-excitons
 python -m venv .venv
 source .venv/bin/activate
-pip install pyside6 pyqtgraph pyopengl
+pip install pyside6 pyqtgraph pyopengl psutil
 ```
 
 Note that depending on the PyQtGraph version, you may need to install specific version 6.9.0 or 6.8.3 of PySide6. On this issue, see this [question](https://stackoverflow.com/questions/79678479/pyqtgraph-not-working-on-example-in-pythonguis-website-pyside6-with-pyqtgraph). Current versions (as of 01.2025) do **not** need this downgrade.
@@ -110,6 +110,7 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_tasks.py`: background calculations (worker thread, ordering, progress, cancellation, queue replacement, the hooks into yambopy's progress).
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
 - `test_analysis.py`: plane cuts (exact interpolation, masking, plane axes, intersection with the supercell) and the distance distribution (radii of a Gaussian, truncation warning).
+- `test_memory.py`: the real-space grid (as yambopy's, for several cutoffs), the memory estimate and the block size, and the display upsampling.
 - `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
 - `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
 - `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
@@ -201,7 +202,10 @@ Currently under active development, this page plots 3D visualizations of the pro
   - `Fixed particle`: the hole or the electron, whose position is fixed while the probability density of the other one is computed.
   - `Position (a, b, c)`: its position in crystal coordinates of the unit cell. After computing, it is moved to the nearest point of the real-space grid of the wave function, as explained in the note shown below it.
   - `Supercell`: the number of unit cells along each lattice vector. Only odd sizes are allowed, so that the fixed particle sits in the central cell.
-  - `Cutoff`: the plane-wave cutoff of the wave function, in Ry. Higher values give a finer real-space grid, at a higher cost.
+  - `Cutoff`: the plane-wave cutoff of the wave function, in Ry, which sets the resolution of the result: only the plane waves of the wave functions below it are used, and the real-space grid is the smallest one that holds them. The points per unit cell grow with the square root of the cutoff (for BiI3: 13, 18 and 24 along each lattice vector at 5, 10 and 20 Ry). `All plane waves` uses all those of the SAVE database, the finest grid possible (46 points for BiI3); beyond the cutoff of the DFT calculation there is nothing more to gain.
+  - Below the button, the size of the calculation is estimated as its parameters change: its grid, per unit cell and in the whole supercell, and the memory it needs at its peak, with the memory available. The estimate is computed from the shapes of the arrays involved (the wave functions of the bands of the exciton, the real-space arrays, the density and its display copies); it is an estimate within some tens of percent. Excitons degenerate with the one chosen are computed with it, and multiply the memory. When the calculation would need more than 90% of the available memory, the estimate is shown in orange with ⚠, and `Compute wave function` asks before starting it.
+
+    Part of the calculation runs over blocks of k-points, whose buffer can take gigabytes for fine grids and many degenerate states. The block size is reduced automatically to keep it within a quarter of the available memory: the result is the same (the sum over k-points is only split differently) and the time barely changes. For BiI3, exciton 10 (10 degenerate states) at the full cutoff needs about 3.5 GB instead of 8.8 GB. The memory available is read with [psutil](https://github.com/giampaolo/psutil) on Linux, Windows and macOS; without psutil, the estimate is shown without it.
   - Press `Compute wave function`. The wave functions of the dataset are loaded the first time only: later calculations on the same dataset, for other excitons, positions, supercells or cutoffs, skip that step and are several times faster.
 
 #### Plot types and rendering
@@ -225,6 +229,8 @@ Each isosurface type keeps its own transparency, set with `Isosurface opacity` a
 - Others, from the [CET collection](https://colorcet.com/) of perceptually uniform colormaps: `Fire`, `Blues`, `Sunset` (light at low densities, which suits the light theme), `Blue-magenta-yellow` and `Greys`; and `Turbo`, an improved rainbow with high contrast but not perceptually uniform.
 
 `Reverse` swaps the ends of the colormap. Colormaps that start dark (e.g. `Inferno`, `Magma`, `Fire`) hide the low densities on the dark theme, and those that start light (`Blues`, `Sunset`) on the light one: reverse them, or pick another, to suit the background. The choice is remembered between sessions.
+
+**Smoothing.** `Smoothing` displays the density on a grid 2 or 3 times finer, interpolated with cubic splines from the computed one: isosurfaces and volume look smoother, especially when zoomed in or at low cutoffs. It adds no physical detail (that needs a higher cutoff), and the analysis and the exported files use the computed grid. The finer copy is computed once per wave function, in about a second at most.
 
 Translucent surfaces are drawn from back to front, and are re-sorted whenever the view is rotated, panned or zoomed. This way, overlapping and nested surfaces blend correctly from any viewpoint.
 

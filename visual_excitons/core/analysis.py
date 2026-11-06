@@ -9,7 +9,7 @@ except where noted.
 """
 
 import numpy as np
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import map_coordinates, zoom
 
 
 def voxelVectors(lattice, supercell, shape):
@@ -21,6 +21,21 @@ def gridPositions(shape, voxels):
     """Cartesian positions of all grid points, shape (n1, n2, n3, 3)."""
     indices = np.stack(np.meshgrid(*(np.arange(n) for n in shape), indexing='ij'), axis=-1).astype(float)
     return indices @ np.asarray(voxels, dtype=float)
+
+
+def upsampleDensity(density, factor):
+    """
+    The density on a grid `factor` times finer, by cubic spline interpolation,
+    for display: grid point i of the original grid is point factor * i of the
+    new one, so the voxel vectors are divided by `factor`. Clipped to [0, 1]
+    (splines overshoot slightly near sharp features).
+    """
+    density = np.asarray(density, dtype=float)
+    if factor == 1:
+        return density
+    target = [(n - 1) * factor + 1 for n in density.shape]
+    upsampled = zoom(density, [m / n for m, n in zip(target, density.shape)], order=3, grid_mode=False)
+    return np.clip(upsampled, 0.0, 1.0)
 
 
 # Distribution of distances from the fixed particle

@@ -401,3 +401,54 @@ def test_analysis_panel(window, qtbot):
     calc.waveFunction = None
     p3.showAnalysisCheckBox.setChecked(False)
     assert analysis.isHidden()
+
+
+def test_resolution_controls(window, qtbot, monkeypatch):
+    p3, page, calc = window.wavefunctionPage.parameters3DWidget, window.wavefunctionPage, window.calculations
+    calls = []
+    monkeypatch.setattr(calc, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(p3, 'estimate', lambda: None)       # no dataset: no estimate
+    p3.fullCutoffCheckBox.setChecked(True)
+    assert not p3.wfCutoffSpinBox.isEnabled()
+    p3.computeWf()
+    assert calls[-1]['cutoff_ry'] == -1 and calls[-1]['block_size'] == 256
+    p3.fullCutoffCheckBox.setChecked(False)
+    p3.wfCutoffSpinBox.setValue(12.0)
+    p3.computeWf()
+    assert calls[-1]['cutoff_ry'] == 12.0
+
+    # Smoothing: the display gets the upsampled density, on a scaled transform
+    fakeWaveFunction(calc, sigma=2.0)
+    p3.smoothingComboBox.setCurrentIndex(1)
+    density, transform = page.displayDensity()
+    assert density.shape == tuple(2 * n - 1 for n in calc.waveFunction.shape)
+    np.testing.assert_allclose(np.array(transform)[:3, :3], calc.tr4x4[:3, :3] / 2)
+    p3.smoothingComboBox.setCurrentIndex(0)
+    assert page.displayDensity()[0] is calc.waveFunction
+    calc.waveFunction = None
+
+
+def test_memory_warning(window, monkeypatch):
+    p3, calc = window.wavefunctionPage.parameters3DWidget, window.calculations
+    import visual_excitons.gui.parameters_3d_widget as module
+    estimate = {'peak': 12 * 2 ** 30, 'wavefunctions': 2 ** 30, 'loaded': False, 'fftBox': (46, 46, 46),
+                'supercell': [3, 3, 3], 'states': 7, 'blockSize': 64}
+    monkeypatch.setattr(p3, 'estimate', lambda: estimate)
+    monkeypatch.setattr(module, 'availableMemory', lambda: (16 * 2 ** 30, 8 * 2 ** 30))
+
+    p3.updateEstimate()
+    assert p3.estimateWarning and p3.estimateNote.text().startswith('⚠')
+    assert '138 × 138 × 138 in the supercell, 7 degenerate states' in p3.estimateNote.text()
+
+    calls, answers = [], []
+    monkeypatch.setattr(calc, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(module.QMessageBox, 'warning', lambda *args: answers.append(args[1]) or module.QMessageBox.StandardButton.No)
+    p3.computeWf()
+    assert answers == ['Not enough memory?'] and calls == []           # declined: not computed
+    monkeypatch.setattr(module.QMessageBox, 'warning', lambda *args: module.QMessageBox.StandardButton.Yes)
+    p3.computeWf()
+    assert len(calls) == 1 and calls[0]['block_size'] == 64             # the block chosen for the memory
+
+    estimate['peak'] = 2 * 2 ** 30                                        # fits: no question, no warning
+    p3.updateEstimate()
+    assert not p3.estimateWarning

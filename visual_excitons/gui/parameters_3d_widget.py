@@ -1,7 +1,7 @@
-from PySide6.QtCore import Qt, Signal, Slot, QSize
+from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
@@ -10,6 +10,10 @@ from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 from .persistence import DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
+from visual_excitons.core.memory import availableMemory, formatBytes
+
+# Warn when a calculation would use more than this fraction of the available memory
+MEMORY_WARNING_FRACTION = 0.9
 
 
 class Parameters3DWidget(Inspector):
@@ -38,6 +42,7 @@ class Parameters3DWidget(Inspector):
     exportImageRequested = Signal()
     colormapChanged = Signal(object)   # pyqtgraph ColorMap
     analysisChanged = Signal()
+    smoothingChanged = Signal(int)   # display upsampling factor
     planeFromViewRequested = Signal()
     exportDensityRequested = Signal()
 
@@ -127,6 +132,33 @@ class Parameters3DWidget(Inspector):
         self.wfCutoffSpinBox.setToolTip('Plane-wave cutoff of the wave function: higher values give a finer real-space grid')
         self.wfCutoffSpinBox.valueChanged.connect(self.options.setWfCutoff)
 
+        self.fullCutoffCheckBox = QCheckBox('All plane waves')
+        self.fullCutoffCheckBox.setToolTip('No cutoff: all the plane waves of the wave functions in the SAVE database,\n'
+                                           'the finest grid possible (and the most memory)')
+        self.fullCutoffCheckBox.toggled.connect(self.wfCutoffSpinBox.setDisabled)
+
+        cutoffLayout = QHBoxLayout()
+        cutoffLayout.addWidget(self.wfCutoffSpinBox)
+        cutoffLayout.addWidget(self.fullCutoffCheckBox)
+        cutoffLayout.addStretch(1)
+
+        # Grid and memory of the calculation, updated as its parameters change
+        self.estimateNote = NoteLabel()
+        self.estimateWarning = False
+        self.estimateTimer = QTimer(self)
+        self.estimateTimer.setSingleShot(True)
+        self.estimateTimer.setInterval(250)
+        self.estimateTimer.timeout.connect(self.updateEstimate)
+        self.lastEstimate = None
+        for signal in (self.wfCutoffSpinBox.valueChanged, self.fullCutoffCheckBox.toggled,
+                       self.qPointSpinBox.valueChanged, self.excitonIndexSpinBox.valueChanged,
+                       self.xSupercellSpinBox.valueChanged, self.ySupercellSpinBox.valueChanged,
+                       self.zSupercellSpinBox.valueChanged, self.calculations.wfComputed,
+                       self.options.databaseFound, self.options.diagoDirChanged):
+            signal.connect(self.requestEstimate)
+        # The databases may be busy while a calculation runs: estimate once it ends
+        self.calculations.busyChanged.connect(lambda busy: None if busy else self.requestEstimate())
+
         # Shown after computing: the position is snapped to the wave-function grid
         self.particleGridLabel = NoteLabel()
         self.particleGridLabel.hide()
@@ -140,8 +172,9 @@ class Parameters3DWidget(Inspector):
         # Spanning both columns, so the wrapped text has the full width of the form
         form.addRow(self.particleGridLabel)
         form.addRow('Supercell:', supercellLayout)
-        form.addRow('Cutoff:', self.wfCutoffSpinBox)
+        form.addRow('Cutoff:', cutoffLayout)
         form.addRow(computeWfButton)
+        form.addRow(self.estimateNote)
         self.addSection('Calculation', form)
 
         # Both positions, before the particle type that shows one of them
@@ -152,6 +185,7 @@ class Parameters3DWidget(Inspector):
         self.remember('fixedParticle', self.particleTypeComboBox, DATASET)
         self.remember('supercell', scope=DATASET, get=self.supercell, set=self.setSupercell)
         self.remember('cutoff', self.wfCutoffSpinBox, DATASET)
+        self.remember('fullCutoff', self.fullCutoffCheckBox, DATASET)
 
     def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
@@ -232,6 +266,15 @@ class Parameters3DWidget(Inspector):
         form = formLayout()
         form.addRow('Plot type:', self.plotTypeComboBox)
         form.addRow('Colormap:', colormapLayout)
+        self.smoothingComboBox = QComboBox()
+        self.smoothingComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.smoothingComboBox.addItems(['None', '2×', '3×'])
+        self.smoothingComboBox.setToolTip('Display the density on a grid 2 or 3 times finer, interpolated smoothly:\n'
+                                          'smoother isosurfaces and volume, with no new physical detail\n'
+                                          '(that needs a higher cutoff). Analysis and exports use the real grid.')
+        self.smoothingComboBox.currentIndexChanged.connect(lambda index: self.smoothingChanged.emit(index + 1))
+        self.smoothingComboBox.currentIndexChanged.connect(self.requestEstimate)
+        form.addRow('Smoothing:', self.smoothingComboBox)
         form.addRow('Iso level:', isoLevelSlider)
         form.addRow('Levels:', numIsoLevelsSpinBox)
         form.addRow('Style:', isoSetStyleComboBox)
@@ -259,7 +302,8 @@ class Parameters3DWidget(Inspector):
 
         self.addSection('Display', form)
         for key, widget in (('plotType', self.plotTypeComboBox), ('colormap', self.colormapComboBox),
-                            ('colormapReversed', self.reverseColormapCheckBox), ('isoLevel', isoLevelSlider),
+                            ('colormapReversed', self.reverseColormapCheckBox), ('smoothing', self.smoothingComboBox),
+                            ('isoLevel', isoLevelSlider),
                             ('isoLevels', numIsoLevelsSpinBox), ('isoSetStyle', isoSetStyleComboBox),
                             ('isoOpacity', isoOpacitySlider), ('isoSetOpacity', isoSetOpacitySlider),
                             ('volumeOpacity', volumeOpacitySlider), ('volumeContrast', volumeContrastSpinBox),
@@ -638,10 +682,98 @@ class Parameters3DWidget(Inspector):
         exc_index = self.excitonIndexSpinBox.value()
         fixed_particle = self.options.particleType()
         fixed_position = self.options.particlePosition()
-        cutoff = self.options.wfCutoff()
+        cutoff = self.cutoff()
         supercell = [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
 
-        self.calculations.computeExcitonWaveFunction(q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle, fixed_position=fixed_position, cutoff_ry=cutoff, supercell=supercell)
+        if not self.confirmMemory():
+            return
+        # k-points per block chosen to fit the available memory (see memory.chooseBlockSize)
+        blockSize = self.lastEstimate['blockSize'] if self.lastEstimate else 256
+        self.calculations.computeExcitonWaveFunction(block_size=blockSize, q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle, fixed_position=fixed_position, cutoff_ry=cutoff, supercell=supercell)
+
+    def cutoff(self):
+        """Cutoff in Ry, or -1 for all the plane waves."""
+        return -1 if self.fullCutoffCheckBox.isChecked() else self.wfCutoffSpinBox.value()
+
+    def smoothingFactor(self):
+        return self.smoothingComboBox.currentIndex() + 1
+
+    # Size of the calculation
+
+    @Slot()
+    def requestEstimate(self, *args):
+        self.estimateTimer.start()
+
+    def estimate(self):
+        """Grid and memory of the calculation as set (see Calculations.estimateWaveFunction)."""
+        return self.calculations.estimateWaveFunction(self.qPointIndex(), self.excitonIndexSpinBox.value(),
+                                                      self.cutoff(), self.supercell(), self.smoothingFactor())
+
+    @Slot()
+    def updateEstimate(self):
+        try:
+            estimate = self.estimate()
+        except ValueError as error:
+            self.lastEstimate = None
+            self.showEstimate(str(error), warning=True)
+            return
+        if estimate is None:
+            if self.calculations.isBusy():
+                return   # estimated when the calculation ends
+            self.lastEstimate = None
+            self.showEstimate('')
+            return
+        self.lastEstimate = estimate
+
+        box, supercell = estimate['fftBox'], estimate['supercell']
+        total = ' × '.join(str(n * s) for n, s in zip(box, supercell))
+        states = f', {estimate["states"]} degenerate states' if estimate['states'] > 1 else ''
+        text = (f'Grid: {box[0]} × {box[1]} × {box[2]} points per cell ({total} in the supercell{states}). '
+                f'Memory: about {formatBytes(estimate["peak"])} at peak')
+        if estimate['loaded']:
+            text += ', the wave functions being already loaded'
+        needed, available = self.memoryNeeded(estimate)
+        warning = False
+        if available is not None:
+            text += f'; {formatBytes(available)} available'
+            warning = needed > MEMORY_WARNING_FRACTION * available
+        self.showEstimate(('⚠ ' if warning else '') + text + '.', warning)
+
+    def memoryNeeded(self, estimate):
+        """Memory the calculation adds to what is in use (bytes), and the memory available (or None)."""
+        memory = availableMemory()
+        # Wave functions already loaded are in use already
+        needed = estimate['peak'] - (estimate['wavefunctions'] if estimate['loaded'] else 0)
+        return needed, (memory[1] if memory else None)
+
+    def showEstimate(self, text, warning=False):
+        self.estimateWarning = warning
+        self.estimateNote.setText(text)
+        self.estimateNote.setVisible(bool(text))
+        if warning:
+            self.estimateNote.setStyleSheet('color: #d9822b')
+        else:
+            self.estimateNote._applyColor()
+
+    def confirmMemory(self):
+        """Ask before a calculation that likely does not fit in the available memory."""
+        try:
+            estimate = self.estimate()
+        except ValueError:
+            return True   # the calculation reports the error
+        if estimate is None:
+            return True
+        self.lastEstimate = estimate   # its block size is used for the calculation
+        needed, available = self.memoryNeeded(estimate)
+        if available is None or needed <= MEMORY_WARNING_FRACTION * available:
+            return True
+        answer = QMessageBox.warning(
+            self, 'Not enough memory?',
+            f'This calculation needs about {formatBytes(needed)} more memory, and only {formatBytes(available)} '
+            'are available: the computer may slow down a lot, or the program may be stopped.\n\n'
+            'A lower cutoff, a smaller supercell or closing other programs would help. Compute anyway?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
 
     @Slot(int)
     def setIsoLevel(self, tick: int):
