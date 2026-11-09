@@ -23,6 +23,8 @@ from .theme import themeManager, THEME_MODES
 from visual_excitons import __version__
 from .persistence import StateRegistry, GLOBAL, DATASET
 from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
+from .figure_export import FigureExportDialog, figureData, figureStyles
+from visual_excitons.core import figures
 from visual_excitons.core.session import (readSession, writeSession, datasetFingerprint, fingerprintsMatch,
                                           SessionError, SESSION_SUFFIX, SESSION_FILTER)
 
@@ -122,6 +124,7 @@ class MainWindow(QMainWindow):
         self.wavefunctionPage = Graphs3DWidget(self.options, self.calculations)
         self.spectraPage.inspector.showWavefunctionRequested.connect(lambda: self.setPage(WAVEFUNCTION_PAGE))
         self.systemPage.qPathApplied.connect(self.saveQPath)
+        self.spectraPage.inspector.exportFigureRequested.connect(self.exportFigure)
         self.wavefunctionPage.parameters3DWidget.exportImageRequested.connect(self.exportImage)
         self.wavefunctionPage.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
 
@@ -191,6 +194,12 @@ class MainWindow(QMainWindow):
         exportImageAction.setShortcut(QKeySequence('Ctrl+E'))
         exportImageAction.triggered.connect(self.exportImage)
         fileMenu.addAction(exportImageAction)
+
+        exportFigureAction = QAction('Export 2D &figure…', self)
+        exportFigureAction.setShortcut(QKeySequence('Ctrl+Shift+F'))
+        exportFigureAction.setStatusTip('The 2D plots as a publication figure, or a script that recreates it with Matplotlib')
+        exportFigureAction.triggered.connect(self.exportFigure)
+        fileMenu.addAction(exportFigureAction)
 
         self.exportDensityAction = QAction('Export probability &density…', self)
         self.exportDensityAction.setShortcut(QKeySequence('Ctrl+Shift+E'))
@@ -660,6 +669,20 @@ class MainWindow(QMainWindow):
         self.rememberExportFolder(filename)
         width, height = dialog.imageSize()
         self.statusBar().showMessage(f'Image ({width} × {height}) saved to {filename}', 6000)
+
+    @Slot()
+    def exportFigure(self):
+        data = figureData(self.calculations)
+        if not figures.availablePanels(data):
+            QMessageBox.information(self, 'Export 2D figure',
+                                    'Nothing to export yet: compute a dispersion, absorption spectra or a band structure.')
+            return
+        styles = figureStyles(self.dispersionStyle, self.absorptionStyle, self.bandStructureStyle)
+        name = datasetName(self.dataset or {}) or 'figure'
+        dialog = FigureExportDialog(data, styles, defaultName=f'{name}_figure', programVersion=__version__, parent=self)
+        dialog.exec()
+        if getattr(dialog, 'savedFile', None):
+            self.statusBar().showMessage(f'Saved {dialog.savedFile}', 6000)
 
     @Slot()
     def exportDensity(self):

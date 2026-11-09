@@ -54,6 +54,8 @@ visual_excitons/
 │   ├── tasks.py            TaskRunner: worker thread, progress, cancellation, DB lock
 │   ├── dataset.py          Finding SAVE / BSE / GW directories in a folder
 │   ├── session.py          Session files: format, reading/writing, dataset fingerprint
+│   ├── figures.py          Publication figures of the 2D plots (Matplotlib; self-contained)
+│   ├── figure_script.py    Export of a figure as a standalone script with its data
 │   ├── bonds.py            Bond detection in periodic crystals
 │   ├── analysis.py         Plane cuts, distance distribution, upsampling
 │   ├── export.py           Cube / XSF writers
@@ -85,7 +87,8 @@ visual_excitons/
 │   ├── gl_style.py         Draw stages, GL options, shaders, sphere/cylinder meshes
 │   ├── colormaps.py        Colormaps of the density
 │   ├── analysis_widget.py  Analysis panel (plane cut, distance distribution)
-│   └── image_export.py     Image export of the 3D view
+│   ├── image_export.py     Image export of the 3D view
+│   └── figure_export.py    Publication figures of the 2D plots: data and styles, dialog with preview
 tests/                      pytest suite (see Testing)
 docs/                       This document
 data/                       Test datasets (not in the repository)
@@ -196,6 +199,9 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `export.py` | `writeCube`, `writeXsf`, `writeDensity`, `supercellAtoms` | Vectorized writers; scientific notation |
 | `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory` | Grid as yambopy computes it; memory from array shapes |
 | `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only |
+| `figures.py` | `buildFigure(data, styles, options)`, `saveFigure`, `saveData`, `loadData` | **Self-contained** (NumPy, Matplotlib): copied whole into exported scripts, so no imports from the program |
+| `figure_script.py` | `writeFigureScript` | The script is `figures.py` plus a main part loading the data file |
+| `session.py` | `writeSession`, `readSession`, `datasetFingerprint` | See section 9 |
 | `atomic_data.py` | `chemical_symbols`, `covalent_radii` (Å), `jmol_colors`, `BOHR_TO_ANGSTROM`, `ANGSTROM_TO_BOHR` | From ASE |
 | `style.py` | `DispersionStyle`, `AbsorptionStyle`, `BandStructureStyle` | State of the 2D plot styles; edited by `style_widget.py` |
 
@@ -386,6 +392,12 @@ flowchart LR
 
 `AxisGizmo` is a small transparent `GLViewWidget` child, synced to the main view's rotation. Arrow sets (Cartesian, lattice, reciprocal) are each scaled to fit. It clears to **transparent black**. Labels are `GLTextItem`s.
 
+### Publication figures of the 2D plots (`core/figures.py`, `gui/figure_export.py`)
+
+The 2D plots stay interactive with PyQtGraph; figures for papers are drawn separately with Matplotlib from the same data and styles. `figure_export.figureData()` and `figureStyles()` translate the results of `Calculations` and the PyQtGraph styles (Qt pens, symbols) into plain values; `figures.buildFigure()` draws a `matplotlib.figure.Figure` (not pyplot: no GUI backend, safe anywhere) under `rc_context` options (fonts, sizes); the dialog previews it through the Agg canvas.
+
+`figures.py` must stay **self-contained** (NumPy and Matplotlib only): `figure_script.writeFigureScript()` copies it whole into the exported scripts, which must run without the program (`test_figures.py` runs one with `python -I` from another folder). Text drawn by Matplotlib must exist in every font offered: write symbols missing from some fonts as math text (e.g. `$\Gamma$`: Computer Modern has no Γ text glyph); the tests fail on missing glyphs.
+
 ### Image export (`image_export.py`)
 
 `composeImage()` renders the scene with `renderImage()` (multisampled framebuffer object at the requested size), then composites the gizmo (a temporary hidden `AxisGizmo` at scale, its labels painted by Qt at their projected positions) and the cell-parameter label (vector painting). Transparent renders clear to transparent black. This relies on **OpenGL context sharing** (`AA_ShareOpenGLContexts`, set in `main.py`).
@@ -498,7 +510,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - `datasetPath(name)` and the `lattice` fixture skip tests whose dataset in `data/` is missing (`data` marker).
 - OpenGL context sharing is enabled as in `main.py`.
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_persistence`, `test_session` (session files, results round trip), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_persistence`, `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 

@@ -12,6 +12,8 @@ class ParametersWidget(Inspector):
     absorptionParametersChanged = Signal()
     # Asks the main window to switch to the wave-function page
     showWavefunctionRequested = Signal()
+    # Asks the main window to export the plots as a publication figure
+    exportFigureRequested = Signal()
 
     def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle):
         Inspector.__init__(self)
@@ -108,6 +110,16 @@ class ParametersWidget(Inspector):
         layout = QVBoxLayout()
         layout.addWidget(StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle))
         self.addSection('Appearance', layout, expanded=False)
+
+        # Publication figures with Matplotlib
+        exportButton = QPushButton('Export figure…')
+        exportButton.setToolTip('The plots as a publication figure (PDF, SVG, PNG...) or a Python script\n'
+                                'that recreates it with Matplotlib (Ctrl+Shift+F)')
+        exportButton.clicked.connect(self.exportFigureRequested)
+        layout = QVBoxLayout()
+        layout.addWidget(exportButton)
+        layout.addWidget(NoteLabel('Any of the three plots, alone or combined, with the colors and styles above.'))
+        self.addSection('Export', layout, expanded=False)
 
         self.alignLabels()
 

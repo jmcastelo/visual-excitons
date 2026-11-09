@@ -96,6 +96,7 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
 - `test_analysis.py`: plane cuts (exact interpolation, masking, plane axes, intersection with the supercell) and the distance distribution (radii of a Gaussian, truncation warning).
 - `test_memory.py`: the real-space grid (as yambopy's, for several cutoffs), the memory estimate and the block size, and the display upsampling.
+- `test_figures.py`: publication figures (panels, arrangements, shared energy axis, styles, fonts and formats, data files), the exported scripts run in a separate Python, and the export dialog.
 - `test_session.py`: session files (format, versions, interrupted saves, fingerprints), results round trip, and a whole setup through the window (changed and moved datasets).
 - `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
 - `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
@@ -178,6 +179,17 @@ Side panel:
 - **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. With `Automatic range` (the default), each spectrum spans the energies of its own excitons, plus a margin of 0.5 eV (five times the broadening of the peaks) on both sides; the range of the spectra plotted is shown below. Untick it to set the range by hand with `From` and `To`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
 - **Selected exciton**: click an exciton on the dispersion, or a bright exciton on an absorption spectrum, to select it. It is marked with an orange ring on both plots (on the absorption spectrum, when it is bright there). Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected on the Wave function page too. `Wave function of this exciton` goes to that page.
 - **Appearance**: the style of the plots (colors, widths, fonts, etc. of the axes, curves, points, legend and the rest of the elements).
+- **Export**: `Export figure…` (also `File › Export 2D figure…`, `Ctrl+Shift+F`) makes publication figures of the plots, drawn with [Matplotlib](https://matplotlib.org) (see below).
+
+**Publication figures.** The export dialog draws the plots with Matplotlib, as figures for papers, with the colors, line styles and symbols set under `Appearance`, and shows a preview:
+
+- **Panels**: the dispersion, the absorption spectra and the band structure (those computed), alone or combined, in the order of the list (drag them to reorder), in a row or in a column, with panel letters (a), (b)... With `Dispersion and absorption on one energy axis`, the absorption is drawn rotated next to the dispersion, sharing its energy axis, over the range of the dispersion and of the bright excitons.
+- **Size**: in cm, with the widths of one column (8.6 cm), one and a half (12.9 cm) and two columns (17.8 cm) of usual two-column journals, or any other.
+- **Fonts**: DejaVu Sans or Serif, STIX (similar to Times) or Computer Modern (as LaTeX), and their size in points.
+- **Contents**: the legend of the spectra, the bright (in their colors) and dark (in grey) excitons below the absorption, the index of the bright excitons, a ring around the selected exciton, Γ instead of G on the path, titles.
+- **Files**: `Save figure…` saves it as PDF, SVG or EPS (vector graphics, best for papers) or PNG or TIFF at the chosen resolution. `Save as script…` saves a Python script and its data file (`.npz`) that recreate the figure with Matplotlib: edit its options (size, fonts, panels...) or its code, and run it with `python`. It does not need Visual Excitons, only NumPy and Matplotlib, so it can be kept with a paper and adapted to a journal's style.
+
+The figures use the data as computed: e.g. the absorption spectra are sampled every `Step` of the `Absorption` section, which shows as straight segments when the shared energy axis zooms into them; use a smaller step for smoother curves. The last options of the dialog are remembered.
 
 Band structure:
 
