@@ -135,7 +135,7 @@ The main window is made of panels:
 - **Spectra controls** and **Wave function controls**: the parameters, made of collapsible sections. Click a section header to open or close it; the panel scrolls when its open sections do not fit.
 - **Appearance**: the style of the 2D plots (see [Appearance of the plots](#appearance-of-the-plots)).
 
-**Arranging the panels.** Drag a panel by its tab to put it next to another one, or onto it to make them tabs of one area; the drop indicators show where it will go. The button at the top right of a panel area floats it in its own window (or double-click its tab), and the cross closes it. `View › Panels` shows or hides each panel.
+**Arranging the panels.** Drag a panel by its tab to put it next to another one, or onto it to make them tabs of one area; the drop indicators show where it will go. The button at the top right of a panel area floats it in its own window (or double-click its tab), and the cross closes it. A floating panel has an `Attach` button in its title bar that puts it back into the main window where it was: as a tab with the same panels, or on the same side of the same neighbour (next to a related panel when those are gone); `Layout › Attach floating panels` does it for all of them. `View › Panels` shows or hides each panel.
 
 The `Layout` menu arranges the panels for each step of the usual workflow, or shows all of them:
 

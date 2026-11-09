@@ -120,6 +120,72 @@ def test_floating_windows_close_with_the_main_window(qtbot):
     assert not container.isVisible() and toggled == []
 
 
+def labelPanels(qtbot, keys):
+    """A window with docks of labels (OpenGL views cannot be shown offscreen), arranged as a preset would."""
+    from PySide6.QtWidgets import QMainWindow
+    from visual_excitons.gui.docking import Panels, RIGHT, BOTTOM
+    main = QMainWindow()
+    qtbot.addWidget(main)
+    main.resize(900, 600)
+    panels = Panels(main)
+    for key in keys:
+        panels.add(key, QLabel(key))
+    main.show()
+    return main, panels
+
+
+def test_attach_puts_floating_panels_back(qtbot):
+    from visual_excitons.gui.docking import BOTTOM, RIGHT
+    main, panels = labelPanels(qtbot, ('system', 'dispersion', 'bands', 'absorption'))
+    D, manager = panels.docks, panels.manager
+    # system | dispersion with bands as a tab, absorption below them
+    manager.addDockWidget(RIGHT, D['dispersion'], D['system'].dockAreaWidget())
+    manager.addDockWidgetTabToArea(D['bands'], D['dispersion'].dockAreaWidget())
+    manager.addDockWidget(BOTTOM, D['absorption'], D['dispersion'].dockAreaWidget())
+    panels.recordHomes()
+    assert panels.homes['bands']['tabs'] == ['dispersion']
+    assert panels.homes['absorption']['neighbour'] == 'dispersion' and panels.homes['absorption']['side'] == int(BOTTOM.value)
+
+    title = lambda key: D[key].titleBarActions()
+    assert panels.attachActions['bands'] not in title('bands')       # docked: no Attach
+    for key in ('bands', 'absorption'):
+        D[key].setFloating()
+    panels.updateAttachActions()
+    assert panels.attachActions['bands'] in title('bands') and sorted(panels.floatingKeys()) == ['absorption', 'bands']
+
+    panels.attachActions['bands'].trigger()
+    panels.attachAll()
+    assert panels.floatingKeys() == []
+    assert D['bands'].dockAreaWidget() is D['dispersion'].dockAreaWidget()          # a tab again
+    below = D['absorption'].dockAreaWidget().mapTo(main, D['absorption'].dockAreaWidget().rect().center())
+    above = D['dispersion'].dockAreaWidget().mapTo(main, D['dispersion'].dockAreaWidget().rect().center())
+    assert below.y() > above.y()                                                    # below it again
+    assert panels.attachActions['bands'] not in title('bands')
+
+
+def test_attach_without_its_place(qtbot):
+    """Its neighbours floating too, or no place known: next to a related panel."""
+    main, panels = labelPanels(qtbot, ('system', 'spectraControls', 'appearance'))
+    D = panels.docks
+    D['appearance'].setFloating()
+    panels.homes['appearance'] = {'tabs': ['nothing'], 'neighbour': None, 'side': None}
+    panels.attach('appearance')
+    assert D['appearance'].dockAreaWidget() is D['spectraControls'].dockAreaWidget()
+
+
+def test_panel_places_are_kept(window, qtbot):
+    """Panels left floating at closing can go back to their place after a restart."""
+    import json
+    window.panels.homes['analysis'] = {'tabs': ['wavefunction'], 'neighbour': None, 'side': None}
+    window.panels.recordHomes = lambda: None          # offscreen, the docks are not laid out
+    window.close()
+    saved = json.loads(QSettings('VisualExcitons', 'VisualExcitons').value('panelHomes'))
+    assert saved['analysis']['tabs'] == ['wavefunction']
+    again = MainWindow()
+    qtbot.addWidget(again)
+    assert again.panels.homes['analysis']['tabs'] == ['wavefunction']
+
+
 def test_closing_the_window_closes_the_floating_panels(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window.panels, 'closeFloatingWindows', lambda: calls.append(True))

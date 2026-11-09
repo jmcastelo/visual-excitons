@@ -11,8 +11,8 @@ The arrangement is kept between restarts (`saveState`), as are the user's
 layouts (`saveLayouts`); they are preferences, not part of session files.
 """
 
-from PySide6.QtCore import QObject, Signal, QTimer
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtCore import QObject, Signal, QTimer, QEvent, QRectF, QPointF, Qt
+from PySide6.QtGui import QPalette, QColor, QAction, QIcon, QPixmap, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QScrollArea, QFrame, QWidget, QApplication
 import PySide6QtAds as ads
 
@@ -119,6 +119,37 @@ def scrollable(widget: QWidget) -> QScrollArea:
     return area
 
 
+def attachIcon(size=16) -> QIcon:
+    """A window with an arrow into its corner: back into the main window."""
+    s = size * 2
+    pixmap = QPixmap(s, s)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    color = QColor(128, 128, 128)
+    painter.setPen(QPen(color, s * 0.08))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRect(QRectF(s * 0.1, s * 0.1, s * 0.8, s * 0.8))
+    painter.setBrush(color)
+    painter.drawRect(QRectF(s * 0.1, s * 0.55, s * 0.35, s * 0.35))
+    painter.setPen(QPen(color, s * 0.09))
+    painter.drawLine(QPointF(s * 0.82, s * 0.18), QPointF(s * 0.5, s * 0.5))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawPolygon(QPolygonF([QPointF(s * 0.42, s * 0.58), QPointF(s * 0.42, s * 0.36),
+                                   QPointF(s * 0.64, s * 0.58)]))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def side(fromRect, toRect):
+    """Where `toRect` lies relative to `fromRect`: LEFT, RIGHT, TOP or BOTTOM."""
+    dx = toRect.center().x() - fromRect.center().x()
+    dy = toRect.center().y() - fromRect.center().y()
+    if abs(dx) * fromRect.height() >= abs(dy) * fromRect.width():
+        return RIGHT if dx > 0 else LEFT
+    return BOTTOM if dy > 0 else TOP
+
+
 class Panels(QObject):
     """The dock manager of the main window and its docks, presets and saved layouts."""
 
@@ -133,6 +164,22 @@ class Panels(QObject):
         self.baseStyleSheet = self.manager.styleSheet()
         self.docks = {}
         self.arranging = False
+        # Where each dock was last docked, for Attach: the docks it was a tab
+        # with, and the dock next to its area with the side it was on. Updated
+        # after every change of layout (any mouse release, presets, restores)
+        self.homes = {}
+        self.extraTitleBarActions = {}
+        self.attachActions = {}
+        self.homesTimer = QTimer(self)
+        self.homesTimer.setSingleShot(True)
+        self.homesTimer.setInterval(0)
+        self.homesTimer.timeout.connect(self.recordHomes)
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            self.homesTimer.start()   # a drag may have moved a dock
+        return False
 
     def applyTheme(self, *args):
         """Tab colors for the current palette (call after each theme change)."""
@@ -151,6 +198,12 @@ class Panels(QObject):
         dock.setMinimumSizeHintMode(ads.CDockWidget.eMinimumSizeHintMode.MinimumSizeHintFromContent)
         dock.viewToggled.connect(lambda shown, key=key: self.arranging or self.panelToggled.emit(key, shown))
         self.docks[key] = dock
+        # Back into the main window, from its floating window
+        action = QAction(attachIcon(), 'Attach', self)
+        action.setToolTip('Put the panel back into the main window, where it was')
+        action.triggered.connect(lambda checked=False, key=key: self.attach(key))
+        self.attachActions[key] = action
+        dock.topLevelChanged.connect(lambda floating: self.updateAttachActions())
         # Until a layout is applied: all in one area, so that every dock belongs
         # to the manager
         first = next(iter(self.docks.values()))
@@ -159,6 +212,85 @@ class Panels(QObject):
         else:
             self.manager.addDockWidgetTabToArea(dock, first.dockAreaWidget())
         return dock
+
+    def setTitleBarActions(self, key, actions):
+        """Actions in the title bar of a dock (followed by Attach while it floats)."""
+        self.extraTitleBarActions[key] = list(actions)
+        self.updateTitleBarActions(key, force=True)
+
+    def updateTitleBarActions(self, key, force=False):
+        # QtAds shows the actions of a dock whether visible or not: Attach is
+        # only given to floating docks
+        dock = self.docks[key]
+        actions = self.extraTitleBarActions.get(key, []) + ([self.attachActions[key]] if self.isFloating(key) else [])
+        if not force and dock.titleBarActions() == actions:
+            return
+        dock.setTitleBarActions(actions)
+        area = dock.dockAreaWidget()
+        if area is not None:
+            area.titleBar().updateDockWidgetActionsButtons()
+
+    # Floating docks back into the main window
+
+    def isFloating(self, key):
+        dock = self.docks[key]
+        return dock.isFloating() or dock.isInFloatingContainer()
+
+    def isDocked(self, key):
+        """Open in the main window."""
+        return not self.docks[key].isClosed() and not self.isFloating(key) and self.docks[key].dockAreaWidget() is not None
+
+    def updateAttachActions(self):
+        for key in self.docks:
+            self.updateTitleBarActions(key)
+
+    def recordHomes(self):
+        """Note where each dock open in the main window is (see homes)."""
+        self.updateAttachActions()
+        docked = [key for key in self.docks if self.isDocked(key)]
+        areas = {key: self.docks[key].dockAreaWidget() for key in docked}
+        rects = {}
+        for key, area in areas.items():
+            topLeft = area.mapTo(self.window, area.rect().topLeft())
+            rects[key] = area.rect().translated(topLeft)
+        for key in docked:
+            area = areas[key]
+            tabs = [other for other in docked if other != key and areas[other] is area]
+            neighbour, where = None, None
+            others = [other for other in docked if areas[other] is not area]
+            if others:
+                center = rects[key].center()
+                nearest = min(others, key=lambda other: (rects[other].center() - center).manhattanLength())
+                neighbour, where = nearest, side(rects[nearest], rects[key])
+            self.homes[key] = {'tabs': tabs, 'neighbour': neighbour, 'side': int(where.value) if where else None}
+
+    def attach(self, key):
+        """Put a floating dock back where it was in the main window (or next to a related one)."""
+        if not self.isFloating(key):
+            return
+        dock = self.docks[key]
+        home = self.homes.get(key, {})
+        tab = next((other for other in home.get('tabs', []) if other in self.docks and self.isDocked(other)), None)
+        neighbour = home.get('neighbour')
+        if tab is not None:
+            self.manager.addDockWidgetTabToArea(dock, self.docks[tab].dockAreaWidget())
+        elif neighbour in self.docks and self.isDocked(neighbour) and home.get('side') is not None:
+            self.manager.addDockWidget(ads.DockWidgetArea(home['side']), dock, self.docks[neighbour].dockAreaWidget())
+        else:
+            related = next((other for other in CLOSED_NEIGHBOURS.get(key, []) if self.isDocked(other)), None)
+            if related is not None:
+                self.manager.addDockWidgetTabToArea(dock, self.docks[related].dockAreaWidget())
+            else:
+                self.manager.addDockWidget(RIGHT, dock)
+        dock.setAsCurrentTab()
+        self.recordHomes()
+
+    def attachAll(self):
+        for key in list(self.docks):
+            self.attach(key)
+
+    def floatingKeys(self):
+        return [key for key in self.docks if not self.docks[key].isClosed() and self.isFloating(key)]
 
     def toggleActions(self):
         """Actions that show or hide each dock, in the order of PANELS."""
@@ -228,6 +360,7 @@ class Panels(QObject):
         self.setShares(sizes)
         # Once laid out, when the window was not shown yet
         QTimer.singleShot(0, lambda: self.setShares(sizes))
+        self.homesTimer.start()
 
     def setShares(self, sizes):
         for key, shares in sizes:
@@ -265,6 +398,7 @@ class Panels(QObject):
             return bool(self.manager.restoreState(state))
         finally:
             self.arranging = False
+            self.homesTimer.start()
 
     # The user's layouts
 
@@ -280,6 +414,7 @@ class Panels(QObject):
             self.manager.openPerspective(name)
         finally:
             self.arranging = False
+            self.homesTimer.start()
 
     def removeLayout(self, name):
         self.manager.removePerspective(name)

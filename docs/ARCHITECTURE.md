@@ -419,6 +419,7 @@ Every panel is a dock of the Qt Advanced Docking System (`PySide6QtAds`), manage
 - `PANELS`: the dock keys (also their object names, which the saved state refers to: do not rename them) and titles. To add a panel: add it here, place it in the `PRESETS` that should show it and in `CLOSED_NEIGHBOURS`, and add its widget in `MainWindow.createPanels`.
 - `PRESETS`: the preset layouts, as steps that place each dock relative to the window or to another dock's area (`LEFT`, `RIGHT`, `BOTTOM`, `CENTER`, or `TAB` to add it as a tab), and the shares of the splitters (`sizes`; the list must match the widgets of the splitter that holds the dock's area, or it is ignored). `applyPreset` removes all docks and places them again; docks left out of a preset are closed as hidden tabs next to a related panel (`CLOSED_NEIGHBOURS`), so that reopening them puts them somewhere sensible. Docks passed in `closed` are placed but closed (the analysis when it is off), so they reopen where the preset puts them.
 - The arrangement (`saveState`/`restoreState`) is saved under `panels` in the settings on close; the user's layouts are QtAds perspectives, saved under `layouts/`. Neither is in session files. An invalid saved state falls back to `DEFAULT_PRESET`.
+- **Attach** (QtAds has no way back to a previous place): `Panels.homes` notes, for each dock open in the main window, the docks it is a tab with and the nearest other dock with the side it is on (`recordHomes`, run after every mouse release, through an application event filter and a zero-delay timer, and after presets and restores). `attach(key)` puts a floating dock back as a tab of the first of those still docked, or on that side of the neighbour, else next to a `CLOSED_NEIGHBOURS` panel. The homes are saved under `panelHomes`. QtAds shows a dock's title bar actions whether visible or not, so the Attach action is only given to floating docks (`updateTitleBarActions`, with `updateDockWidgetActionsButtons`); other title bar actions go through `Panels.setTitleBarActions`.
 - Floating docks are top-level windows of their own, and the application only quits when no window is left open: `MainWindow.closeEvent` saves the state, then calls `closeFloatingWindows()` (in that order, so the floating docks are restored open next time).
 - `panelToggled(key, shown)` reports docks opened or closed by the user (not while a layout is applied: `arranging`). `MainWindow` uses it to keep the `Show the analysis panel` checkbox and the Analysis dock in step.
 - Moving a dock reparents its widget, and an OpenGL widget that moves to another window (floating) gets a new OpenGL context. This works because contexts are shared (`AA_ShareOpenGLContexts`): pyqtgraph compiles its shaders once, for all views.
@@ -483,7 +484,7 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 | Key | Content |
 |---|---|
 | `geometry`, `theme` | Window |
-| `panels`, `layouts/` | Arrangement of the panels; the user's saved layouts |
+| `panels`, `layouts/`, `panelHomes` | Arrangement of the panels; the user's saved layouts; where each panel goes back to (Attach) |
 | `state` | JSON: global values of all panels |
 | `recentDatasets` | JSON list: directories, `gw`, `qPath`, `state` (dataset values, camera included) |
 | `recentSessions`, `sessionDir` | Recent session files, last session folder |

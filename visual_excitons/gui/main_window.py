@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
             action = QAction(appearanceIcon(), 'Appearance…', self)
             action.setToolTip(f'The style of the {GRAPHS[key].lower()} plot')
             action.triggered.connect(lambda checked=False, key=key: self.showAppearance(key))
-            self.panels.docks[key].setTitleBarActions([action])
+            self.panels.setTitleBarActions(key, [action])
             view.menu.addSeparator()
             view.menu.addAction(action)
             self.appearanceActions[key] = action
@@ -264,6 +264,12 @@ class MainWindow(QMainWindow):
 
         # Layout: presets and the user's own layouts
         self.layoutMenu = self.menuBar().addMenu('&Layout')
+        self.attachFloatingAction = QAction('&Attach floating panels', self)
+        self.attachFloatingAction.setStatusTip('Put the floating panels back into the main window, where they were')
+        self.attachFloatingAction.triggered.connect(self.panels.attachAll)
+        # Only when there are floating panels
+        self.layoutMenu.aboutToShow.connect(
+            lambda: self.attachFloatingAction.setEnabled(bool(self.panels.floatingKeys())))
         self.updateLayoutMenu()
 
         # Help
@@ -329,6 +335,9 @@ class MainWindow(QMainWindow):
                 menu.addAction(action)
 
         menu.addSeparator()
+        menu.addAction(self.attachFloatingAction)
+
+        menu.addSeparator()
         saveAction = QAction('&Save layout as…', self)
         saveAction.setStatusTip('Keep the current arrangement of the panels under a name')
         saveAction.triggered.connect(self.saveLayoutAs)
@@ -373,6 +382,8 @@ class MainWindow(QMainWindow):
     def restoreLayout(self):
         """The layouts saved by the user, and the arrangement of the last run (or the default preset)."""
         self.panels.loadLayouts(self.settings)
+        self.panels.homes = {key: home for key, home in self.loadJson('panelHomes', {}).items()
+                             if key in self.panels.docks and isinstance(home, dict)}
         self.updateLayoutMenu()
         if not self.panels.restoreState(self.settings.value('panels', b'')):
             self.applyPreset(DEFAULT_PRESET)
@@ -836,6 +847,8 @@ class MainWindow(QMainWindow):
         self.calculations.tasks.waitForDone(10000)
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('panels', self.panels.saveState())
+        self.panels.recordHomes()
+        self.settings.setValue('panelHomes', json.dumps(self.panels.homes))
         self.settings.setValue('theme', self.theme.mode)
         self.settings.setValue('state', json.dumps(self.state.values(GLOBAL)))
         self.storeDatasetState()
