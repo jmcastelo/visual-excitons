@@ -204,6 +204,19 @@ class Panels(QObject):
             total = sum(current) or self.window.width()
             self.manager.setSplitterSizes(area, [max(1, round(share * total)) for share in shares])
 
+    def closeFloatingWindows(self):
+        """
+        Close the windows of the floating docks, when the main window closes
+        (after saving the state, which has them): they are windows of their
+        own, and the application only quits once no window is left open.
+        """
+        self.arranging = True
+        try:
+            for container in self.manager.floatingWidgets():
+                container.close()
+        finally:
+            self.arranging = False
+
     def saveState(self) -> bytes:
         return bytes(self.manager.saveState())
 

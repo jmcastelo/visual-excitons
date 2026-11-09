@@ -787,4 +787,6 @@ class MainWindow(QMainWindow):
         self.settings.setValue('theme', self.theme.mode)
         self.settings.setValue('state', json.dumps(self.state.values(GLOBAL)))
         self.storeDatasetState()
+        # Last: closing them changes what is saved above (closed docks)
+        self.panels.closeFloatingWindows()
         super().closeEvent(event)

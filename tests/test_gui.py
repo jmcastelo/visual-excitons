@@ -101,6 +101,33 @@ def test_layout_is_remembered(window, qtbot, monkeypatch):
     again.close()
 
 
+def test_floating_windows_close_with_the_main_window(qtbot):
+    """Floating docks are windows of their own: left open, the program would not quit."""
+    from PySide6.QtWidgets import QMainWindow
+    from visual_excitons.gui.docking import Panels
+    main = QMainWindow()
+    qtbot.addWidget(main)
+    panels = Panels(main)
+    for key in ('system', 'dispersion'):          # labels: OpenGL views cannot be shown offscreen
+        panels.add(key, QLabel(key))
+    main.show()
+    panels.docks['dispersion'].setFloating()
+    [container] = panels.manager.floatingWidgets()
+    assert container.isVisible()
+    toggled = []
+    panels.panelToggled.connect(lambda key, shown: toggled.append(key))
+    panels.closeFloatingWindows()
+    assert not container.isVisible() and toggled == []
+
+
+def test_closing_the_window_closes_the_floating_panels(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(window.panels, 'closeFloatingWindows', lambda: calls.append(True))
+    monkeypatch.setattr(window.panels, 'saveState', lambda: calls.append('saved') or b'')
+    window.close()
+    assert calls == ['saved', True]            # after saving the layout, which has them
+
+
 def test_invalid_saved_layout_falls_back_to_the_default(qtbot, monkeypatch, tmp_path):
     settings = QSettings('VisualExcitons', 'VisualExcitons')
     settings.clear()
