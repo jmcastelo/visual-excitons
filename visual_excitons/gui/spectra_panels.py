@@ -1,19 +1,21 @@
-from PySide6.QtCore import Qt, Slot
+"""
+The spectra: the dispersion, absorption and band structure plots and their
+controls, each shown in its own dock by the main window.
+"""
+
+from PySide6.QtCore import QObject, Slot
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QSplitter
 
 from .dispersion_widget import DispersionWidget
 from .band_structure_widget import BandStructureWidget
 from .absorption_widget import AbsorptionWidget
 from .parameters_widget import ParametersWidget
-from .inspector import pageLayout
-from .persistence import PersistentState
 from .theme import PLOT_COLORS
 
 
-class GraphsWidget(QWidget):
-    def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle):
-        QWidget.__init__(self)
+class SpectraPanels(QObject):
+    def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle, parent=None):
+        super().__init__(parent)
 
         self.calculations = calculations
         self.styles = (dispersionStyle, absorptionStyle, bandStructureStyle)
@@ -75,30 +77,11 @@ class GraphsWidget(QWidget):
         # (connected after the plots, so it is placed on the new data)
         self.dispersionWidget = dispersionWidget
         self.absorptionWidget = absorptionWidget
+        self.bandStructureWidget = bandStructureWidget
         for signal in (calculations.excitonSelected, calculations.excitonDispersionReady,
                        calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
             signal.connect(self.updateHighlights)
         self.parametersWidget.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
-
-        # Splitters
-
-        vSplitter = QSplitter()
-        vSplitter.setOrientation(Qt.Orientation.Vertical)
-        vSplitter.addWidget(dispersionWidget)
-        vSplitter.addWidget(bandStructureWidget)
-
-        hSplitter = QSplitter()
-        hSplitter.setOrientation(Qt.Orientation.Horizontal)
-        hSplitter.addWidget(vSplitter)
-        hSplitter.addWidget(absorptionWidget)
-
-        layout = pageLayout(hSplitter, self.inspector)
-        self.setLayout(layout)
-
-        # Sizes of the plots and the side panel, kept between sessions
-        self.persistence = PersistentState()
-        for key, splitter in (('page', layout.itemAt(0).widget()), ('plots', hSplitter), ('leftPlots', vSplitter)):
-            self.persistence.remember(key, splitter)
 
     @Slot()
     def updateHighlights(self, *args):

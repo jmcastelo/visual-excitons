@@ -1,5 +1,5 @@
 """
-Side panel of collapsible sections, shared by all pages.
+Control panels made of collapsible sections (the spectra and wave function controls).
 
 Each section has a clickable header with an arrow and shows or hides its
 contents. The panel scrolls when the open sections do not fit, and the labels
@@ -9,7 +9,7 @@ of all its forms share one column width so fields line up across sections.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QPalette, QColor
 from PySide6.QtWidgets import (QWidget, QToolButton, QVBoxLayout, QScrollArea, QFrame, QFormLayout, QLabel,
-                               QSizePolicy, QHBoxLayout, QSlider, QApplication, QSplitter)
+                               QSizePolicy, QHBoxLayout, QSlider, QApplication)
 
 from .theme import themeManager
 from .persistence import PersistentState, GLOBAL
@@ -120,29 +120,6 @@ class Inspector(QScrollArea):
         content = max((section.content.minimumSizeHint().width() for section in self.sections.values()), default=0)
         self.setMinimumWidth(content + margins.left() + margins.right() + self.verticalScrollBar().sizeHint().width()
                              + 2 * self.frameWidth())
-
-
-INSPECTOR_WIDTH = 360
-
-
-def pageLayout(view: QWidget, inspector: QWidget) -> QHBoxLayout:
-    """
-    Layout of a page: its main view, resizable against the inspector on its
-    right, without margins (the main window frames the page).
-    """
-    splitter = QSplitter(Qt.Orientation.Horizontal)
-    splitter.addWidget(view)
-    splitter.addWidget(inspector)
-    splitter.setStretchFactor(0, 1)
-    splitter.setStretchFactor(1, 0)
-    splitter.setCollapsible(0, False)
-    inspector.setMinimumWidth(max(260, inspector.minimumWidth()))
-    splitter.setSizes([10 * INSPECTOR_WIDTH, INSPECTOR_WIDTH])
-
-    layout = QHBoxLayout()
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(splitter)
-    return layout
 
 
 def formLayout() -> QFormLayout:

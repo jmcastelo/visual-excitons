@@ -63,21 +63,21 @@ visual_excitons/
 │   ├── atomic_data.py      Symbols, covalent radii, Jmol colors, Bohr/Å constants
 │   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend)
 ├── gui/                    Widgets and rendering
-│   ├── main_window.py      MainWindow: menus, status bar, pages, datasets, persistence
-│   ├── navigation_bar.py   Left sidebar with painted icons
+│   ├── main_window.py      MainWindow: panels, menus, status bar, datasets, persistence
+│   ├── docking.py          Dockable panels (QtAds): presets, saved layouts
 │   ├── theme.py            System / Light / Dark themes, plot colors
-│   ├── inspector.py        Side panel framework: collapsible sections, forms, notes
+│   ├── inspector.py        Control panel framework: collapsible sections, forms, notes
 │   ├── persistence.py      Values kept between sessions (global and per dataset)
-│   ├── options_widget.py   System page
-│   ├── graphs_widget.py    Spectra page (its three plots + inspector)
-│   ├── parameters_widget.py       Spectra page inspector
+│   ├── options_widget.py   System panel
+│   ├── spectra_panels.py   The three 2D plots and their controls, wired together
+│   ├── parameters_widget.py       Spectra controls (inspector)
 │   ├── dispersion_widget.py       ┐
 │   ├── absorption_widget.py       ├ The three 2D plots
 │   ├── band_structure_widget.py   ┘
 │   ├── style_widget.py     "Appearance" editor of the 2D plots
 │   ├── highlight.py        Ring around the selected exciton
-│   ├── graphs_3d_widget.py Wave function page: orchestrates 3D view, inspector, analysis
-│   ├── parameters_3d_widget.py    Wave function page inspector
+│   ├── wavefunction_panels.py     3D view, analysis and their controls, wired together
+│   ├── parameters_3d_widget.py    Wave function controls (inspector)
 │   ├── exciton_wf_widget.py       The 3D view (GLViewWidget subclass)
 │   ├── wf_geometry.py      Isosurface meshes and volume colors (pure functions)
 │   ├── sorted_mesh_item.py Translucent mesh drawn back to front
@@ -94,15 +94,13 @@ docs/                       This document
 data/                       Test datasets (not in the repository)
 ```
 
-**Historical names.** Some classes kept their original names after the GUI was reorganized into pages. The mapping:
+**Historical names.** Some classes kept their original names after the GUI was reorganized into panels. The mapping:
 
 | Class | File | What it is now |
 |---|---|---|
-| `OptionsWidget` | `options_widget.py` | The **System** page |
-| `GraphsWidget` | `graphs_widget.py` | The **Spectra** page |
-| `ParametersWidget` | `parameters_widget.py` | The Spectra page's side panel (inspector) |
-| `Graphs3DWidget` | `graphs_3d_widget.py` | The **Wave function** page |
-| `Parameters3DWidget` | `parameters_3d_widget.py` | The Wave function page's side panel |
+| `OptionsWidget` | `options_widget.py` | The **System** panel |
+| `ParametersWidget` | `parameters_widget.py` | The **Spectra controls** panel (inspector) |
+| `Parameters3DWidget` | `parameters_3d_widget.py` | The **Wave function controls** panel |
 | `ExcitonWfWidget` | `exciton_wf_widget.py` | The 3D view |
 | `Options` | `core/options.py` | Parameters and lattice state, not only "options" |
 
@@ -113,10 +111,10 @@ data/                       Test datasets (not in the repository)
 ```mermaid
 flowchart TB
     main[main.py] --> MW[MainWindow]
-    MW --> NAV[NavigationBar]
-    MW --> SYS["System page<br/>(OptionsWidget)"]
-    MW --> SPEC["Spectra page<br/>(GraphsWidget)"]
-    MW --> WF["Wave function page<br/>(Graphs3DWidget)"]
+    MW --> DOCK["Panels<br/>(docking.py, QtAds)"]
+    MW --> SYS["System panel<br/>(OptionsWidget)"]
+    MW --> SPEC["SpectraPanels"]
+    MW --> WF["WavefunctionPanels"]
     SPEC --> P2D["Plots: dispersion,<br/>absorption, band structure"]
     SPEC --> I2D["Inspector<br/>(ParametersWidget)"]
     WF --> V3D["3D view<br/>(ExcitonWfWidget)"]
@@ -144,8 +142,8 @@ flowchart TB
 The rules behind this structure:
 
 - **`core` has no widgets.** `Options` and `Calculations` are `QObject`s (for signals), but they know nothing about windows. Pure computations (bonds, plane cuts, exports, memory estimates) are plain functions taking arrays, testable without Qt.
-- **The GUI talks to `core` through signals and slots.** `Calculations` emits results; pages connect them to plots. Most wiring happens in the page constructors and in `MainWindow`.
-- **One `Options` and one `Calculations`** exist, created by `MainWindow` and passed to the pages.
+- **The GUI talks to `core` through signals and slots.** `Calculations` emits results; `SpectraPanels` and `WavefunctionPanels` connect them to their plots. Most wiring happens in their constructors and in `MainWindow`.
+- **One `Options` and one `Calculations`** exist, created by `MainWindow` and passed to the panels.
 - **Slow work runs in a worker thread** through `TaskRunner` (section 5): the GUI never blocks on Yambo databases or heavy numerics.
 
 ---
@@ -182,7 +180,7 @@ Every Yambo-based calculation, as **compute functions** (module level, pure: the
 
 Other responsibilities:
 
-- **Exciton selection**, shared by the pages: `selectExciton` (absorption point: energy is x) and `selectDispersionExciton` (dispersion point: energy is y) set `selectedExciton = (qIndex, excIndex, energy)` and emit `excitonSelected`. `selectedExcitonPositions()` gives where to draw the highlight ring.
+- **Exciton selection**, shared by the panels: `selectExciton` (absorption point: energy is x) and `selectDispersionExciton` (dispersion point: energy is y) set `selectedExciton = (qIndex, excIndex, energy)` and emit `excitonSelected`. `selectedExcitonPositions()` gives where to draw the highlight ring.
 - **Size estimates**: `estimateWaveFunction()` returns the grid and memory of a wave-function calculation (see `core/memory.py`), reading only what it needs; it never blocks on the database lock (returns `None` if busy).
 - **Wave-function geometry**: `wfVoxels()`, `wfFixedCrystal()`, `wfFixedCartesian()`, `wfSupercellAtoms()`, used by analysis and export.
 - **Caches**: `lattice`, `wavefunctionCache` (the loaded `YamboWFDB`, the slowest thing to load, one at a time), `planeWaves`, `excitonSizes`. `resetDataset()` clears them and the results.
@@ -248,7 +246,7 @@ The current task is found through a thread-local `currentContext()`, so the GUI 
 
 ### Display preparation
 
-The Wave function page uses the same runner for heavy display work (upsampling, isosurfaces, volume colors), see section 8.
+The wave function display uses the same runner for heavy display work (upsampling, isosurfaces, volume colors), see section 8.
 
 ---
 
@@ -262,16 +260,16 @@ sequenceDiagram
     participant MW as MainWindow
     participant O as Options
     participant C as Calculations
-    participant P as Pages
+    participant P as Panels
     U->>MW: File › Open dataset / Open recent / startup
     MW->>MW: storeDatasetState() of the previous dataset
     MW->>O: setGW, setSaveDir
     O->>C: datasetAboutToChange → tasks.reset()
     O->>O: read ns.db1 (databaseAccess)
     O-->>P: databaseFound(True)
-    P->>P: System page: ibrav, lattice, default Q-path
+    P->>P: System panel: ibrav, lattice, default Q-path
     MW->>C: resetDataset()
-    P->>P: Wave function page: plotLattice(), centerView()
+    P->>P: Wave function panels: plotLattice(), centerView()
     MW->>O: setDiagoDir, setQPDir
     MW->>P: restoreQPath(saved) → Set Q-path
     MW->>P: state.restore(DATASET, saved or defaults)
@@ -282,18 +280,18 @@ sequenceDiagram
 
 ### From the dispersion to the wave function
 
-1. **Compute dispersion** (Spectra page) → `Calculations.getExcitonDispersion()` → task → `_applyDispersion` stores `qIndices` (path point → Q-point index), points and interpolated curves → signals → `DispersionWidget.plotData`.
+1. **Compute dispersion** (Spectra controls) → `Calculations.getExcitonDispersion()` → task → `_applyDispersion` stores `qIndices` (path point → Q-point index), points and interpolated curves → signals → `DispersionWidget.plotData`.
 2. **Click a dispersion point** → `DispersionWidget.qPointSelected(points, ctrl)` → `computeQPointAbsorptionSpectrum` (absorption at that Q-point), `getExcitonBandStructure`, and `selectDispersionExciton`.
 3. **Click a bright exciton** in the absorption → `AbsorptionWidget.excitonsSelected` → `selectExciton` → `excitonSelected(q, exc, energy)`:
    - Spectra inspector: "Selected exciton" section and its button.
    - Wave function inspector: sets the Q-point and exciton spin boxes.
-   - `GraphsWidget.updateHighlights`: rings in both plots.
+   - `SpectraPanels.updateHighlights`: rings in both plots.
    - `MainWindow`: status bar message.
-4. **Compute wave function** (Wave function page) → `Parameters3DWidget.computeWf()`:
+4. **Compute wave function** (Wave function controls) → `Parameters3DWidget.computeWf()`:
    - `confirmMemory()` asks the estimate; asks the user if it likely does not fit; its block size is used.
    - `Calculations.computeExcitonWaveFunction(q_index, exc_index, ..., block_size)` → task `computeWaveFunction` → `_applyWaveFunction` → `wfComputed`.
 5. **On `wfComputed`**:
-   - `Graphs3DWidget.plotWf()` prepares and shows the current plot type (section 8).
+   - `WavefunctionPanels.plotWf()` prepares and shows the current plot type (section 8).
    - `Parameters3DWidget.onWfComputed()` shows the snapped fixed-particle position and grid.
    - The analysis panel recomputes (`onWfComputedForAnalysis`).
    - Export actions are enabled; the size estimate is refreshed.
@@ -377,7 +375,7 @@ flowchart LR
 ```
 
 - `wf_geometry.py` computes the geometry as pure functions: isosurfaces with **vectorized normals**, isosurface sets as a single mesh (so faces of all levels are sorted together), volume colors.
-- `Graphs3DWidget.prepareDisplay()` decides inline or background (`INLINE_DISPLAY_WORK`), caches the upsampled density (`displayCache`, one copy), and only shows the result of the **latest request** (`displayRequest`) for the current wave function. The shown plot stays until its replacement is ready.
+- `WavefunctionPanels.prepareDisplay()` decides inline or background (`INLINE_DISPLAY_WORK`), caches the upsampled density (`displayCache`, one copy), and only shows the result of the **latest request** (`displayRequest`) for the current wave function. The shown plot stays until its replacement is ready.
 - `ExcitonWfWidget.plotWf*()` remain as synchronous wrappers (compute + show).
 
 ### Volume (`volume_item.py`)
@@ -408,11 +406,24 @@ The 2D plots stay interactive with PyQtGraph; figures for papers are drawn separ
 
 ### Main window (`main_window.py`)
 
-`MainWindow` creates `Options`, `Calculations`, the 2D styles, the three pages in a `QStackedWidget`, the `NavigationBar`, menus, status bar (dataset label, task label, progress bar, Cancel), the theme, and the persistence registry. It handles datasets (open, recent list, Q-path and parameter restore), exports, errors (`QMessageBox`) and saving state on close.
+`MainWindow` creates `Options`, `Calculations`, the 2D styles, the panels (`createPanels`: `OptionsWidget`, `SpectraPanels`, `WavefunctionPanels`, each widget in its dock), menus (including the `Layout` menu), status bar (dataset label, task label, progress bar, Cancel), the theme, and the persistence registry. It handles datasets (open, recent list, Q-path and parameter restore), exports, errors (`QMessageBox`) and saving state on close.
 
-### Side panels (`inspector.py`)
+`SpectraPanels` and `WavefunctionPanels` are `QObject`s, not widgets: they create the plots, the 3D view, the analysis and the control panels, and connect them to each other and to `Calculations`; `MainWindow` puts each of their widgets in a dock.
 
-Every page's side panel is an `Inspector` (a `QScrollArea`) made of `CollapsibleSection`s:
+### Dockable panels (`docking.py`)
+
+Every panel is a dock of the Qt Advanced Docking System (`PySide6QtAds`), managed by `Panels`:
+
+- `PANELS`: the dock keys (also their object names, which the saved state refers to: do not rename them) and titles. To add a panel: add it here, place it in the `PRESETS` that should show it and in `CLOSED_NEIGHBOURS`, and add its widget in `MainWindow.createPanels`.
+- `PRESETS`: the preset layouts, as steps that place each dock relative to the window or to another dock's area (`LEFT`, `RIGHT`, `BOTTOM`, `CENTER`, or `TAB` to add it as a tab), and the shares of the splitters (`sizes`; the list must match the widgets of the splitter that holds the dock's area, or it is ignored). `applyPreset` removes all docks and places them again; docks left out of a preset are closed as hidden tabs next to a related panel (`CLOSED_NEIGHBOURS`), so that reopening them puts them somewhere sensible. Docks passed in `closed` are placed but closed (the analysis when it is off), so they reopen where the preset puts them.
+- The arrangement (`saveState`/`restoreState`) is saved under `panels` in the settings on close; the user's layouts are QtAds perspectives, saved under `layouts/`. Neither is in session files. An invalid saved state falls back to `DEFAULT_PRESET`.
+- `panelToggled(key, shown)` reports docks opened or closed by the user (not while a layout is applied: `arranging`). `MainWindow` uses it to keep the `Show the analysis panel` checkbox and the Analysis dock in step.
+- Moving a dock reparents its widget, and an OpenGL widget that moves to another window (floating) gets a new OpenGL context. This works because contexts are shared (`AA_ShareOpenGLContexts`): pyqtgraph compiles its shaders once, for all views.
+- QtAds sets a stylesheet on the dock manager, so a theme change, which repolishes every widget, takes about 0.25 s per window.
+
+### Control panels (`inspector.py`)
+
+Each control panel is an `Inspector` (a `QScrollArea`) made of `CollapsibleSection`s:
 
 ```python
 form = formLayout()
@@ -428,13 +439,12 @@ self.alignLabels()                            # once, at the end of the construc
 - `alignLabels()`: gives all form labels the same width, and sets the panel's minimum width to its widest section (`updateMinimumWidth`), so nothing is cut off.
 - `NoteLabel`: small explanatory text that wraps correctly in forms and follows the theme.
 - `ValueSlider`: slider with its value shown beside it.
-- `pageLayout(view, inspector)`: the page layout, with the inspector in a splitter on the right.
 
 Rows shown only for some plot types use `QFormLayout.setRowVisible` (`Parameters3DWidget.plotTypeRows`).
 
 ### Themes (`theme.py`)
 
-`themeManager()` (one per application) applies `System` (the platform style and palette), `Light` or `Dark` (Fusion with custom palettes) and emits `themeChanged(dark)`. Plot colors come from `PLOT_COLORS[dark]`; `plotForeground()` gives the current foreground for plot items. Widgets that paint themselves connect to `themeChanged` (e.g. `NavigationBar`, `NoteLabel`, pages' `setDarkTheme`). The application's palette-change events are not reliable for this; use the signal.
+`themeManager()` (one per application) applies `System` (the platform style and palette), `Light` or `Dark` (Fusion with custom palettes) and emits `themeChanged(dark)`. Plot colors come from `PLOT_COLORS[dark]`; `plotForeground()` gives the current foreground for plot items. Widgets that paint themselves connect to `themeChanged` (e.g. `NoteLabel`, the panels' `setDarkTheme`). The application's palette-change events are not reliable for this; use the signal.
 
 ### Persistence (`persistence.py`)
 
@@ -443,15 +453,15 @@ Values kept between sessions are registered with a **scope**:
 - `GLOBAL`: user preferences (display, view, layout), saved in the settings as one JSON blob under `state`.
 - `DATASET`: parameters of a system (energy range, exciton, fixed particle positions, supercell, cutoff...), saved with each dataset in `recentDatasets`.
 
-Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `spectraLayout`, `wavefunction`, `wavefunctionLayout`). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
+Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
 
 A dataset opened for the first time gets the defaults (`MainWindow.datasetDefaults`), not the previous dataset's values.
 
-The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATASET` value of the Wave function page: datasets are opened after the preferences are restored, and opening one centers the view, so a camera restored as a preference would be overridden.
+The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATASET` value of `WavefunctionPanels`: datasets are opened after the preferences are restored, and opening one centers the view, so a camera restored as a preference would be overridden.
 
 ### Sessions (`core/session.py`, `MainWindow`)
 
-A session file is a zip with `session.json` (manifest) and `results.npz` (arrays). The manifest has `format` and `version` (`SESSION_VERSION`: increase it when the content changes incompatibly; `readSession` refuses newer files), the dataset (directories, Q-path), `state` (`global` and `dataset` values of the `StateRegistry`), `page`, the dataset `fingerprint` (count, total size and latest modification time of `ns.db1`, `ndb.BS_diago_Q*`, `ndb.QP`) and `results` (metadata of `Calculations.resultsSnapshot()`).
+A session file is a zip with `session.json` (manifest) and `results.npz` (arrays). The manifest has `format` and `version` (`SESSION_VERSION`: increase it when the content changes incompatibly; `readSession` refuses newer files), the dataset (directories, Q-path), `state` (`global` and `dataset` values of the `StateRegistry`), the dataset `fingerprint` (count, total size and latest modification time of `ns.db1`, `ndb.BS_diago_Q*`, `ndb.QP`) and `results` (metadata of `Calculations.resultsSnapshot()`).
 
 - Saving (`MainWindow.writeSessionFile`) writes to a temporary file and renames it, so an interrupted save never breaks an existing session.
 - Opening (`MainWindow.openSession`): restores the `global` values, then opens the dataset with the session's `dataset` values (camera included), then, if the fingerprint matches (`fingerprintsMatch`; sizes only when the dataset was located elsewhere), `Calculations.restoreResults()`, which goes through the same `_apply…` methods as real calculations, so plots, curve styles and dependent panels update as usual.
@@ -461,7 +471,8 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 
 | Key | Content |
 |---|---|
-| `geometry`, `page`, `theme`, `showInspector` | Window |
+| `geometry`, `theme` | Window |
+| `panels`, `layouts/` | Arrangement of the panels; the user's saved layouts |
 | `state` | JSON: global values of all panels |
 | `recentDatasets` | JSON list: directories, `gw`, `qPath`, `state` (dataset values, camera included) |
 | `recentSessions`, `sessionDir` | Recent session files, last session folder |
@@ -473,10 +484,10 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 
 ## 10. Recipes
 
-### Add a control to a side panel
+### Add a control to a control panel
 
 1. Create the widget in the right `build…Section` of the inspector and add it to the section's form.
-2. Connect it to an `Options` setter and/or a signal of the inspector; connect that signal in the page constructor.
+2. Connect it to an `Options` setter and/or a signal of the inspector; connect that signal in the constructor of `SpectraPanels` or `WavefunctionPanels`.
 3. If it should be kept between sessions: `self.remember('key', widget, scope)`; choose `DATASET` if it depends on the system.
 4. Add a test in `tests/test_gui.py`, and to `test_persistence.py` if remembered.
 
@@ -512,6 +523,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - Qt runs on the **offscreen** platform (unless `QT_QPA_PLATFORM` is set), and settings go to a temporary directory: tests never touch the user's settings.
 - `datasetPath(name)` and the `lattice` fixture skip tests whose dataset in `data/` is missing (`data` marker).
 - OpenGL context sharing is enabled as in `main.py`.
+- `deleteWindows` (autouse) deletes the top-level widgets each test leaves. Closed windows stay alive through their signal connections, and every theme change repolishes all of them: without it, the GUI tests get slower and slower as they run (several times slower in total).
 
 Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
 

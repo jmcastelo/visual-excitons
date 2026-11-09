@@ -1,12 +1,14 @@
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import QWidget, QSplitter
-import pyqtgraph.opengl as gl
+"""
+The exciton wave function: the 3D view, the analysis and their controls, each
+shown in its own dock by the main window.
+"""
+
+from PySide6.QtCore import QObject, Slot
 import numpy as np
 
 from .exciton_wf_widget import ExcitonWfWidget
 from .parameters_3d_widget import Parameters3DWidget
 from .axes_3d_widget import AxisGizmo
-from .inspector import pageLayout
 from .analysis_widget import AnalysisWidget
 from visual_excitons.core.analysis import (planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon,
                                            upsampleDensity)
@@ -26,9 +28,9 @@ from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 BOND_GREY = (0.6, 0.6, 0.6)
 
 
-class Graphs3DWidget(QWidget):
-    def __init__(self, options: Options, calculations: Calculations):
-        QWidget.__init__(self)
+class WavefunctionPanels(QObject):
+    def __init__(self, options: Options, calculations: Calculations, parent=None):
+        super().__init__(parent)
 
         self.options = options
 
@@ -76,30 +78,18 @@ class Graphs3DWidget(QWidget):
         # Initial view from the view widgets' default state
         self.parameters3DWidget.applyView()
 
-        # Analysis panel, below the 3D view
+        # Analysis panel: its dock is shown and hidden with the Analysis
+        # section's checkbox (see MainWindow.createPanels)
         self.analysisWidget = AnalysisWidget()
-        self.analysisWidget.setVisible(False)
         self.radialResult = None   # of the current wave function, computed when first shown
         self.calculations.wfComputed.connect(self.onWfComputedForAnalysis)
         self.parameters3DWidget.analysisChanged.connect(self.updateAnalysis)
         self.parameters3DWidget.planeFromViewRequested.connect(self.setPlaneFromView)
         self.parameters3DWidget.colormapChanged.connect(self.analysisWidget.setColormap)
 
-        self.viewSplitter = QSplitter(Qt.Orientation.Vertical)
-        self.viewSplitter.addWidget(self.excitonWfWidget)
-        self.viewSplitter.addWidget(self.analysisWidget)
-        self.viewSplitter.setCollapsible(0, False)
-        self.viewSplitter.setStretchFactor(0, 3)
-        self.viewSplitter.setStretchFactor(1, 2)
-
         self.inspector = self.parameters3DWidget
-        layout = pageLayout(self.viewSplitter, self.inspector)
-        self.setLayout(layout)
 
-        # Sizes of the side panel and of the analysis panel, kept between sessions
         self.persistence = PersistentState()
-        self.persistence.remember('page', layout.itemAt(0).widget())
-        self.persistence.remember('analysis', self.viewSplitter)
         # The camera, with each dataset: restored after its lattice is drawn and
         # centered (which a preference, restored earlier, would not survive)
         self.persistence.remember('camera', scope=DATASET, get=self.excitonWfWidget.cameraState,
@@ -124,10 +114,9 @@ class Graphs3DWidget(QWidget):
 
     @Slot()
     def updateAnalysis(self):
-        """Show or hide the analysis panel, and update it and the plane in 3D."""
+        """Update the analysis panel, if shown, and the plane in 3D."""
         parameters, calc = self.parameters3DWidget, self.calculations
         shown = parameters.showAnalysisCheckBox.isChecked()
-        self.analysisWidget.setVisible(shown)
 
         if not shown or calc.probabilityDensity() is None or calc.wfSupercell is None:
             self.excitonWfWidget.setCutPlane(None)

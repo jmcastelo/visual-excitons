@@ -486,7 +486,7 @@ class Parameters3DWidget(Inspector):
 
     def buildAnalysisSection(self):
         self.showAnalysisCheckBox = QCheckBox('Show the analysis panel')
-        self.showAnalysisCheckBox.setToolTip('Below the 3D view: the density on a plane, and the distribution\n'
+        self.showAnalysisCheckBox.setToolTip('The Analysis panel: the density on a plane, and the distribution\n'
                                              'of distances from the fixed particle (exciton radius)')
         self.showAnalysisCheckBox.toggled.connect(self.analysisChanged)
 

@@ -188,16 +188,15 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     folder = datasetPath('BiI3_Bulk_8x8x8')
     w = newWindow()
     w.openDataset(main_window.findDataset(folder))
-    w.systemPage.qPathLineEdit.setText('LGZF')
-    assert w.systemPage.setBrillouinZone()
-    p3 = w.wavefunctionPage.parameters3DWidget
+    w.system.qPathLineEdit.setText('LGZF')
+    assert w.system.setBrillouinZone()
+    p3 = w.wavefunction.parameters3DWidget
     p3.colormapComboBox.setCurrentText('Magma')
     p3.setSupercell([3, 3, 1])
     injectResults(w)
-    view = w.wavefunctionPage.excitonWfWidget
+    view = w.wavefunction.excitonWfWidget
     view.setCameraParams(rotation=QQuaternion.fromAxisAndAngle(QVector3D(0, 1, 0), 33.0), distance=4321.0)
     camera = view.cameraState()
-    w.setPage(1)
     path = tmp_path / 'setup.vxsession'
     w.writeSessionFile(str(path))
     assert w.sessionPath == str(path.resolve()) and w.windowTitle().startswith('setup — BiI3_Bulk_8x8x8')
@@ -205,17 +204,16 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
 
     w2 = newWindow()
     assert w2.recentSessionsMenu.actions()[0].text() == 'setup'
-    w2.wavefunctionPage.parameters3DWidget.colormapComboBox.setCurrentText('Greys')
+    w2.wavefunction.parameters3DWidget.colormapComboBox.setCurrentText('Greys')
     w2.openSession(str(path))
     c2 = w2.calculations
     assert 'with its results' in w2.statusBar().currentMessage()
     assert w2.options.getPathString() == 'LGZF' and w2.options.supercell() == [3, 3, 1]
-    assert w2.wavefunctionPage.parameters3DWidget.colormapComboBox.currentText() == 'Magma'
+    assert w2.wavefunction.parameters3DWidget.colormapComboBox.currentText() == 'Magma'
     assert c2.selectedExciton == (4, 2, 2.1) and len(c2.excAbsData) == 2 and c2.waveFunction.shape == (54, 54, 18)
-    restored = w2.wavefunctionPage.excitonWfWidget.cameraState()
+    restored = w2.wavefunction.excitonWfWidget.cameraState()
     np.testing.assert_allclose(restored['rotation'] + restored['center'] + [restored['distance']],
                                camera['rotation'] + camera['center'] + [camera['distance']], atol=1e-5)
-    assert w2.stack.currentIndex() == 1
 
     # Opening a dataset afterwards forgets the session: Save must not overwrite it
     w2.openDataset(main_window.findDataset(folder))

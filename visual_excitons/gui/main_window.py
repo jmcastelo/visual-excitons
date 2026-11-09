@@ -1,6 +1,7 @@
 """
-Main window: a navigation bar on the left switches between the pages (System,
-Spectra, Wavefunction); menus, a status bar and persistent settings frame them.
+Main window: dockable panels (see docking.py) for the system, the spectra and
+the wave function, arranged by preset or saved layouts (Layout menu); menus, a
+status bar and persistent settings frame them.
 """
 
 import json
@@ -8,17 +9,17 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Slot, QSettings
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox,
-                               QApplication, QProgressBar, QToolButton)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox, QApplication,
+                               QProgressBar, QToolButton, QInputDialog)
 
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
 from .options_widget import OptionsWidget
-from .graphs_widget import GraphsWidget
-from .graphs_3d_widget import Graphs3DWidget
-from .navigation_bar import NavigationBar
+from .spectra_panels import SpectraPanels
+from .wavefunction_panels import WavefunctionPanels
+from .docking import Panels, PRESETS, DEFAULT_PRESET, scrollable
 from .theme import themeManager, THEME_MODES
 from visual_excitons import __version__
 from .persistence import StateRegistry, GLOBAL, DATASET
@@ -34,7 +35,8 @@ DEFAULT_DATASET_FOLDER = Path(__file__).resolve().parents[2] / 'data' / 'BiI3_Bu
 
 MAX_RECENT_DATASETS = 8
 
-SYSTEM_PAGE, SPECTRA_PAGE, WAVEFUNCTION_PAGE = range(3)
+# Narrowest width of the control panels
+MIN_CONTROLS_WIDTH = 260
 
 
 class MainWindow(QMainWindow):
@@ -50,14 +52,14 @@ class MainWindow(QMainWindow):
         self.sessionPath = None   # session file of the current setup, if saved or opened
 
         self.createStyles()
-        self.createPages()
+        self.createPanels()
         self.createMenus()
         self.createStatusBar()
 
         # A new SAVE directory invalidates everything computed before; reset
         # first, then redraw the lattice
         self.options.databaseFound.connect(lambda found: self.calculations.resetDataset())
-        self.options.databaseFound.connect(self.wavefunctionPage.onDatasetChanged)
+        self.options.databaseFound.connect(self.wavefunction.onDatasetChanged)
         self.options.databaseFound.connect(self.updateDatasetLabel)
         self.options.numQPointsChanged.connect(self.updateDatasetLabel)
         self.options.saveDirChanged.connect(self.updateDatasetLabel)
@@ -73,17 +75,18 @@ class MainWindow(QMainWindow):
             lambda filename: self.statusBar().showMessage(f'Probability density saved to {filename}', 6000))
         self.options.databaseFound.connect(self.onDatasetForExports)
 
-        self.theme.themeChanged.connect(self.spectraPage.setDarkTheme)
-        self.theme.themeChanged.connect(self.wavefunctionPage.setDarkTheme)
+        self.theme.themeChanged.connect(self.spectra.setDarkTheme)
+        self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
         self.setTheme(self.settings.value('theme', 'System'))
 
         # Parameters kept between sessions (see persistence.py): preferences now,
         # those of a dataset when it is opened
         self.state = StateRegistry()
-        self.state.add('spectra', self.spectraPage.inspector.persistence)
-        self.state.add('spectraLayout', self.spectraPage.persistence)
-        self.state.add('wavefunction', self.wavefunctionPage.inspector.persistence)
-        self.state.add('wavefunctionLayout', self.wavefunctionPage.persistence)
+        self.state.add('spectra', self.spectra.inspector.persistence)
+        self.state.add('wavefunction', self.wavefunction.inspector.persistence)
+        # The camera (the name dates from when it was kept with the page layout:
+        # kept for the settings and sessions saved then)
+        self.state.add('wavefunctionLayout', self.wavefunction.persistence)
         # A dataset opened for the first time starts from the defaults, not from
         # the parameters of the previous one
         self.datasetDefaults = self.state.values(DATASET)
@@ -91,7 +94,7 @@ class MainWindow(QMainWindow):
 
         if not self.restoreGeometry(self.settings.value('geometry', b'')):
             self.resize(1600, 1000)
-        self.setPage(int(self.settings.value('page', SYSTEM_PAGE)))
+        self.restoreLayout()
         self.openInitialDataset()
 
     # Construction
@@ -117,34 +120,34 @@ class MainWindow(QMainWindow):
         calc.excitonBandStructureNumCurvesChanged.connect(self.bandStructureStyle.setNumCurves)
         calc.excitonBandStructureInit.connect(self.bandStructureStyle.applyDefaultStyle)
 
-    def createPages(self):
-        self.systemPage = OptionsWidget(self.options)
-        self.spectraPage = GraphsWidget(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
-                                        self.bandStructureStyle)
-        self.wavefunctionPage = Graphs3DWidget(self.options, self.calculations)
-        self.spectraPage.inspector.showWavefunctionRequested.connect(lambda: self.setPage(WAVEFUNCTION_PAGE))
-        self.systemPage.qPathApplied.connect(self.saveQPath)
-        self.spectraPage.inspector.exportFigureRequested.connect(self.exportFigure)
-        self.wavefunctionPage.parameters3DWidget.exportImageRequested.connect(self.exportImage)
-        self.wavefunctionPage.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
+    def createPanels(self):
+        self.system = OptionsWidget(self.options)
+        self.spectra = SpectraPanels(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
+                                     self.bandStructureStyle, parent=self)
+        self.wavefunction = WavefunctionPanels(self.options, self.calculations, parent=self)
+        self.spectra.inspector.showWavefunctionRequested.connect(lambda: self.showPanel('wavefunction'))
+        self.system.qPathApplied.connect(self.saveQPath)
+        self.spectra.inspector.exportFigureRequested.connect(self.exportFigure)
+        self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
+        self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
 
-        self.stack = QStackedWidget()
-        for page in (self.systemPage, self.spectraPage, self.wavefunctionPage):
-            self.stack.addWidget(page)
+        self.panels = Panels(self)
+        for inspector in (self.spectra.inspector, self.wavefunction.inspector):
+            inspector.setMinimumWidth(max(MIN_CONTROLS_WIDTH, inspector.minimumWidth()))
+        for key, widget in (('system', scrollable(self.system)),
+                            ('dispersion', self.spectra.dispersionWidget),
+                            ('absorption', self.spectra.absorptionWidget),
+                            ('bands', self.spectra.bandStructureWidget),
+                            ('wavefunction', self.wavefunction.excitonWfWidget),
+                            ('analysis', self.wavefunction.analysisWidget),
+                            ('spectraControls', self.spectra.inspector),
+                            ('wavefunctionControls', self.wavefunction.inspector)):
+            self.panels.add(key, widget)
 
-        self.navigation = NavigationBar()
-        self.navigation.addPage('System', 'crystal', 'Data, crystal lattice and Q-path (Ctrl+1)')
-        self.navigation.addPage('Spectra', 'spectrum', 'Dispersion, absorption and band structure (Ctrl+2)')
-        self.navigation.addPage('Wave\nfunction', 'orbital', 'Exciton wave function in real space (Ctrl+3)')
-        self.navigation.pageSelected.connect(self.setPage)
-
-        central = QWidget()
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.navigation)
-        layout.addWidget(self.stack, 1)
-        self.setCentralWidget(central)
+        # The analysis checkbox shows and hides its panel, and follows it
+        self.analysisCheckBox = self.wavefunction.parameters3DWidget.showAnalysisCheckBox
+        self.analysisCheckBox.toggled.connect(lambda shown: self.panels.setShown('analysis', shown))
+        self.panels.panelToggled.connect(self.onPanelToggled)
 
     def createMenus(self):
         # File
@@ -216,25 +219,10 @@ class MainWindow(QMainWindow):
         # View
         viewMenu = self.menuBar().addMenu('&View')
 
-        pageGroup = QActionGroup(self)
-        self.pageActions = []
-        for index, text in enumerate(('&System', 'S&pectra', '&Wave function')):
-            action = QAction(text, self)
-            action.setCheckable(True)
-            action.setShortcut(QKeySequence(f'Ctrl+{index + 1}'))
-            action.triggered.connect(lambda checked=False, index=index: self.setPage(index))
-            pageGroup.addAction(action)
-            viewMenu.addAction(action)
-            self.pageActions.append(action)
-
+        panelsMenu = viewMenu.addMenu('&Panels')
+        for action in self.panels.toggleActions():
+            panelsMenu.addAction(action)
         viewMenu.addSeparator()
-        self.inspectorAction = QAction('Show &side panel', self)
-        self.inspectorAction.setCheckable(True)
-        self.inspectorAction.setChecked(self.settings.value('showInspector', True, type=bool))
-        self.inspectorAction.setShortcut(QKeySequence('Ctrl+B'))
-        self.inspectorAction.toggled.connect(self.setInspectorVisible)
-        viewMenu.addAction(self.inspectorAction)
-        self.setInspectorVisible(self.inspectorAction.isChecked())
 
         themeMenu = viewMenu.addMenu('&Theme')
         themeGroup = QActionGroup(self)
@@ -246,6 +234,10 @@ class MainWindow(QMainWindow):
             themeGroup.addAction(action)
             themeMenu.addAction(action)
             self.themeActions[mode] = action
+
+        # Layout: presets and the user's own layouts
+        self.layoutMenu = self.menuBar().addMenu('&Layout')
+        self.updateLayoutMenu()
 
         # Help
         helpMenu = self.menuBar().addMenu('&Help')
@@ -282,20 +274,95 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.datasetLabel)
         self.updateDatasetLabel()
 
-    # Pages and panels
+    # Panels and layouts
 
-    @Slot(int)
-    def setPage(self, index: int):
-        index = min(max(int(index), 0), self.stack.count() - 1)
-        self.stack.setCurrentIndex(index)
-        self.navigation.setCurrentIndex(index)
-        if hasattr(self, 'pageActions'):
-            self.pageActions[index].setChecked(True)
+    PRESET_SHORTCUTS = {'System': 'Ctrl+1', 'Spectra': 'Ctrl+2', 'Wave function': 'Ctrl+3', 'Overview': 'Ctrl+4'}
+    PRESET_TIPS = {'System': 'Data, crystal lattice and Q-path',
+                   'Spectra': 'Dispersion, absorption and band structure, with their controls',
+                   'Wave function': 'The exciton wave function in real space, its analysis and controls',
+                   'Overview': 'All the panels at once'}
 
-    @Slot(bool)
-    def setInspectorVisible(self, visible: bool):
-        for page in (self.spectraPage, self.wavefunctionPage):
-            page.inspector.setVisible(visible)
+    def updateLayoutMenu(self):
+        menu = self.layoutMenu
+        menu.clear()
+        for name in PRESETS:
+            action = QAction(name, self)
+            action.setShortcut(QKeySequence(self.PRESET_SHORTCUTS[name]))
+            action.setStatusTip(self.PRESET_TIPS[name])
+            action.triggered.connect(lambda checked=False, name=name: self.applyPreset(name))
+            menu.addAction(action)
+
+        names = self.panels.layoutNames()
+        if names:
+            menu.addSeparator()
+            for name in names:
+                action = QAction(name, self)
+                action.setStatusTip('A layout you saved')
+                action.triggered.connect(lambda checked=False, name=name: self.openLayout(name))
+                menu.addAction(action)
+
+        menu.addSeparator()
+        saveAction = QAction('&Save layout as…', self)
+        saveAction.setStatusTip('Keep the current arrangement of the panels under a name')
+        saveAction.triggered.connect(self.saveLayoutAs)
+        menu.addAction(saveAction)
+        deleteMenu = menu.addMenu('&Delete layout')
+        for name in names:
+            action = QAction(name, self)
+            action.triggered.connect(lambda checked=False, name=name: self.deleteLayout(name))
+            deleteMenu.addAction(action)
+        deleteMenu.setEnabled(bool(names))
+
+    @Slot(str)
+    def applyPreset(self, name: str):
+        # The analysis panel only if it is on
+        closed = () if self.analysisCheckBox.isChecked() else ('analysis',)
+        self.panels.applyPreset(name, closed)
+
+    def openLayout(self, name):
+        self.panels.openLayout(name)
+        self.syncAnalysisCheckBox()
+
+    @Slot()
+    def saveLayoutAs(self):
+        name, ok = QInputDialog.getText(self, 'Save layout', 'Name of the layout:')
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in PRESETS:
+            QMessageBox.warning(self, 'Save layout', f'{name} is the name of a preset layout: choose another one.')
+            return
+        self.panels.saveLayout(name)
+        self.panels.saveLayouts(self.settings)
+        self.updateLayoutMenu()
+        self.statusBar().showMessage(f'Layout {name} saved: it is in the Layout menu', 6000)
+
+    def deleteLayout(self, name):
+        self.panels.removeLayout(name)
+        self.panels.saveLayouts(self.settings)
+        self.updateLayoutMenu()
+        self.statusBar().showMessage(f'Layout {name} deleted', 4000)
+
+    def restoreLayout(self):
+        """The layouts saved by the user, and the arrangement of the last run (or the default preset)."""
+        self.panels.loadLayouts(self.settings)
+        self.updateLayoutMenu()
+        if not self.panels.restoreState(self.settings.value('panels', b'')):
+            self.applyPreset(DEFAULT_PRESET)
+        self.syncAnalysisCheckBox()
+
+    def showPanel(self, key):
+        self.panels.show(key)
+        if key == 'analysis':
+            self.analysisCheckBox.setChecked(True)
+
+    @Slot(str, bool)
+    def onPanelToggled(self, key, shown):
+        if key == 'analysis':
+            self.analysisCheckBox.setChecked(shown)
+
+    def syncAnalysisCheckBox(self):
+        self.analysisCheckBox.setChecked(self.panels.isShown('analysis'))
 
     @Slot(str)
     def setTheme(self, mode: str):
@@ -351,7 +418,7 @@ class MainWindow(QMainWindow):
             return
         if dataset['diago'] is None:
             QMessageBox.warning(self, 'Open dataset', 'No BSE directory (with ndb.BS_diago_Q* files) found next to\n'
-                                f'{dataset["save"]}\n\nYou can choose it on the System page.')
+                                f'{dataset["save"]}\n\nYou can choose it in the System panel.')
         self.openDataset(dataset)
 
     def openDataset(self, dataset):
@@ -375,7 +442,7 @@ class MainWindow(QMainWindow):
         # The Q-path last set on this dataset, if any
         qPath = dataset.get('qPath')
         if qPath:
-            if self.systemPage.restoreQPath(qPath):
+            if self.system.restoreQPath(qPath):
                 self.statusBar().showMessage(f'Q-path {self.options.getPathString()} restored', 4000)
             else:
                 # Not valid any more (e.g. different lattice): forget it
@@ -476,7 +543,6 @@ class MainWindow(QMainWindow):
             'dataset': dataset,
             'fingerprint': datasetFingerprint(dataset),
             'state': {'global': self.state.values(GLOBAL), 'dataset': self.state.values(DATASET)},
-            'page': self.stack.currentIndex(),
         }
         meta, arrays = self.calculations.resultsSnapshot() if self.sessionResultsAction.isChecked() else ({}, {})
         manifest['results'] = meta
@@ -544,7 +610,6 @@ class MainWindow(QMainWindow):
                     message += f'; its results could not be shown ({error})'
             else:
                 message += '; its results were not shown: the dataset changed since it was saved'
-        self.setPage(int(manifest.get('page', self.stack.currentIndex())))
 
         self.sessionPath = str(Path(path).resolve())
         self.settings.setValue('sessionDir', str(Path(path).resolve().parent))
@@ -644,14 +709,14 @@ class MainWindow(QMainWindow):
     def onDatasetForExports(self, found):
         # A density belongs to the dataset it was computed on
         self.exportDensityAction.setEnabled(False)
-        self.wavefunctionPage.parameters3DWidget.exportDensityButton.setEnabled(False)
+        self.wavefunction.parameters3DWidget.exportDensityButton.setEnabled(False)
 
     @Slot()
     def exportImage(self):
         # The view must have been shown to be rendered
-        self.setPage(WAVEFUNCTION_PAGE)
+        self.showPanel('wavefunction')
         QApplication.processEvents()
-        view = self.wavefunctionPage.excitonWfWidget
+        view = self.wavefunction.excitonWfWidget
         dialog = ImageExportDialog(view, self)
         if dialog.exec() != ImageExportDialog.DialogCode.Accepted:
             return
@@ -711,9 +776,8 @@ class MainWindow(QMainWindow):
         self.calculations.cancel()
         self.calculations.tasks.waitForDone(10000)
         self.settings.setValue('geometry', self.saveGeometry())
-        self.settings.setValue('page', self.stack.currentIndex())
+        self.settings.setValue('panels', self.panels.saveState())
         self.settings.setValue('theme', self.theme.mode)
-        self.settings.setValue('showInspector', self.inspectorAction.isChecked())
         self.settings.setValue('state', json.dumps(self.state.values(GLOBAL)))
         self.storeDatasetState()
         super().closeEvent(event)

@@ -7,7 +7,8 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QTableWidgetItem, QCheckBox
 
 import visual_excitons.gui.main_window as main_window
-from visual_excitons.gui.main_window import MainWindow, SYSTEM_PAGE, SPECTRA_PAGE, WAVEFUNCTION_PAGE
+from visual_excitons.gui.main_window import MainWindow
+from visual_excitons.gui.docking import PANELS, PRESETS, DEFAULT_PRESET
 from visual_excitons.gui.inspector import CollapsibleSection, Inspector, formLayout
 from visual_excitons.gui.theme import themeManager, PLOT_COLORS
 from conftest import datasetPath
@@ -30,20 +31,83 @@ def test_starts_without_dataset(window):
     assert not window.recentMenu.isEnabled()
 
 
-def test_navigation(window):
-    for index in (SPECTRA_PAGE, WAVEFUNCTION_PAGE, SYSTEM_PAGE):
-        window.navigation.buttons[index].click()
-        assert window.stack.currentIndex() == index and window.pageActions[index].isChecked()
-    window.pageActions[WAVEFUNCTION_PAGE].trigger()
-    assert window.stack.currentIndex() == WAVEFUNCTION_PAGE
-    assert window.navigation.buttons[WAVEFUNCTION_PAGE].isChecked()
+def openPanels(window):
+    return {key for key, dock in window.panels.docks.items() if not dock.isClosed()}
 
 
-def test_side_panel_toggle(window):
-    window.inspectorAction.setChecked(False)
-    assert window.spectraPage.inspector.isHidden() and window.wavefunctionPage.inspector.isHidden()
-    window.inspectorAction.setChecked(True)
-    assert not window.spectraPage.inspector.isHidden()
+def test_presets(window):
+    assert set(window.panels.docks) == set(PANELS)
+    # First run: everything but the analysis (off by default)
+    assert openPanels(window) == set(PANELS) - {'analysis'}
+    expected = {'System': {'system'},
+                'Spectra': {'dispersion', 'absorption', 'bands', 'spectraControls'},
+                'Wave function': {'wavefunction', 'wavefunctionControls'},
+                'Overview': set(PANELS) - {'analysis'}}
+    actions = {action.text(): action for action in window.layoutMenu.actions()}
+    for name in PRESETS:
+        actions[name].trigger()
+        assert openPanels(window) == expected[name], name
+    assert actions['Spectra'].shortcut().toString() == 'Ctrl+2'
+
+    # With the analysis on, the presets that have it show it
+    window.analysisCheckBox.setChecked(True)
+    window.applyPreset('Wave function')
+    assert openPanels(window) == {'wavefunction', 'analysis', 'wavefunctionControls'}
+    window.applyPreset('Spectra')
+    assert 'analysis' not in openPanels(window) and window.analysisCheckBox.isChecked()
+
+
+def test_panels_open_and_close(window):
+    actions = {action.text(): action for action in window.menuBar().findChildren(type(window.layoutMenu))
+               if action.title() == '&Panels' for action in action.actions()}
+    assert list(actions) == list(PANELS.values())
+    actions['Dispersion'].trigger()
+    assert window.panels.docks['dispersion'].isClosed()
+    actions['Dispersion'].trigger()
+    assert not window.panels.docks['dispersion'].isClosed()
+
+    # The analysis panel and its checkbox follow each other
+    window.analysisCheckBox.setChecked(True)
+    assert window.panels.isShown('analysis')
+    window.panels.docks['analysis'].toggleView(False)
+    assert not window.analysisCheckBox.isChecked()
+
+
+def test_layout_is_remembered(window, qtbot, monkeypatch):
+    window.applyPreset('Spectra')
+    window.panels.docks['bands'].toggleView(False)
+    # A layout of my own
+    monkeypatch.setattr(main_window.QInputDialog, 'getText', lambda *args: ('Mine', True))
+    window.saveLayoutAs()
+    assert 'Mine' in [action.text() for action in window.layoutMenu.actions()]
+    window.applyPreset('Overview')
+    window.close()
+
+    again = MainWindow()
+    qtbot.addWidget(again)
+    assert openPanels(again) == set(PANELS) - {'analysis'}
+    again.openLayout('Mine')
+    assert openPanels(again) == {'dispersion', 'absorption', 'spectraControls'}
+
+    # Not over a preset
+    shown = []
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: shown.append(args[2]))
+    monkeypatch.setattr(main_window.QInputDialog, 'getText', lambda *args: ('Overview', True))
+    again.saveLayoutAs()
+    assert 'preset' in shown[0] and again.panels.layoutNames() == ['Mine']
+    again.deleteLayout('Mine')
+    assert again.panels.layoutNames() == []
+    again.close()
+
+
+def test_invalid_saved_layout_falls_back_to_the_default(qtbot, monkeypatch, tmp_path):
+    settings = QSettings('VisualExcitons', 'VisualExcitons')
+    settings.clear()
+    settings.setValue('panels', b'not a layout')
+    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
+    w = MainWindow()
+    qtbot.addWidget(w)
+    assert openPanels(w) == {key for key, where, relativeTo in PRESETS[DEFAULT_PRESET]['steps']} - {'analysis'}
 
 
 @pytest.mark.parametrize('mode, dark', [('Dark', True), ('Light', False)])
@@ -55,7 +119,7 @@ def test_theme(window, mode, dark):
     assert axes.backgroundColor.color == colors['background'] and axes.axesColor.color == colors['foreground']
     # Default-colored curves follow the theme
     assert window.dispersionStyle.curveStyle.commonPen.color() == colors['foreground']
-    background = window.wavefunctionPage.excitonWfWidget.opts['bgcolor']
+    background = window.wavefunction.excitonWfWidget.opts['bgcolor']
     assert (background[0] < 0.5) == dark
 
 
@@ -71,10 +135,10 @@ def test_exciton_selection_reaches_both_pages(window, qtbot):
     window.calculations.selectedExciton = (4, 2, 2.2284)
     window.calculations.excitonSelected.emit(4, 2, 2.2284)
 
-    parameters = window.wavefunctionPage.parameters3DWidget
+    parameters = window.wavefunction.parameters3DWidget
     assert parameters.qPointSpinBox.value() == 5 and parameters.excitonIndexSpinBox.value() == 2
     assert '2.2284 eV' in parameters.excitonNote.text()
-    spectra = window.spectraPage.inspector
+    spectra = window.spectra.inspector
     assert spectra.showWavefunctionButton.isEnabled() and 'Q-point 5' in spectra.selectedExcitonNote.text()
     assert 'exciton 2 at Q-point 5' in window.statusBar().currentMessage()
 
@@ -82,14 +146,15 @@ def test_exciton_selection_reaches_both_pages(window, qtbot):
     parameters.excitonIndexSpinBox.setValue(3)
     assert 'Click a bright exciton' in parameters.excitonNote.text()
 
+    window.panels.docks['wavefunction'].toggleView(False)
     spectra.showWavefunctionButton.click()
-    assert window.stack.currentIndex() == WAVEFUNCTION_PAGE
+    assert window.panels.docks['wavefunction'].isCurrentTab() and window.panels.isShown('wavefunction')
 
 
 def test_compute_passes_the_chosen_exciton(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window.calculations, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
-    parameters = window.wavefunctionPage.parameters3DWidget
+    parameters = window.wavefunction.parameters3DWidget
     window.options.numQPointsChanged.emit(10)
     parameters.qPointSpinBox.setValue(3)
     parameters.excitonIndexSpinBox.setValue(7)
@@ -101,13 +166,13 @@ def test_compute_passes_the_chosen_exciton(window, monkeypatch):
 
 
 def test_supercell_sizes_are_odd(window):
-    parameters = window.wavefunctionPage.parameters3DWidget
+    parameters = window.wavefunction.parameters3DWidget
     parameters.ySupercellSpinBox.setValue(4)
     assert parameters.ySupercellSpinBox.value() == 5 and window.options.supercell() == [1, 5, 1]
 
 
 def test_display_rows_follow_the_plot_type(window):
-    parameters = window.wavefunctionPage.parameters3DWidget
+    parameters = window.wavefunction.parameters3DWidget
     for plotType in range(3):
         parameters.plotTypeComboBox.setCurrentIndex(plotType)
         for widget, plotTypes in parameters.plotTypeRows:
@@ -157,12 +222,12 @@ def test_open_dataset(window):
     window.openDataset(main_window.findDataset(folder))
     assert window.windowTitle() == 'BiI3_Bulk_8x8x8 — Visual Excitons'
     assert 'RHL1' in window.datasetLabel.text() and '90 Q-points' in window.datasetLabel.text()
-    assert window.options.gw and window.systemPage.calcTypeComboBox.currentText() == 'DFT+GW+BSE'
-    assert window.systemPage.parameterLabels['a'].text() == '8.15801 Å'
+    assert window.options.gw and window.system.calcTypeComboBox.currentText() == 'DFT+GW+BSE'
+    assert window.system.parameterLabels['a'].text() == '8.15801 Å'
     assert window.recentMenu.actions()[0].text() == 'BiI3_Bulk_8x8x8'
     # The lattice is drawn: atoms (one mesh per cell) and bonds
-    assert window.wavefunctionPage.excitonWfWidget.latticeItems
-    assert window.wavefunctionPage.excitonWfWidget.bondsItem is not None
+    assert window.wavefunction.excitonWfWidget.latticeItems
+    assert window.wavefunction.excitonWfWidget.bondsItem is not None
 
 
 @pytest.mark.data
@@ -172,7 +237,7 @@ def test_switching_datasets_resets_calculations(window):
     window.calculations.waveFunction = np.zeros((2, 2, 2))
     window.openDataset(main_window.findDataset(datasetPath('BN')))
     assert window.calculations.selectedExciton is None and window.calculations.waveFunction is None
-    assert not window.options.gw and window.systemPage.calcTypeComboBox.currentText() == 'DFT+BSE'
+    assert not window.options.gw and window.system.calcTypeComboBox.currentText() == 'DFT+BSE'
     assert [action.text() for action in window.recentMenu.actions()] == ['BN', 'BiI3_Bulk_8x8x8']
 
 
@@ -208,15 +273,15 @@ def test_selection_is_highlighted(window):
     calc.dispPoints = [[[0, 2.0], [1, 2.1]]]
     calc.selectedExciton = (9, 1, 2.1)
     calc.excitonSelected.emit(9, 1, 2.1)
-    ring = window.spectraPage.dispersionWidget.highlight.item
+    ring = window.spectra.dispersionWidget.highlight.item
     assert list(zip(*ring.getData())) == [(1.0, 2.1)] and ring.scene() is not None
-    assert len(window.spectraPage.absorptionWidget.highlight.item.getData()[0]) == 0
+    assert len(window.spectra.absorptionWidget.highlight.item.getData()[0]) == 0
     # Fake data, not to be replotted (e.g. by the theme reset at teardown)
     calc.dispPoints, calc.qIndices = [], None
 
 
 def test_automatic_absorption_range_control(window, qtbot):
-    inspector = window.spectraPage.inspector
+    inspector = window.spectra.inspector
     assert inspector.autoRangeCheckBox.isChecked() and not inspector.energyMinSpinBox.isEnabled()
     with qtbot.waitSignal(inspector.absorptionParametersChanged):
         inspector.autoRangeCheckBox.setChecked(False)
@@ -233,7 +298,7 @@ def test_automatic_absorption_range_control(window, qtbot):
 def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
     folder = datasetPath('BiI3_Bulk_8x8x8')
     window.openDataset(main_window.findDataset(folder))
-    system = window.systemPage
+    system = window.system
     assert window.options.qBZ is None          # nothing saved yet: no path set
 
     # An extra point, a path through it and density sampling
@@ -252,10 +317,10 @@ def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
     qtbot.addWidget(restored)
     assert restored.options.saveDir == str(folder / 'save')
     assert restored.options.getPathString() == 'LGZFM'
-    assert restored.systemPage.interpolationComboBox.currentIndex() == 1
-    assert restored.systemPage.densitySpin.value() == 12.5
+    assert restored.system.interpolationComboBox.currentIndex() == 1
+    assert restored.system.densitySpin.value() == 12.5
     assert restored.options.extraHighSymmetryPoints == {'M': [0.25, 0.25, 0.0]}
-    assert restored.systemPage.hspTable.item(restored.systemPage.hspTable.rowCount() - 1, 0).text() == 'M'
+    assert restored.system.hspTable.item(restored.system.hspTable.rowCount() - 1, 0).text() == 'M'
     assert 'restored' in restored.statusBar().currentMessage()
     restored.close()
 
@@ -266,13 +331,13 @@ def test_invalid_saved_q_path_is_dropped(window):
     dataset['qPath'] = {'ibrav': -5, 'path': 'NOPE', 'sampling': 'points', 'points': 100, 'density': 10.0, 'extraPoints': {}}
     window.openDataset(dataset)
     assert window.options.qBZ is None and 'qPath' not in window.recentDatasets()[0]
-    assert window.systemPage.qPathLineEdit.text() == window.options.defaultPath
+    assert window.system.qPathLineEdit.text() == window.options.defaultPath
     assert 'could not be restored' in window.statusBar().currentMessage()
 
 
 def test_image_export_dialog(window):
     from visual_excitons.gui.image_export import ImageExportDialog
-    view = window.wavefunctionPage.excitonWfWidget
+    view = window.wavefunction.excitonWfWidget
     view.resize(400, 300)
     dialog = ImageExportDialog(view, window)
     dialog.scaleComboBox.setCurrentIndex(2)                 # 3x
@@ -315,8 +380,8 @@ def test_export_density_from_the_window(window, qtbot, monkeypatch, tmp_path):
 
 
 def test_colormap_choice(window, qtbot):
-    p3 = window.wavefunctionPage.parameters3DWidget
-    view = window.wavefunctionPage.excitonWfWidget
+    p3 = window.wavefunction.parameters3DWidget
+    view = window.wavefunction.excitonWfWidget
     with qtbot.waitSignal(p3.colormapChanged):
         p3.colormapComboBox.setCurrentText('Inferno')
     from visual_excitons.gui.colormaps import makeColormap
@@ -330,7 +395,7 @@ def test_colormap_choice(window, qtbot):
 
 
 def test_side_panels_fit_their_content(window):
-    for inspector in (window.spectraPage.inspector, window.wavefunctionPage.inspector):
+    for inspector in (window.spectra.inspector, window.wavefunction.inspector):
         for section in inspector.sections.values():
             assert inspector.minimumWidth() >= section.content.minimumSizeHint().width()
 
@@ -356,11 +421,11 @@ def fakeWaveFunction(calc, sigma):
 
 
 def test_analysis_panel(window, qtbot):
-    page = window.wavefunctionPage
+    page = window.wavefunction
     p3, analysis, calc = page.parameters3DWidget, page.analysisWidget, window.calculations
-    assert analysis.isHidden()
+    assert not window.panels.isShown('analysis')
     p3.showAnalysisCheckBox.setChecked(True)
-    assert not analysis.isHidden() and 'Compute a wave function' in analysis.statistics.text()
+    assert window.panels.isShown('analysis') and 'Compute a wave function' in analysis.statistics.text()
 
     fakeWaveFunction(calc, sigma=2.0)
     calc.wfComputed.emit()
@@ -400,11 +465,11 @@ def test_analysis_panel(window, qtbot):
     assert page.radialResult is None and page.excitonWfWidget.cutPlaneItems == []
     calc.waveFunction = None
     p3.showAnalysisCheckBox.setChecked(False)
-    assert analysis.isHidden()
+    assert not window.panels.isShown('analysis')
 
 
 def test_resolution_controls(window, qtbot, monkeypatch):
-    p3, page, calc = window.wavefunctionPage.parameters3DWidget, window.wavefunctionPage, window.calculations
+    p3, page, calc = window.wavefunction.parameters3DWidget, window.wavefunction, window.calculations
     calls = []
     monkeypatch.setattr(calc, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
     monkeypatch.setattr(p3, 'estimate', lambda: None)       # no dataset: no estimate
@@ -429,7 +494,7 @@ def test_resolution_controls(window, qtbot, monkeypatch):
 
 
 def test_memory_warning(window, monkeypatch):
-    p3, calc = window.wavefunctionPage.parameters3DWidget, window.calculations
+    p3, calc = window.wavefunction.parameters3DWidget, window.calculations
     import visual_excitons.gui.parameters_3d_widget as module
     estimate = {'peak': 12 * 2 ** 30, 'wavefunctions': 2 ** 30, 'loaded': False, 'fftBox': (46, 46, 46),
                 'supercell': [3, 3, 3], 'states': 7, 'blockSize': 64}
@@ -456,7 +521,7 @@ def test_memory_warning(window, monkeypatch):
 
 def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window, qtbot):
     """Heavy plots (smoothing, many levels) do not block the window; outdated results are not shown."""
-    page, p3, calc = window.wavefunctionPage, window.wavefunctionPage.parameters3DWidget, window.calculations
+    page, p3, calc = window.wavefunction, window.wavefunction.parameters3DWidget, window.calculations
     view = page.excitonWfWidget
     fakeWaveFunction(calc, sigma=2.0)
     p3.plotTypeComboBox.setCurrentIndex(1)        # isosurface set
@@ -484,8 +549,8 @@ def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window,
 
 def test_structure_toggles_apply_to_items_drawn_later(window):
     """Hidden parts stay hidden when the lattice is redrawn (dataset, supercell, sizes...)."""
-    view = window.wavefunctionPage.excitonWfWidget
-    p3 = window.wavefunctionPage.parameters3DWidget
+    view = window.wavefunction.excitonWfWidget
+    p3 = window.wavefunction.parameters3DWidget
     boxes = {box.text(): box for box in p3.findChildren(QCheckBox)}
     for name in ('Atoms', 'Bonds', 'Cell boundaries'):
         boxes[name].setChecked(False)
@@ -511,18 +576,18 @@ def test_structure_toggles_apply_to_items_drawn_later(window):
 @pytest.mark.data
 def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
     window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
-    p3 = window.wavefunctionPage.parameters3DWidget
+    p3 = window.wavefunction.parameters3DWidget
     next(box for box in p3.findChildren(QCheckBox) if box.text() == 'Cell boundaries').setChecked(False)
     window.close()
 
     restarted = MainWindow()
     qtbot.addWidget(restarted)
-    view = restarted.wavefunctionPage.excitonWfWidget
+    view = restarted.wavefunction.excitonWfWidget
     assert view.latticeBoundaryItems and not any(item.visible() for item in view.latticeBoundaryItems)
-    box = next(b for b in restarted.wavefunctionPage.parameters3DWidget.findChildren(QCheckBox)
+    box = next(b for b in restarted.wavefunction.parameters3DWidget.findChildren(QCheckBox)
                if b.text() == 'Cell boundaries')
     assert not box.isChecked()
-    restarted.wavefunctionPage.parameters3DWidget.setSupercell([3, 1, 1])   # redrawn: still hidden
+    restarted.wavefunction.parameters3DWidget.setSupercell([3, 1, 1])   # redrawn: still hidden
     assert len(view.latticeBoundaryItems) == 3 and not any(item.visible() for item in view.latticeBoundaryItems)
     box.setChecked(True)
     restarted.close()

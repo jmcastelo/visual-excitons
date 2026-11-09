@@ -29,7 +29,7 @@ for _variable in _THREAD_VARIABLES:
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings, QCoreApplication, Qt
+from PySide6.QtCore import QSettings, QCoreApplication, Qt, QEvent
 
 # As in main.py, before the application is created
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
@@ -98,6 +98,26 @@ def isolatedSettings(tmp_path_factory):
     for fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
         QSettings.setPath(fmt, QSettings.Scope.UserScope, str(directory))
     yield directory
+
+
+@pytest.fixture(autouse=True)
+def deleteWindows():
+    """
+    Delete the top-level widgets a test leaves (windows, dialogs, menus). Closed
+    is not enough: they stay alive through their signal connections, and every
+    theme change repolishes them all, slower and slower as tests go by.
+    """
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    before = set(app.topLevelWidgets()) if app is not None else set()
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        if widget not in before and widget.parent() is None:
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.fixture

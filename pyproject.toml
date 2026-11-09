@@ -27,6 +27,9 @@ dependencies = [
     # full PySide6 package adds about 400 MB of add-ons this program does not use
     # (WebEngine, PDF, 3D, charts...)
     "PySide6-Essentials>=6.8",
+    # Dockable panels (Qt Advanced Docking System). Each release requires one
+    # exact PySide6 version, which therefore sets the PySide6 installed
+    "PySide6-QtAds>=5.1",
     "pyqtgraph>=0.14",
     "PyOpenGL>=3.1.7",
     "numpy>=1.26",
