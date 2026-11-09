@@ -23,6 +23,8 @@ class BandStructureWidget(pg.PlotWidget):
         self.setLabel('left', text = self.yLabel, units = self.yUnits)
 
         self.style = style
+        # x range of the Q-path, until one is set (see setXAxis)
+        self.xMin, self.xMax = 0.0, 1.0
 
         self.style.axesStyle.titleColor.changed.connect(self.setTitleColor)
         self.style.axesStyle.labelsColor.changed.connect(self.setLabelsColor)

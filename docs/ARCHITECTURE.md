@@ -53,6 +53,7 @@ visual_excitons/
 │   ├── calculations.py     Calculations: all Yambo calculations, as background tasks
 │   ├── tasks.py            TaskRunner: worker thread, progress, cancellation, DB lock
 │   ├── dataset.py          Finding SAVE / BSE / GW directories in a folder
+│   ├── session.py          Session files: format, reading/writing, dataset fingerprint
 │   ├── bonds.py            Bond detection in periodic crystals
 │   ├── analysis.py         Plane cuts, distance distribution, upsampling
 │   ├── export.py           Cube / XSF writers
@@ -434,13 +435,25 @@ Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegist
 
 A dataset opened for the first time gets the defaults (`MainWindow.datasetDefaults`), not the previous dataset's values.
 
+The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATASET` value of the Wave function page: datasets are opened after the preferences are restored, and opening one centers the view, so a camera restored as a preference would be overridden.
+
+### Sessions (`core/session.py`, `MainWindow`)
+
+A session file is a zip with `session.json` (manifest) and `results.npz` (arrays). The manifest has `format` and `version` (`SESSION_VERSION`: increase it when the content changes incompatibly; `readSession` refuses newer files), the dataset (directories, Q-path), `state` (`global` and `dataset` values of the `StateRegistry`), `page`, the dataset `fingerprint` (count, total size and latest modification time of `ns.db1`, `ndb.BS_diago_Q*`, `ndb.QP`) and `results` (metadata of `Calculations.resultsSnapshot()`).
+
+- Saving (`MainWindow.writeSessionFile`) writes to a temporary file and renames it, so an interrupted save never breaks an existing session.
+- Opening (`MainWindow.openSession`): restores the `global` values, then opens the dataset with the session's `dataset` values (camera included), then, if the fingerprint matches (`fingerprintsMatch`; sizes only when the dataset was located elsewhere), `Calculations.restoreResults()`, which goes through the same `_apply…` methods as real calculations, so plots, curve styles and dependent panels update as usual.
+- Anything new worth keeping in sessions: parameters go through the persistence registry (section 9) and are included automatically; results need `resultsSnapshot` / `restoreResults` (store arrays in `arrays`, everything else JSON-able in `meta`).
+
 Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 
 | Key | Content |
 |---|---|
 | `geometry`, `page`, `theme`, `showInspector` | Window |
 | `state` | JSON: global values of all panels |
-| `recentDatasets` | JSON list: directories, `gw`, `qPath`, `state` (dataset values) |
+| `recentDatasets` | JSON list: directories, `gw`, `qPath`, `state` (dataset values, camera included) |
+| `recentSessions`, `sessionDir` | Recent session files, last session folder |
+| `sessionResults` | Whether results are stored in session files |
 | `exportDir` | Last export folder |
 | `imageExport/*` | Last image export choices |
 
@@ -485,7 +498,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - `datasetPath(name)` and the `lattice` fixture skip tests whose dataset in `data/` is missing (`data` marker).
 - OpenGL context sharing is enabled as in `main.py`.
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_persistence`, `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_persistence`, `test_session` (session files, results round trip), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 
@@ -543,7 +556,8 @@ Tips:
 
 ## 13. Known limitations and ideas
 
-- Results (dispersion, spectra, wave function) are not kept between sessions; only parameters are. A disk cache of results keyed by dataset and parameters, camera persistence and named session files were discussed and deferred.
+- Results are kept in session files, not when the program is simply closed and reopened (only parameters and the camera are). A disk cache of results keyed by dataset and parameters would make that automatic.
+- There is no "unsaved changes" tracking for sessions: closing does not ask to save.
 - The 2D plot styles (`style.py`, `style_widget.py`) are older code: not kept between sessions, and theme switching only replaces colors still at their default.
 - The excitonic band structure is only available at Γ.
 - Boundary atoms (atoms just outside the supercell) and a per-species bond-length table are not implemented.

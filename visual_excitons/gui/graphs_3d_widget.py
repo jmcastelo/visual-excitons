@@ -16,7 +16,7 @@ from .wf_geometry import isoMesh, isoSetMesh, volumeColors
 # Below this many grid points (times surfaces), plots are prepared inline:
 # fast enough not to show (e.g. while dragging the iso level slider)
 INLINE_DISPLAY_WORK = 3_000_000
-from .persistence import PersistentState
+from .persistence import PersistentState, DATASET
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.bonds import findBonds, halfBonds
@@ -100,6 +100,10 @@ class Graphs3DWidget(QWidget):
         self.persistence = PersistentState()
         self.persistence.remember('page', layout.itemAt(0).widget())
         self.persistence.remember('analysis', self.viewSplitter)
+        # The camera, with each dataset: restored after its lattice is drawn and
+        # centered (which a preference, restored earlier, would not survive)
+        self.persistence.remember('camera', scope=DATASET, get=self.excitonWfWidget.cameraState,
+                                  set=self.excitonWfWidget.setCameraState)
 
     @Slot(bool)
     def setDarkTheme(self, dark: bool):

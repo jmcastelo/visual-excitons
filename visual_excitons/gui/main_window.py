@@ -23,6 +23,8 @@ from .theme import themeManager, THEME_MODES
 from visual_excitons import __version__
 from .persistence import StateRegistry, GLOBAL, DATASET
 from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
+from visual_excitons.core.session import (readSession, writeSession, datasetFingerprint, fingerprintsMatch,
+                                          SessionError, SESSION_SUFFIX, SESSION_FILTER)
 
 
 # Opened on the first run, when there is no recent dataset (relative to the repository)
@@ -43,6 +45,7 @@ class MainWindow(QMainWindow):
         self.options = Options()
         self.calculations = Calculations(self.options)
         self.dataset = None
+        self.sessionPath = None   # session file of the current setup, if saved or opened
 
         self.createStyles()
         self.createPages()
@@ -152,6 +155,36 @@ class MainWindow(QMainWindow):
 
         self.recentMenu = fileMenu.addMenu('Open &recent')
         self.updateRecentMenu()
+
+        # Sessions: a whole setup in a file (see core/session.py)
+        fileMenu.addSeparator()
+        openSessionAction = QAction('Open &session…', self)
+        openSessionAction.setShortcut(QKeySequence('Ctrl+Shift+O'))
+        openSessionAction.setStatusTip('Open a session file: its dataset, parameters, view and results')
+        openSessionAction.triggered.connect(self.chooseSession)
+        fileMenu.addAction(openSessionAction)
+
+        self.recentSessionsMenu = fileMenu.addMenu('Open recent session')
+        self.updateRecentSessionsMenu()
+
+        saveSessionAction = QAction('Save session', self)
+        saveSessionAction.setShortcut(QKeySequence.StandardKey.Save)
+        saveSessionAction.setStatusTip('Save the dataset, parameters, view and results in the current session file')
+        saveSessionAction.triggered.connect(self.saveSession)
+        fileMenu.addAction(saveSessionAction)
+
+        saveSessionAsAction = QAction('Save session &as…', self)
+        saveSessionAsAction.setShortcut(QKeySequence('Ctrl+Shift+S'))
+        saveSessionAsAction.triggered.connect(self.saveSessionAs)
+        fileMenu.addAction(saveSessionAsAction)
+
+        self.sessionResultsAction = QAction('Store results in sessions', self)
+        self.sessionResultsAction.setCheckable(True)
+        self.sessionResultsAction.setChecked(self.settings.value('sessionResults', True, type=bool))
+        self.sessionResultsAction.setStatusTip('Store the computed results in session files, so that they are '
+                                               'shown at once when opened (larger files)')
+        self.sessionResultsAction.toggled.connect(lambda store: self.settings.setValue('sessionResults', store))
+        fileMenu.addAction(self.sessionResultsAction)
 
         fileMenu.addSeparator()
         exportImageAction = QAction('&Export 3D view as image…', self)
@@ -315,6 +348,8 @@ class MainWindow(QMainWindow):
     def openDataset(self, dataset):
         # Keep the parameters of the dataset being left
         self.storeDatasetState()
+        # Saving now must not overwrite the session of another setup
+        self.sessionPath = None
 
         # What was saved for this dataset (Q-path, parameters), even when it is
         # found again through Open dataset
@@ -374,7 +409,159 @@ class MainWindow(QMainWindow):
         if self.options.nQpoints:
             parts.append(f'{self.options.nQpoints} Q-points')
         self.datasetLabel.setText('  ·  '.join(parts))
-        self.setWindowTitle(f'{name} — Visual Excitons' if name else 'Visual Excitons')
+        title = [Path(self.sessionPath).stem] if self.sessionPath else []
+        title += [name] if name else []
+        self.setWindowTitle(' — '.join(title + ['Visual Excitons']))
+
+    # Sessions
+
+    def recentSessions(self):
+        return [path for path in self.loadJson('recentSessions', []) if isinstance(path, str)]
+
+    def addRecentSession(self, path):
+        path = str(Path(path).resolve())
+        recent = [path] + [p for p in self.recentSessions() if p != path]
+        self.settings.setValue('recentSessions', json.dumps(recent[:MAX_RECENT_DATASETS]))
+        self.updateRecentSessionsMenu()
+
+    def updateRecentSessionsMenu(self):
+        self.recentSessionsMenu.clear()
+        recent = self.recentSessions()
+        for path in recent:
+            action = QAction(Path(path).stem, self)
+            action.setToolTip(path)
+            action.setEnabled(Path(path).is_file())
+            action.triggered.connect(lambda checked=False, path=path: self.openSession(path))
+            self.recentSessionsMenu.addAction(action)
+        self.recentSessionsMenu.setEnabled(bool(recent))
+
+    def sessionFolder(self):
+        return self.settings.value('sessionDir', str(Path.cwd()))
+
+    @Slot()
+    def saveSession(self):
+        if self.sessionPath:
+            self.writeSessionFile(self.sessionPath)
+        else:
+            self.saveSessionAs()
+
+    @Slot()
+    def saveSessionAs(self):
+        if self.dataset is None:
+            QMessageBox.information(self, 'Save session', 'Open a dataset first.')
+            return
+        suggestion = Path(self.sessionPath).name if self.sessionPath else self.exportBaseName() + SESSION_SUFFIX
+        filename, _ = QFileDialog.getSaveFileName(self, 'Save session', str(Path(self.sessionFolder()) / suggestion),
+                                                  SESSION_FILTER)
+        if not filename:
+            return
+        if not filename.endswith(SESSION_SUFFIX):
+            filename += SESSION_SUFFIX
+        self.writeSessionFile(filename)
+
+    def sessionContent(self):
+        """The manifest and arrays of a session file of the current setup."""
+        self.storeDatasetState()
+        dataset = {key: value for key, value in self.dataset.items() if key != 'state'}
+        manifest = {
+            'dataset': dataset,
+            'fingerprint': datasetFingerprint(dataset),
+            'state': {'global': self.state.values(GLOBAL), 'dataset': self.state.values(DATASET)},
+            'page': self.stack.currentIndex(),
+        }
+        meta, arrays = self.calculations.resultsSnapshot() if self.sessionResultsAction.isChecked() else ({}, {})
+        manifest['results'] = meta
+        return manifest, arrays
+
+    def writeSessionFile(self, path):
+        if self.dataset is None:
+            QMessageBox.information(self, 'Save session', 'Open a dataset first.')
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            manifest, arrays = self.sessionContent()
+            writeSession(path, manifest, arrays, programVersion=__version__)
+        except OSError as error:
+            QMessageBox.critical(self, 'Save session failed', str(error))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.sessionPath = str(Path(path).resolve())
+        self.settings.setValue('sessionDir', str(Path(path).resolve().parent))
+        self.addRecentSession(path)
+        self.updateDatasetLabel()
+        note = '' if manifest['results'] or not self.sessionResultsAction.isChecked() else ' (no results to store)'
+        if self.calculations.isBusy():
+            note += '; the calculation still running is not included'
+        self.statusBar().showMessage(f'Session saved to {path} ({Path(path).stat().st_size / 2**20:.1f} MB){note}', 8000)
+
+    @Slot()
+    def chooseSession(self):
+        filename, _ = QFileDialog.getOpenFileName(self, 'Open session', self.sessionFolder(), SESSION_FILTER)
+        if filename:
+            self.openSession(filename)
+
+    def openSession(self, path):
+        try:
+            manifest, arrays = readSession(path)
+        except SessionError as error:
+            QMessageBox.critical(self, 'Open session failed', str(error))
+            return
+
+        dataset = dict(manifest.get('dataset') or {})
+        relocated = False
+        if not datasetExists(dataset):
+            dataset = self.locateDataset(dataset)
+            if dataset is None:
+                return
+            relocated = True
+
+        self.calculations.cancel()
+        state = manifest.get('state', {})
+        # Preferences of the session first: the dataset's parameters (camera
+        # included) are restored when it is opened, after its lattice is drawn
+        self.state.restore(GLOBAL, state.get('global', {}))
+        dataset['state'] = state.get('dataset', {})
+        self.openDataset(dataset)
+
+        results = manifest.get('results') or {}
+        message = f'Session {Path(path).stem} opened'
+        if results:
+            if fingerprintsMatch(datasetFingerprint(dataset), manifest.get('fingerprint', {}), strict=not relocated):
+                try:
+                    self.calculations.restoreResults(results, arrays)
+                    message += ' with its results'
+                except Exception as error:   # a session from an incompatible version, or damaged
+                    message += f'; its results could not be shown ({error})'
+            else:
+                message += '; its results were not shown: the dataset changed since it was saved'
+        self.setPage(int(manifest.get('page', self.stack.currentIndex())))
+
+        self.sessionPath = str(Path(path).resolve())
+        self.settings.setValue('sessionDir', str(Path(path).resolve().parent))
+        self.addRecentSession(path)
+        self.updateDatasetLabel()
+        self.statusBar().showMessage(message, 10000)
+
+    def locateDataset(self, dataset):
+        """Ask for the folder of a dataset that is not where the session says; None if not found."""
+        answer = QMessageBox.question(
+            self, 'Dataset not found',
+            f'The dataset of this session was not found at\n{dataset.get("save") or "(unknown)"}\n\n'
+            'Has it been moved? Locate its folder to open the session with it.',
+            QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Open)
+        if answer != QMessageBox.StandardButton.Open:
+            return None
+        folder = QFileDialog.getExistingDirectory(self, 'Locate the dataset', str(Path.cwd()),
+                                                  QFileDialog.Option.ShowDirsOnly)
+        if not folder:
+            return None
+        found = findDataset(folder)
+        if not datasetExists(found):
+            QMessageBox.warning(self, 'Dataset not found', f'No SAVE directory (with ns.db1) found in\n{folder}')
+            return None
+        found['qPath'] = dataset.get('qPath')
+        return found
 
     # Calculations
 

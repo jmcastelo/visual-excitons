@@ -70,7 +70,7 @@ class DispersionWidget(pg.PlotWidget):
             self.addItem(dataItem)
             self.curveItems.append(dataItem.curve)
 
-        if self.singleQPoint:
+        if self.singleQPoint and len(points) > 0:
             for i, y in enumerate(np.array(points)[:, 1]):
                 line = pg.InfiniteLine(pos = y, angle = 0, movable = False, pen = plotForeground())
                 self.addItem(line)

@@ -243,6 +243,7 @@ class Calculations(QObject):
         self.dispPointsData = []
         self.dispXInter = []
         self.dispYInter = []
+        self.dispersionAxes = {}
 
         self.excAbsData = []
         self.showExcitonLabels = False
@@ -298,10 +299,16 @@ class Calculations(QObject):
         self.excitonDispersion = None
         self.collinear_qpoints = None
         self.qIndices = None
-        self.excAbsData = []
         self.waveFunction = None
         self.wfAtomPositions = None
         self.selectedExciton = None
+        # Results of the previous dataset off the plots
+        self.clearAbsorptionCurves()
+        self.excitonAbsorptionClear.emit()
+        self.dispPoints, self.dispPointsData, self.dispXInter, self.dispYInter = [], [], [], []
+        self.emitExcitonDispersionReady()
+        self.k, self.bands, self.weights = [], [], []
+        self.excitonBandStructureClear.emit()
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
         self.planeWaves = None
@@ -374,7 +381,10 @@ class Calculations(QObject):
         self.dispPointsData = result['pointsData']
         self.dispXInter = result['xInter']
         self.dispYInter = result['yInter']
-        self.excAbsData = []
+        self.dispersionAxes = {'xRange': list(result['xRange']), 'yRange': list(result['yRange']),
+                               'specialPoints': list(result['specialPoints']), 'labels': list(result['labels'])}
+        # The spectra belonged to the previous dispersion
+        self.clearAbsorptionCurves()
 
         self.qPathReady.emit(result['specialPoints'], result['labels'])
         self.excitonDispersionRange.emit(result['xRange'], result['yRange'])
@@ -473,6 +483,16 @@ class Calculations(QObject):
     def emitExcitonAbsorption(self):
         self.excitonAbsorptionReady.emit(self.excAbsData, self.showExcitonLabels)
 
+    def clearAbsorptionCurves(self):
+        """
+        Drop all absorption curves, with their styles: the curve styles are a list
+        parallel to the curves (see excitonAbsorptionCurveRemoved), which would
+        otherwise keep entries of curves no longer there.
+        """
+        for index in reversed(range(len(self.excAbsData))):
+            self.excAbsData.pop(index)
+            self.excitonAbsorptionCurveRemoved.emit(index)
+
     def absorptionCurveIndex(self, q):
         for i, curveData in enumerate(self.excAbsData):
             if curveData['q'] == q:
@@ -548,6 +568,105 @@ class Calculations(QObject):
         self.wfFixedPosition = result['fixedPosition']
         self.wfExciton = (result['qIndex'], result['excIndex'])
         self.wfComputed.emit()
+
+    # Results in session files (see session.py)
+
+    def resultsSnapshot(self, includeWaveFunction=True):
+        """
+        The computed results, as JSON-able metadata and NumPy arrays (name ->
+        array), to store in a session file.
+        """
+        meta, arrays = {}, {}
+
+        if self.qIndices is not None and len(self.dispPoints):
+            arrays['dispersion/qIndices'] = np.asarray(self.qIndices)
+            arrays['dispersion/collinearQPoints'] = np.asarray(self.collinear_qpoints, dtype=float)
+            arrays['dispersion/points'] = np.asarray(self.dispPoints, dtype=float)
+            arrays['dispersion/xInter'] = np.asarray(self.dispXInter, dtype=float)
+            arrays['dispersion/yInter'] = np.asarray(self.dispYInter, dtype=float)
+            meta['dispersion'] = dict(self.dispersionAxes)
+
+        curves = []
+        for i, data in enumerate(self.excAbsData):
+            for name in ('energy', 'absorption', 'brightExcEnergy', 'brightExcAbsorption', 'brightExcIntensities',
+                         'brightExcIndices', 'darkExcEnergy'):
+                arrays[f'absorption/{i}/{name}'] = np.asarray(data[name], dtype=float)
+            curves.append({'q': int(data['q']), 'index': int(data['index']), 'fixed': bool(data['fixed']),
+                           'range': list(data.get('range', ()))})
+        if curves:
+            meta['absorption'] = curves
+
+        if len(self.k):
+            arrays['bands/k'] = np.asarray(self.k, dtype=float)
+            arrays['bands/bands'] = np.asarray(self.bands, dtype=float)
+            arrays['bands/weights'] = np.asarray(self.weights, dtype=float)
+            meta['bands'] = True
+
+        if self.selectedExciton is not None:
+            meta['selectedExciton'] = list(self.selectedExciton)
+
+        if includeWaveFunction and self.waveFunction is not None:
+            # Single precision: plenty for a density relative to its maximum, half the size
+            arrays['waveFunction/density'] = self.waveFunction.astype(np.float32)
+            arrays['waveFunction/tr4x4'] = np.asarray(self.tr4x4, dtype=float)
+            arrays['waveFunction/atomPositions'] = np.asarray(self.wfAtomPositions, dtype=float)
+            meta['waveFunction'] = {'fixedParticle': self.wfFixedParticle, 'supercell': list(self.wfSupercell),
+                                    'grid': list(self.wfGrid), 'fixedPosition': list(self.wfFixedPosition),
+                                    'exciton': list(self.wfExciton)}
+        return meta, arrays
+
+    def restoreResults(self, meta, arrays):
+        """
+        Show results stored by resultsSnapshot, as if just computed. The dataset
+        must be open (the lattice is read from it).
+        """
+        lattice = self.lattice
+        if lattice is None:
+            with databaseAccess():
+                lattice = self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+
+        if 'dispersion' in meta:
+            axes = meta['dispersion']
+            points = arrays['dispersion/points']
+            self._applyDispersion({
+                'lattice': lattice, 'excitonDispersion': None,
+                'collinearQPoints': arrays['dispersion/collinearQPoints'],
+                'qIndices': arrays['dispersion/qIndices'],
+                'points': points.tolist(),
+                'pointsData': [[PointData(i, j + 1) for i in range(points.shape[1])] for j in range(points.shape[0])],
+                'xInter': arrays['dispersion/xInter'], 'yInter': arrays['dispersion/yInter'],
+                'xRange': tuple(axes['xRange']), 'yRange': tuple(axes['yRange']),
+                'specialPoints': axes['specialPoints'], 'labels': axes['labels'],
+            })
+
+        for i, curve in enumerate(meta.get('absorption', [])):
+            data = {name: arrays[f'absorption/{i}/{name}'] for name in
+                    ('energy', 'absorption', 'brightExcEnergy', 'brightExcAbsorption', 'brightExcIntensities',
+                     'brightExcIndices', 'darkExcEnergy')}
+            data.update(q=curve['q'], index=curve['index'], fixed=curve['fixed'], range=tuple(curve['range']),
+                        data=[PointData(curve['index'], int(j)) for j in data['brightExcIndices']])
+            self.excAbsData.append(data)
+            self.excitonAbsorptionCurveAppended.emit(curve['q'])
+        if meta.get('absorption'):
+            self.excitonAbsorptionReady.emit(self.excAbsData, self.showExcitonLabels)
+
+        if meta.get('bands'):
+            self._applyBandStructure({'k': arrays['bands/k'], 'bands': arrays['bands/bands'],
+                                      'weights': arrays['bands/weights']})
+
+        if 'waveFunction' in meta:
+            wf = meta['waveFunction']
+            self._applyWaveFunction({
+                'lattice': lattice, 'waveFunction': arrays['waveFunction/density'].astype(float),
+                'atomPositions': arrays['waveFunction/atomPositions'], 'tr4x4': arrays['waveFunction/tr4x4'],
+                'fixedParticle': wf['fixedParticle'], 'supercell': list(wf['supercell']), 'grid': list(wf['grid']),
+                'fixedPosition': list(wf['fixedPosition']), 'qIndex': wf['exciton'][0], 'excIndex': wf['exciton'][1],
+            })
+
+        if 'selectedExciton' in meta:
+            qIndex, excIndex, energy = meta['selectedExciton']
+            self.selectedExciton = (int(qIndex), int(excIndex), float(energy))
+            self.excitonSelected.emit(*self.selectedExciton)
 
     # Size of a wave-function calculation (see memory.py)
 

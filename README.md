@@ -96,6 +96,7 @@ They need no display: Qt runs on its offscreen platform, and the application set
 - `test_gui.py`: the main window and its panels (navigation, themes, exciton selection across pages, controls).
 - `test_analysis.py`: plane cuts (exact interpolation, masking, plane axes, intersection with the supercell) and the distance distribution (radii of a Gaussian, truncation warning).
 - `test_memory.py`: the real-space grid (as yambopy's, for several cutoffs), the memory estimate and the block size, and the display upsampling.
+- `test_session.py`: session files (format, versions, interrupted saves, fingerprints), results round trip, and a whole setup through the window (changed and moved datasets).
 - `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
 - `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
 - `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
@@ -123,13 +124,28 @@ The status bar shows the dataset loaded (name, Bravais lattice and number of Q-p
 
 **Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen under `Appearance` are kept.
 
-**Resuming a session.** When the program is opened again, it resumes where it was left:
+**Resuming where you left off.** When the program is opened again, it resumes where it was left:
 
 - The window: its size, the page shown, the theme, whether the side panels are shown, their width and which of their sections are open, and the sizes of the plots.
 - Preferences: how the wave function is displayed (plot type, iso level, number of levels, style, opacities, volume settings), the view (basis, preset, direction and up vectors, side, projection), the structure (atoms, names, bonds and boundaries shown, atom and bond sizes, bond colors), the axes gizmo and cell parameters shown, and whether bright excitons are labelled.
-- The last dataset, with its own parameters: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff.
+- The last dataset, with its own parameters: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff, and the view of the 3D scene (rotation, zoom and pan).
 
-Each dataset keeps its own parameters: switching to another one and back, or opening it again later from `Open recent` or `Open dataset`, brings them back; a dataset opened for the first time starts from the defaults. Results (dispersion, spectra, wave function) are not stored: compute them again, with the parameters already set.
+Each dataset keeps its own parameters: switching to another one and back, or opening it again later from `Open recent` or `Open dataset`, brings them back; a dataset opened for the first time starts from the defaults. Results (dispersion, spectra, wave function) are not kept this way: compute them again, with the parameters already set, or save a session (below).
+
+### Sessions
+
+A session file (`.vxsession`) keeps a whole setup, to come back to it later or to share it: the dataset, its Q-path, all the parameters and display settings, the exact view of the 3D scene, the page shown and, optionally, the computed results. Keep several sessions of the same dataset for different figures or excitons, e.g. one per exciton with its own view and colormap.
+
+- `File › Save session` (`Ctrl+S`) saves the current setup in its session file, or asks for one the first time; `Save session as…` (`Ctrl+Shift+S`) saves it in a new one. The name of the session is shown in the title of the window.
+- `File › Open session…` (`Ctrl+Shift+O`) and `Open recent session` restore a session.
+- `Store results in sessions` (on by default) stores the computed results: dispersion, absorption spectra, band structure, the selected exciton and the wave function. Opening the session then shows them at once, without computing anything. The files stay small (the wave function is stored compressed, in single precision): e.g. 0.2 MB for a BiI3 session with all of them.
+
+When a session is opened:
+
+- If its dataset is no longer where it was (moved, or on another computer), you are asked to locate its folder.
+- Its results are only shown if the databases are the same as when it was saved (same files, sizes and modification times; when the dataset was moved, the same files and sizes). Otherwise the parameters are restored, and the results can be computed again.
+
+Opening another dataset or session leaves the current session: `Save session` then asks for a file, so that one setup never overwrites another. Session files are zip archives with a readable `session.json` and the results in `results.npz`.
 
 ### Datasets
 
@@ -339,3 +355,7 @@ File names are suggested from the dataset and the exciton (e.g. `BiI3_Bulk_8x8x8
 - Save and load configurations to disk.
 - Finite-Q band structure plots.
 - Expand the tool to include electronic band structure plots.
+
+## License
+
+Visual Excitons is free software, licensed under the [GNU General Public License](LICENSE), version 2 or (at your option) any later version, the same license as [YamboPy](https://github.com/yambo-code/yambopy).

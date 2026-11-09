@@ -237,6 +237,23 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.gizmo.setLatticeVectors(self.cellLattice)
         self.updateCellInfo()
 
+    def cameraState(self):
+        """The camera (rotation, distance, center), to restore it later with setCameraState."""
+        rotation = self.opts['rotation']
+        center = self.opts['center']
+        return {'rotation': [rotation.scalar(), rotation.x(), rotation.y(), rotation.z()],
+                'distance': float(self.opts['distance']), 'center': [center.x(), center.y(), center.z()]}
+
+    def setCameraState(self, state):
+        w, x, y, z = (float(v) for v in state['rotation'])
+        rotation = QQuaternion(w, x, y, z)
+        if rotation.length() < 1e-9:
+            raise ValueError('invalid camera rotation')
+        self.setCameraParams(rotation=rotation.normalized(), distance=float(state['distance']),
+                             center=pg.Vector(*(float(c) for c in state['center'])))
+        if self.gizmo is not None:
+            self.gizmo.sync()
+
     def cameraAxes(self):
         """World directions towards the viewer and up on the screen."""
         camToWorld = self.opts['rotation'].conjugated()

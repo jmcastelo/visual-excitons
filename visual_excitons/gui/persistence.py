@@ -75,7 +75,7 @@ class PersistentState:
             if s == scope and key in values:
                 try:
                     set(values[key])
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, KeyError):
                     pass
         for hook in self.afterRestore:
             hook(scope)

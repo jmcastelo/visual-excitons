@@ -222,3 +222,22 @@ def test_new_lattice_clears_the_q_path():
     assert options.qBZ is not None
     options.setLatticeData(options.ibrav)   # e.g. another dataset or ibrav
     assert options.qBZ is None and options.extraHighSymmetryPoints == {}
+
+
+def test_new_dispersion_or_dataset_drops_curve_styles(calculations):
+    """Curves and their styles stay parallel when all curves are dropped at once."""
+    style = AbsorptionStyle()
+    calculations.excitonAbsorptionCurveAppended.connect(style.appendCurveStyle)
+    calculations.excitonAbsorptionCurveRemoved.connect(style.removeCurveStyle)
+    calculations.qIndices = list(range(10))
+    calculations.computeAbsorptionSpectrum = lambda index, q, parameters: {'q': q, 'index': index}
+    for i in (1, 2, 3):
+        calculations.computeQPointAbsorptionSpectrum([Point(i)], True)
+    assert len(style.curveStyle.curvePens) == 3
+
+    calculations.clearAbsorptionCurves()
+    assert calculations.excAbsData == [] and style.curveStyle.curvePens == [] and style.common.numCurves == 0
+
+    calculations.computeQPointAbsorptionSpectrum([Point(4)], True)
+    calculations.resetDataset()
+    assert style.curveStyle.curvePens == [] and calculations.dispPoints == [] and len(calculations.k) == 0

@@ -7,7 +7,8 @@ name = "visual-excitons"
 dynamic = ["version"]
 description = "Visualization of excitonic properties computed with Yambo: dispersion, absorption, band structure and real-space wave functions"
 readme = "README.md"
-license = "GPL-3.0-only"
+# The same license as YamboPy
+license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "jmcastelo", email = "jm.castelo@uv.es" }]
 requires-python = ">=3.10"
