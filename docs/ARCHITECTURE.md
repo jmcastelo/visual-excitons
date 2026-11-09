@@ -289,6 +289,7 @@ sequenceDiagram
    - `MainWindow`: status bar message.
 4. **Compute wave function** (Wave function controls) → `Parameters3DWidget.computeWf()`:
    - `confirmMemory()` asks the estimate; asks the user if it likely does not fit; its block size is used.
+   - From the spectra, `Compute its wave function` calls `Parameters3DWidget.computeSelected()` (through `MainWindow.computeSelectedWaveFunction`, which then shows the Wave function panel): it sets the selected exciton in the wave function controls, then `computeWf()`. Their estimates also cover the selected exciton (`updateSelectedEstimate`, emitted as `selectedEstimateChanged` and shown in the Spectra controls).
    - `Calculations.computeExcitonWaveFunction(q_index, exc_index, ..., block_size)` → task `computeWaveFunction` → `_applyWaveFunction` → `wfComputed`.
 5. **On `wfComputed`**:
    - `WavefunctionPanels.plotWf()` prepares and shows the current plot type (section 8).

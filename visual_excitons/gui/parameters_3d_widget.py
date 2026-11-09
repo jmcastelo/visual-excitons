@@ -19,6 +19,8 @@ MEMORY_WARNING_FRACTION = 0.9
 class Parameters3DWidget(Inspector):
     plotTypeChanged = Signal(int)
     signalReplotLattice = Signal()
+    # Memory of computing the exciton selected in the spectra (text, warning)
+    selectedEstimateChanged = Signal(str, bool)
     fixedParticlePosChanged = Signal()
     isoLevelChanged = Signal()
     numIsoLevelsChanged = Signal()
@@ -154,6 +156,7 @@ class Parameters3DWidget(Inspector):
                        self.qPointSpinBox.valueChanged, self.excitonIndexSpinBox.valueChanged,
                        self.xSupercellSpinBox.valueChanged, self.ySupercellSpinBox.valueChanged,
                        self.zSupercellSpinBox.valueChanged, self.calculations.wfComputed,
+                       self.particleTypeComboBox.currentIndexChanged,   # named in the selected exciton's estimate
                        self.options.databaseFound, self.options.diagoDirChanged):
             signal.connect(self.requestEstimate)
         # The databases may be busy while a calculation runs: estimate once it ends
@@ -624,6 +627,7 @@ class Parameters3DWidget(Inspector):
             spinBox.setValue(value)
             spinBox.blockSignals(False)
         self.updateExcitonNote()
+        self.requestEstimate()
 
     def qPointIndex(self):
         return self.qPointSpinBox.value() - 1
@@ -686,10 +690,19 @@ class Parameters3DWidget(Inspector):
         supercell = [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
 
         if not self.confirmMemory():
-            return
+            return False
         # k-points per block chosen to fit the available memory (see memory.chooseBlockSize)
         blockSize = self.lastEstimate['blockSize'] if self.lastEstimate else 256
         self.calculations.computeExcitonWaveFunction(block_size=blockSize, q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle, fixed_position=fixed_position, cutoff_ry=cutoff, supercell=supercell)
+        return True
+
+    def computeSelected(self):
+        """Compute the exciton selected in the spectra, with the settings of the calculation; whether it started."""
+        selected = self.calculations.selectedExciton
+        if selected is None:
+            return False
+        self.onExcitonSelected(*selected)
+        return self.computeWf()
 
     def cutoff(self):
         """Cutoff in Ry, or -1 for all the plane waves."""
@@ -706,30 +719,16 @@ class Parameters3DWidget(Inspector):
 
     def estimate(self):
         """Grid and memory of the calculation as set (see Calculations.estimateWaveFunction)."""
-        return self.calculations.estimateWaveFunction(self.qPointIndex(), self.excitonIndexSpinBox.value(),
-                                                      self.cutoff(), self.supercell(), self.smoothingFactor())
+        return self.estimateFor(self.qPointIndex(), self.excitonIndexSpinBox.value())
 
-    @Slot()
-    def updateEstimate(self):
-        try:
-            estimate = self.estimate()
-        except ValueError as error:
-            self.lastEstimate = None
-            self.showEstimate(str(error), warning=True)
-            return
-        if estimate is None:
-            if self.calculations.isBusy():
-                return   # estimated when the calculation ends
-            self.lastEstimate = None
-            self.showEstimate('')
-            return
-        self.lastEstimate = estimate
+    def estimateFor(self, qIndex, excIndex):
+        """Grid and memory of computing another exciton with the settings of the calculation."""
+        return self.calculations.estimateWaveFunction(qIndex, excIndex, self.cutoff(), self.supercell(),
+                                                      self.smoothingFactor())
 
-        box, supercell = estimate['fftBox'], estimate['supercell']
-        total = ' × '.join(str(n * s) for n, s in zip(box, supercell))
-        states = f', {estimate["states"]} degenerate states' if estimate['states'] > 1 else ''
-        text = (f'Grid: {box[0]} × {box[1]} × {box[2]} points per cell ({total} in the supercell{states}). '
-                f'Memory: about {formatBytes(estimate["peak"])} at peak')
+    def describeMemory(self, estimate):
+        """The memory of a calculation, as text, and whether it is likely too much for the memory available."""
+        text = f'about {formatBytes(estimate["peak"])} at peak'
         if estimate['loaded']:
             text += ', the wave functions being already loaded'
         needed, available = self.memoryNeeded(estimate)
@@ -737,7 +736,70 @@ class Parameters3DWidget(Inspector):
         if available is not None:
             text += f'; {formatBytes(available)} available'
             warning = needed > MEMORY_WARNING_FRACTION * available
+        return text, warning
+
+    @Slot()
+    def updateEstimate(self):
+        estimate = self.updateOwnEstimate()
+        # The same calculation for the exciton selected in the spectra, unless it
+        # is this one
+        selected = self.calculations.selectedExciton
+        same = selected is not None and selected[:2] == (self.qPointIndex(), self.excitonIndexSpinBox.value())
+        self.updateSelectedEstimate(estimate if same else None)
+
+    def updateOwnEstimate(self):
+        """Show the estimate of the calculation as set; return it (None if there is none)."""
+        try:
+            estimate = self.estimate()
+        except ValueError as error:
+            self.lastEstimate = None
+            self.showEstimate(str(error), warning=True)
+            return None
+        if estimate is None:
+            if self.calculations.isBusy():
+                return None   # estimated when the calculation ends
+            self.lastEstimate = None
+            self.showEstimate('')
+            return None
+        self.lastEstimate = estimate
+
+        box, supercell = estimate['fftBox'], estimate['supercell']
+        total = ' × '.join(str(n * s) for n, s in zip(box, supercell))
+        states = f', {estimate["states"]} degenerate states' if estimate['states'] > 1 else ''
+        memory, warning = self.describeMemory(estimate)
+        text = (f'Grid: {box[0]} × {box[1]} × {box[2]} points per cell ({total} in the supercell{states}). '
+                f'Memory: {memory}')
         self.showEstimate(('⚠ ' if warning else '') + text + '.', warning)
+        return estimate
+
+    def updateSelectedEstimate(self, estimate=None):
+        """
+        Emit selectedEstimateChanged with the memory of computing the exciton
+        selected in the spectra with the settings of the calculation (`estimate`
+        if already known).
+        """
+        selected = self.calculations.selectedExciton
+        if selected is None:
+            self.selectedEstimateChanged.emit('', False)
+            return
+        if estimate is None:
+            try:
+                estimate = self.estimateFor(selected[0], selected[1])
+            except ValueError as error:
+                self.selectedEstimateChanged.emit(str(error), True)
+                return
+            if estimate is None:
+                if not self.calculations.isBusy():   # otherwise estimated when the calculation ends
+                    self.selectedEstimateChanged.emit('', False)
+                return
+        memory, warning = self.describeMemory(estimate)
+        particle = 'hole' if self.options.particleType() == 'h' else 'electron'
+        cells = ' × '.join(str(n) for n in estimate['supercell'])
+        cutoff = 'all plane waves' if self.cutoff() < 0 else f'cutoff {self.cutoff():g} Ry'
+        states = f', {estimate["states"]} degenerate states' if estimate['states'] > 1 else ''
+        text = (f'Memory: {memory}. With the settings of the Wave function controls: {particle} fixed, '
+                f'supercell {cells}, {cutoff}{states}.')
+        self.selectedEstimateChanged.emit(('⚠ ' if warning else '') + text, warning)
 
     def memoryNeeded(self, estimate):
         """Memory the calculation adds to what is in use (bytes), and the memory available (or None)."""
@@ -750,10 +812,7 @@ class Parameters3DWidget(Inspector):
         self.estimateWarning = warning
         self.estimateNote.setText(text)
         self.estimateNote.setVisible(bool(text))
-        if warning:
-            self.estimateNote.setStyleSheet('color: #d9822b')
-        else:
-            self.estimateNote._applyColor()
+        self.estimateNote.setWarning(warning)
 
     def confirmMemory(self):
         """Ask before a calculation that likely does not fit in the available memory."""

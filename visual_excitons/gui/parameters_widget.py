@@ -11,7 +11,7 @@ class ParametersWidget(Inspector):
 
     absorptionParametersChanged = Signal()
     # Asks the main window to switch to the wave-function page
-    showWavefunctionRequested = Signal()
+    computeWavefunctionRequested = Signal()
     # Asks the main window to export the plots as a publication figure
     exportFigureRequested = Signal()
 
@@ -88,16 +88,21 @@ class ParametersWidget(Inspector):
         form.addRow(self.showLabelsCheckBox)
         self.addSection('Absorption', form)
 
-        # Selected exciton, shared with the wave-function page
+        # Selected exciton, shared with the wave function controls: its wave
+        # function in one click, with the memory it needs
 
         self.selectedExcitonNote = NoteLabel()
-        self.showWavefunctionButton = QPushButton('Wave function of this exciton')
-        self.showWavefunctionButton.setToolTip('Bring the Wave function panel to the front, with this exciton selected')
-        self.showWavefunctionButton.clicked.connect(self.showWavefunctionRequested)
+        self.computeWavefunctionButton = QPushButton('Compute its wave function')
+        self.computeWavefunctionButton.setToolTip('Compute the wave function of this exciton with the settings of the\n'
+                                                  'Wave function controls, and show it')
+        self.computeWavefunctionButton.clicked.connect(self.computeWavefunctionRequested)
+        self.wfEstimateNote = NoteLabel()
+        self.wfEstimateNote.hide()
 
         layout = QVBoxLayout()
         layout.addWidget(self.selectedExcitonNote)
-        layout.addWidget(self.showWavefunctionButton)
+        layout.addWidget(self.computeWavefunctionButton)
+        layout.addWidget(self.wfEstimateNote)
         self.addSection('Selected exciton', layout)
 
         self.calculations.excitonSelected.connect(self.onExcitonSelected)
@@ -192,13 +197,20 @@ class ParametersWidget(Inspector):
         self.options.setExcMinIntensity(value)
         self.absorptionParametersChanged.emit()
 
+    @Slot(str, bool)
+    def setWaveFunctionEstimate(self, text: str, warning: bool):
+        """The memory of computing the selected exciton (from the wave function controls)."""
+        self.wfEstimateNote.setText(text)
+        self.wfEstimateNote.setWarning(warning)
+        self.wfEstimateNote.setVisible(bool(text) and self.calculations.selectedExciton is not None)
+
     @Slot()
     def onExcitonSelected(self, *args):
         selected = self.calculations.selectedExciton
         if selected is None:
             self.selectedExcitonNote.setText('Click a bright exciton in an absorption spectrum to select it.')
-            self.showWavefunctionButton.setEnabled(False)
+            self.computeWavefunctionButton.setEnabled(False)
         else:
             qIndex, excIndex, energy = selected
             self.selectedExcitonNote.setText(f'Exciton {excIndex} at Q-point {qIndex + 1}, E = {energy:.4f} eV')
-            self.showWavefunctionButton.setEnabled(True)
+            self.computeWavefunctionButton.setEnabled(True)

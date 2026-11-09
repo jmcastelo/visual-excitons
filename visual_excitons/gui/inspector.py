@@ -188,6 +188,10 @@ class ValueSlider(QWidget):
         self.slider.setToolTip(text)
 
 
+# Text of warnings, readable on both themes
+WARNING_COLOR = '#d9822b'
+
+
 class NoteLabel(QLabel):
     """
     Small grey explanatory text, word-wrapped, that always gets the height its
@@ -202,10 +206,19 @@ class NoteLabel(QLabel):
         font = QFont(self.font())
         font.setPointSizeF(font.pointSizeF() * 0.92)
         self.setFont(font)
+        self.warning = False
         self._applyColor()
         themeManager().themeChanged.connect(self._applyColor)
 
+    def setWarning(self, warning: bool):
+        """In orange, for a warning (e.g. not enough memory), on any theme."""
+        self.warning = warning
+        self._applyColor()
+
     def _applyColor(self, *args):
+        if self.warning:
+            self.setStyleSheet(f'color: {WARNING_COLOR}')
+            return
         # Between the text and window colors, readable on both themes
         palette = QApplication.palette()
         text, window = palette.color(QPalette.ColorRole.WindowText), palette.color(QPalette.ColorRole.Window)

@@ -140,16 +140,68 @@ def test_exciton_selection_reaches_both_pages(window, qtbot):
     assert parameters.qPointSpinBox.value() == 5 and parameters.excitonIndexSpinBox.value() == 2
     assert '2.2284 eV' in parameters.excitonNote.text()
     spectra = window.spectra.inspector
-    assert spectra.showWavefunctionButton.isEnabled() and 'Q-point 5' in spectra.selectedExcitonNote.text()
+    assert spectra.computeWavefunctionButton.isEnabled() and 'Q-point 5' in spectra.selectedExcitonNote.text()
     assert 'exciton 2 at Q-point 5' in window.statusBar().currentMessage()
 
     # Changing the exciton by hand: the note no longer claims it is the selected one
     parameters.excitonIndexSpinBox.setValue(3)
     assert 'Click a bright exciton' in parameters.excitonNote.text()
 
+
+
+def test_compute_the_selected_exciton_from_the_spectra(window, monkeypatch):
+    """One click from an exciton in the spectra to its wave function, with the memory it needs shown."""
+    import visual_excitons.gui.parameters_3d_widget as module
+    p3, spectra, calc = window.wavefunction.parameters3DWidget, window.spectra.inspector, window.calculations
+    estimates = []
+
+    def estimate(qIndex, excIndex, cutoff, supercell, factor):
+        estimates.append((qIndex, excIndex))
+        return {'peak': 3 * 2 ** 30, 'wavefunctions': 2 ** 30, 'loaded': False, 'fftBox': (18, 18, 18),
+                'supercell': [s + 1 - s % 2 for s in supercell], 'states': 2, 'blockSize': 128}
+    monkeypatch.setattr(calc, 'estimateWaveFunction', estimate)
+    monkeypatch.setattr(module, 'availableMemory', lambda: (16 * 2 ** 30, 8 * 2 ** 30))
+    calls = []
+    monkeypatch.setattr(calc, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
+
+    # Nothing selected: no button, no estimate
+    p3.updateEstimate()
+    assert not spectra.computeWavefunctionButton.isEnabled() and spectra.wfEstimateNote.isHidden()
+
+    window.options.numQPointsChanged.emit(90)
+    calc.selectedExciton = (4, 2, 2.2284)
+    calc.excitonSelected.emit(4, 2, 2.2284)
+    p3.ySupercellSpinBox.setValue(3)
+    p3.updateEstimate()
+    note = spectra.wfEstimateNote
+    assert not note.isHidden() and not note.warning
+    assert note.text().startswith('Memory: about 3.0 GB at peak; 8.0 GB available.')
+    assert 'hole fixed, supercell 1 × 3 × 1, cutoff 10 Ry, 2 degenerate states' in note.text()
+
+    # Another exciton set by hand in the wave function controls: the estimate is still of the selected one
+    p3.excitonIndexSpinBox.setValue(5)
+    estimates.clear()
+    p3.updateEstimate()
+    assert estimates == [(4, 5), (4, 2)]
+
+    # Too much for the memory available: in orange
+    monkeypatch.setattr(module, 'availableMemory', lambda: (16 * 2 ** 30, 2 * 2 ** 30))
+    p3.updateEstimate()
+    assert note.warning and note.text().startswith('⚠')
+
+    # The button computes the selected exciton (not the one set by hand) and shows it
+    monkeypatch.setattr(module.QMessageBox, 'warning', lambda *args: module.QMessageBox.StandardButton.Yes)
     window.panels.docks['wavefunction'].toggleView(False)
-    spectra.showWavefunctionButton.click()
-    assert window.panels.docks['wavefunction'].isCurrentTab() and window.panels.isShown('wavefunction')
+    spectra.computeWavefunctionButton.click()
+    assert calls[-1]['q_index'] == 4 and calls[-1]['exc_index'] == 2 and calls[-1]['supercell'] == [1, 3, 1]
+    assert p3.excitonIndexSpinBox.value() == 2
+    assert window.panels.isShown('wavefunction') and window.panels.docks['wavefunction'].isCurrentTab()
+
+    # Declined for lack of memory: nothing computed, the panels stay as they are
+    monkeypatch.setattr(module.QMessageBox, 'warning', lambda *args: module.QMessageBox.StandardButton.No)
+    window.panels.docks['wavefunction'].toggleView(False)
+    spectra.computeWavefunctionButton.click()
+    assert len(calls) == 1 and not window.panels.isShown('wavefunction')
 
 
 def test_compute_passes_the_chosen_exciton(window, monkeypatch):

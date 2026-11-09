@@ -125,7 +125,8 @@ class MainWindow(QMainWindow):
         self.spectra = SpectraPanels(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
                                      self.bandStructureStyle, parent=self)
         self.wavefunction = WavefunctionPanels(self.options, self.calculations, parent=self)
-        self.spectra.inspector.showWavefunctionRequested.connect(lambda: self.showPanel('wavefunction'))
+        self.spectra.inspector.computeWavefunctionRequested.connect(self.computeSelectedWaveFunction)
+        self.wavefunction.parameters3DWidget.selectedEstimateChanged.connect(self.spectra.inspector.setWaveFunctionEstimate)
         self.system.qPathApplied.connect(self.saveQPath)
         self.spectra.inspector.exportFigureRequested.connect(self.exportFigure)
         self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
@@ -355,6 +356,12 @@ class MainWindow(QMainWindow):
         self.panels.show(key)
         if key == 'analysis':
             self.analysisCheckBox.setChecked(True)
+
+    @Slot()
+    def computeSelectedWaveFunction(self):
+        """The wave function of the exciton selected in the spectra, shown in its panel."""
+        if self.wavefunction.parameters3DWidget.computeSelected():
+            self.showPanel('wavefunction')
 
     @Slot(str, bool)
     def onPanelToggled(self, key, shown):
