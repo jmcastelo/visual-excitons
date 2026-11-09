@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-qt>=4.4"]
+test = ["pytest>=8", "pytest-qt>=4.4", "pytest-xdist>=3.5"]
 
 [project.gui-scripts]
 visual-excitons = "visual_excitons.main:main"
@@ -60,8 +60,11 @@ testpaths = ["tests"]
 # The package is imported from the repository root
 pythonpath = ["."]
 qt_api = "pyside6"
-# Slow end-to-end tests run only on request: pytest -m slow
-addopts = "-m 'not slow'"
+# Slow end-to-end tests run only on request: pytest -m slow.
+# In parallel (pytest-xdist): workers chosen in tests/conftest.py so as not to
+# saturate the CPU; tests grouped with xdist_group run in the same worker.
+# Serial, e.g. to debug: pytest -n0
+addopts = "-m 'not slow' -n auto --dist loadgroup"
 markers = [
     "slow: long end-to-end calculations on real datasets (run with -m slow)",
     "data: needs the datasets in data/, which are not in the repository (skipped when missing)",

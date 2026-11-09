@@ -506,11 +506,14 @@ pytest -m "slow or not slow"
 
 Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 
+- **Parallel** with pytest-xdist (`-n auto --dist loadgroup` in `addopts`): `pytest_xdist_auto_num_workers` chooses one worker per physical core, at most half the CPU threads, within the free memory (`WORKER_MEMORY` 1 GB each, measured peak 0.8 GB; `MEMORY_MARGIN` 2 GB), and **none (serial) when the slow tests are selected** (`selectsSlowTests`): they peak at about 3 GB, and once exhausted the memory of the development machine (16 GB) next to other workers. The numerical libraries get one thread per worker, half the CPU threads in serial runs (environment variables set at the top of `conftest.py`, before NumPy is imported; `test_environment.py` checks it). Tests that must share a worker: `pytest.mark.xdist_group(...)`.
+- Each worker has its own temporary directory, so its own settings: tests stay independent. `-n0` runs serially (debugging).
+
 - Qt runs on the **offscreen** platform (unless `QT_QPA_PLATFORM` is set), and settings go to a temporary directory: tests never touch the user's settings.
 - `datasetPath(name)` and the `lattice` fixture skip tests whose dataset in `data/` is missing (`data` marker).
 - OpenGL context sharing is enabled as in `main.py`.
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_persistence`, `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 

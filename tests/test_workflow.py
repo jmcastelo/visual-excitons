@@ -12,7 +12,9 @@ from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.dataset import findDataset
 from conftest import datasetPath
 
-pytestmark = [pytest.mark.slow, pytest.mark.data]
+# One worker for all of them: they share the dispersion (module fixture), and
+# each loads gigabytes of wave functions, too much to run several at once
+pytestmark = [pytest.mark.slow, pytest.mark.data, pytest.mark.xdist_group('workflow')]
 
 
 @pytest.fixture(scope='module')
