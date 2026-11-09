@@ -1,6 +1,37 @@
+"""
+Styles of the 2D plots: pens and symbols of the curves (for all of them and
+each one), axes, legend and fill. `state()` and `setState()` turn them into
+JSON-able dicts and back, to keep them between sessions and in session files.
+"""
+
 from PySide6.QtCore import QObject, Signal, Slot, Qt
 from PySide6.QtGui import QColor, QFont
 import pyqtgraph as pg
+
+PEN_STYLES = [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine, Qt.PenStyle.DashDotLine,
+              Qt.PenStyle.DashDotDotLine]
+
+
+def penState(pen):
+    style = pen.style()
+    return {'color': pen.color().name(QColor.NameFormat.HexArgb),
+            'width': pen.widthF(), 'style': PEN_STYLES.index(style) if style in PEN_STYLES else 0}
+
+
+def setPen(pen, state):
+    pen.setColor(QColor(state['color']))
+    pen.setWidthF(float(state['width']))
+    pen.setStyle(PEN_STYLES[int(state['style'])])
+
+
+def fontState(font):
+    return font.toString()
+
+
+def makeFont(state):
+    font = QFont()
+    font.fromString(state)
+    return font
 
 
 class StyleCommon:
@@ -43,6 +74,17 @@ class CurveStyle(QObject):
 
     def allCurvePensEqual(self):
         return all(pen == self.curvePens[0] for pen in self.curvePens)
+
+    def state(self):
+        return {'pen': penState(self.commonPen), 'curves': [penState(pen) for pen in self.curvePens],
+                'gradient': [self.startHue, self.endHue]}
+
+    def setState(self, state, curves=False):
+        setPen(self.commonPen, state['pen'])
+        self.startHue, self.endHue = (int(hue) for hue in state.get('gradient', [self.startHue, self.endHue]))
+        if curves and len(state.get('curves', [])) == len(self.curvePens):
+            for pen, penState in zip(self.curvePens, state['curves']):
+                setPen(pen, penState)
 
     def setCommonPalette(self):
         self.curvePens.clear()
@@ -118,6 +160,19 @@ class PointStyle(QObject):
 
     def allPointSizesEqual(self):
         return all(size == self.pointSizes[0] for size in self.pointSizes)
+
+    def state(self):
+        return {'symbol': self.commonPointSymbol, 'size': self.commonPointSize,
+                'symbols': list(self.pointSymbols), 'sizes': list(self.pointSizes)}
+
+    def setState(self, state, curves=False):
+        if state['symbol'] in self.symbols:
+            self.commonPointSymbol = state['symbol']
+        self.commonPointSize = int(state['size'])
+        symbols, sizes = state.get('symbols', []), state.get('sizes', [])
+        if curves and len(symbols) == len(self.pointSymbols) and len(sizes) == len(self.pointSizes):
+            self.pointSymbols[:] = [symbol if symbol in self.symbols else 'o' for symbol in symbols]
+            self.pointSizes[:] = [int(size) for size in sizes]
 
     def setCommonStyle(self):
         self.pointSymbols.clear()
@@ -233,10 +288,29 @@ class AxesStyle(QObject):
 
         self.axesWidth = 1
 
+    COLORS = ('titleColor', 'labelsColor', 'ticksColor', 'axesColor', 'backgroundColor')
+    FONTS = ('titleFont', 'labelsFont', 'ticksFont')
+
     @Slot()
     def setAxesWidth(self, width):
         self.axesWidth = width
         self.axesWidthChanged.emit(self.axesWidth)
+
+    def state(self):
+        state = {name: getattr(self, name).getColor().name(QColor.NameFormat.HexArgb) for name in self.COLORS}
+        state.update({name: fontState(getattr(self, name).getFont()) for name in self.FONTS})
+        state['width'] = self.axesWidth
+        return state
+
+    def setState(self, state):
+        for name in self.COLORS:
+            if name in state:
+                getattr(self, name).setColor(QColor(state[name]))
+        for name in self.FONTS:
+            if name in state:
+                getattr(self, name).setFont(makeFont(state[name]))
+        if 'width' in state:
+            self.setAxesWidth(int(state['width']))
 
 
 class LegendStyle(QObject):
@@ -256,6 +330,22 @@ class LegendStyle(QObject):
         self.offset = [30, 30]
 
         self.styles = [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine, Qt.PenStyle.DashDotLine, Qt.PenStyle.DashDotDotLine]
+
+    def state(self):
+        return {'textColor': QColor(self.textColor).name(QColor.NameFormat.HexArgb), 'textSize': self.textSize,
+                'backgroundColor': None if self.backgroundColor is None
+                else QColor(self.backgroundColor).name(QColor.NameFormat.HexArgb),
+                'border': penState(self.borderPen), 'offset': list(self.offset)}
+
+    def setState(self, state):
+        self.setTextColor(QColor(state['textColor']))
+        self.setTextSize(int(state['textSize']))
+        if state.get('backgroundColor') is not None:
+            self.setBackgroundColor(QColor(state['backgroundColor']))
+        setPen(self.borderPen, state['border'])
+        self.borderPenChanged.emit(self.borderPen)
+        self.offset[:] = [int(value) for value in state['offset']]
+        self.offsetChanged.emit(self.offset)
 
     @Slot()
     def setTextColor(self, color):
@@ -360,6 +450,29 @@ class BaseStyle(QObject):
     def applyToAllCurves(self):
         return self.common.applyToAllCurves
 
+    def state(self):
+        """The style as a JSON-able dict, with the style of each curve."""
+        state = {'axes': self.axesStyle.state(), 'curve': self.curveStyle.state()}
+        if hasattr(self, 'pointStyle'):
+            state['point'] = self.pointStyle.state()
+        return state
+
+    def setState(self, state, curves=False):
+        """
+        Set a style from state(); the style of each curve too if `curves` and
+        there are as many curves as when it was saved. Missing or invalid parts
+        are left as they are.
+        """
+        for key, part in (('axes', self.axesStyle), ('curve', getattr(self, 'curveStyle', None)),
+                          ('point', getattr(self, 'pointStyle', None))):
+            if part is None or key not in state:
+                continue
+            try:
+                part.setState(state[key]) if key == 'axes' else part.setState(state[key], curves)
+            except (KeyError, TypeError, ValueError, IndexError):
+                pass
+        self.styleChanged.emit()
+
     def setApplyToAllCurves(self, apply):
         self.common.applyToAllCurves = apply
 
@@ -393,6 +506,17 @@ class AbsorptionStyle(BaseStyle):
 
         self.legendStyle = LegendStyle()
 
+    def state(self):
+        return {**super().state(), 'legend': self.legendStyle.state()}
+
+    def setState(self, state, curves=False):
+        if 'legend' in state:
+            try:
+                self.legendStyle.setState(state['legend'])
+            except (KeyError, TypeError, ValueError, IndexError):
+                pass
+        super().setState(state, curves)
+
     @Slot()
     def appendCurveStyle(self, index):
         self.curveStyle.curvePens.append(pg.mkPen(index))
@@ -424,6 +548,23 @@ class BandStructureStyle(BaseStyle):
         self.curveStyle.styleChanged.connect(self.styleChanged)
 
         self.brush = pg.mkBrush('orange')
+        self.weightFactor = 1.0
+
+    def state(self):
+        return {**super().state(), 'fill': self.brush.color().name(QColor.NameFormat.HexArgb),
+                'weightFactor': self.weightFactor}
+
+    def setState(self, state, curves=False):
+        if 'fill' in state:
+            self.brush = pg.mkBrush(QColor(state['fill']))
+        if 'weightFactor' in state:
+            self.setWeightFactor(float(state['weightFactor']))
+        super().setState(state, curves)
+
+    @Slot(float)
+    def setWeightFactor(self, factor):
+        self.weightFactor = factor
+        self.weightFactorChanged.emit(factor)
 
     @Slot()
     def applyDefaultStyle(self):

@@ -61,13 +61,14 @@ visual_excitons/
 │   ├── export.py           Cube / XSF writers
 │   ├── memory.py           Real-space grid and memory estimates
 │   ├── atomic_data.py      Symbols, covalent radii, Jmol colors, Bohr/Å constants
-│   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend)
+│   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend); state() / setState()
 ├── gui/                    Widgets and rendering
 │   ├── main_window.py      MainWindow: panels, menus, status bar, datasets, persistence
 │   ├── docking.py          Dockable panels (QtAds): presets, saved layouts
 │   ├── theme.py            System / Light / Dark themes, plot colors
 │   ├── inspector.py        Control panel framework: collapsible sections, forms, notes
 │   ├── persistence.py      Values kept between sessions (global and per dataset)
+│   ├── appearance.py       The 2D plot styles kept between sessions, theme colors remapped
 │   ├── options_widget.py   System panel
 │   ├── spectra_panels.py   The three 2D plots and their controls, wired together
 │   ├── parameters_widget.py       Spectra controls (inspector)
@@ -455,7 +456,9 @@ Values kept between sessions are registered with a **scope**:
 - `GLOBAL`: user preferences (display, view, layout), saved in the settings as one JSON blob under `state`.
 - `DATASET`: parameters of a system (energy range, exciton, fixed particle positions, supercell, cutoff...), saved with each dataset in `recentDatasets`.
 
-Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
+Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, `appearance` for the 2D plot styles, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
+
+The **2D plot styles** are one `GLOBAL` entry (`appearance/styles`): `appearance.appearanceState()` gathers `state()` of the three styles (common pen and symbol, the style of each curve, axes colors, fonts and width, legend, fill, weight factor) with the theme they were made on; `restoreAppearance()` maps the colors that were that theme's defaults to the current theme's, then calls `setState()`, and `StyleWidget.refresh()` shows the values (the editors' `setWidgetsValues` block their signals: showing a value must not apply it). The style of each curve only applies when there are as many curves as when saved: at startup there are none, so only the common style applies; `MainWindow.openSession` applies the session's again after `restoreResults`, which gives restored curves the common style.
 
 A dataset opened for the first time gets the defaults (`MainWindow.datasetDefaults`), not the previous dataset's values.
 
@@ -527,7 +530,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - OpenGL context sharing is enabled as in `main.py`.
 - `deleteWindows` (autouse) deletes the top-level widgets each test leaves. Closed windows stay alive through their signal connections, and every theme change repolishes all of them: without it, the GUI tests get slower and slower as they run (several times slower in total).
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 
@@ -587,7 +590,7 @@ Tips:
 
 - Results are kept in session files, not when the program is simply closed and reopened (only parameters and the camera are). A disk cache of results keyed by dataset and parameters would make that automatic.
 - There is no "unsaved changes" tracking for sessions: closing does not ask to save.
-- The 2D plot styles (`style.py`, `style_widget.py`) are older code: not kept between sessions, and theme switching only replaces colors still at their default.
+- The 2D plot styles (`style.py`, `style_widget.py`) are older code. Switching the theme resets the axes colors and the legend text to the theme's; curves keep their colors unless still at the default.
 - The excitonic band structure is only available at Γ.
 - Boundary atoms (atoms just outside the supercell) and a per-species bond-length table are not implemented.
 - Plain `print` output from yambopy goes to the console.

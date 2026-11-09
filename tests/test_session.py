@@ -7,7 +7,7 @@ import zipfile
 import numpy as np
 import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QQuaternion, QVector3D
+from PySide6.QtGui import QQuaternion, QVector3D, QColor
 
 from visual_excitons.core.session import (writeSession, readSession, datasetFingerprint, fingerprintsMatch,
                                           SessionError, SESSION_FORMAT, SESSION_VERSION)
@@ -194,6 +194,13 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     p3.colormapComboBox.setCurrentText('Magma')
     p3.setSupercell([3, 3, 1])
     injectResults(w)
+    # The second absorption curve in its own color
+    style = w.absorptionStyle
+    style.setApplyToAllCurves(False)
+    style.setCurrentCurveIndex(1)
+    style.curveStyle.setCurveColor(QColor('#00c853'))
+    style.setApplyToAllCurves(True)
+    w.dispersionStyle.curveStyle.setCurveWidth(3)
     view = w.wavefunction.excitonWfWidget
     view.setCameraParams(rotation=QQuaternion.fromAxisAndAngle(QVector3D(0, 1, 0), 33.0), distance=4321.0)
     camera = view.cameraState()
@@ -211,6 +218,10 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     assert w2.options.getPathString() == 'LGZF' and w2.options.supercell() == [3, 3, 1]
     assert w2.wavefunction.parameters3DWidget.colormapComboBox.currentText() == 'Magma'
     assert c2.selectedExciton == (4, 2, 2.1) and len(c2.excAbsData) == 2 and c2.waveFunction.shape == (54, 54, 18)
+    # The styles of the plots, each curve's too (restored after the curves)
+    assert w2.absorptionStyle.curveStyle.curvePens[1].color().name() == '#00c853'
+    assert w2.absorptionStyle.curveStyle.curvePens[0].color().name() != '#00c853'
+    assert all(pen.width() == 3 for pen in w2.dispersionStyle.curveStyle.curvePens)
     restored = w2.wavefunction.excitonWfWidget.cameraState()
     np.testing.assert_allclose(restored['rotation'] + restored['center'] + [restored['distance']],
                                camera['rotation'] + camera['center'] + [camera['distance']], atol=1e-5)

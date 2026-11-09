@@ -22,7 +22,8 @@ from .wavefunction_panels import WavefunctionPanels
 from .docking import Panels, PRESETS, DEFAULT_PRESET, scrollable
 from .theme import themeManager, THEME_MODES
 from visual_excitons import __version__
-from .persistence import StateRegistry, GLOBAL, DATASET
+from .persistence import StateRegistry, PersistentState, GLOBAL, DATASET
+from .appearance import appearanceState, restoreAppearance
 from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
 from .figure_export import FigureExportDialog, figureData, figureStyles
 from visual_excitons.core import figures
@@ -88,6 +89,10 @@ class MainWindow(QMainWindow):
         # The camera (the name dates from when it was kept with the page layout:
         # kept for the settings and sessions saved then)
         self.state.add('wavefunctionLayout', self.wavefunction.persistence)
+        # The Appearance of the 2D plots (in sessions with the style of each curve)
+        self.appearance = PersistentState()
+        self.appearance.remember('styles', get=self.appearanceState, set=self.restoreAppearance)
+        self.state.add('appearance', self.appearance)
         # A dataset opened for the first time starts from the defaults, not from
         # the parameters of the previous one
         self.datasetDefaults = self.state.values(DATASET)
@@ -378,6 +383,18 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'themeActions'):
             self.themeActions[self.theme.mode].setChecked(True)
 
+    # Appearance of the 2D plots
+
+    def plotStyles(self):
+        return self.dispersionStyle, self.absorptionStyle, self.bandStructureStyle
+
+    def appearanceState(self):
+        return appearanceState(self.plotStyles(), self.theme.isDark())
+
+    def restoreAppearance(self, state, curves=False):
+        restoreAppearance(self.plotStyles(), state, self.theme.isDark(), curves)
+        self.spectra.inspector.styleWidget.refresh()
+
     # Datasets
 
     def recentDatasets(self):
@@ -613,6 +630,8 @@ class MainWindow(QMainWindow):
             if fingerprintsMatch(datasetFingerprint(dataset), manifest.get('fingerprint', {}), strict=not relocated):
                 try:
                     self.calculations.restoreResults(results, arrays)
+                    # Restoring the curves gave them the common style: now each its own
+                    self.restoreAppearance(state.get('global', {}).get('appearance/styles'), curves=True)
                     message += ' with its results'
                 except Exception as error:   # a session from an incompatible version, or damaged
                     message += f'; its results could not be shown ({error})'

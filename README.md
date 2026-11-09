@@ -111,6 +111,7 @@ The suite covers:
 - `test_session.py`: session files (format, versions, interrupted saves, fingerprints), results round trip, and a whole setup through the window (changed and moved datasets).
 - `test_export.py`: the density files (read back and checked), and the image export: the rendering checks need OpenGL, which Qt's offscreen platform lacks, so they run in a separate process on the display (`render_checks.py`), and are skipped without one.
 - `test_persistence.py`: parameters kept between sessions, preferences and per dataset.
+- `test_appearance.py`: the styles of the 2D plots kept between sessions (each curve's too), and theme colors following the theme.
 - `test_environment.py`: the test run itself (number of processes, threads of the numerical libraries).
 - `test_workflow.py`: end-to-end calculations on the `BiI3` dataset (dispersion, absorption, selection, wave function), also in the background with progress and cancellation.
 
@@ -155,14 +156,14 @@ The status bar shows the dataset loaded (name, Bravais lattice and number of Q-p
 **Resuming where you left off.** When the program is opened again, it resumes where it was left:
 
 - The window: its size, the arrangement of the panels (and your saved layouts), the theme, and which sections of the control panels are open.
-- Preferences: how the wave function is displayed (plot type, iso level, number of levels, style, opacities, volume settings), the view (basis, preset, direction and up vectors, side, projection), the structure (atoms, names, bonds and boundaries shown, atom and bond sizes, bond colors), the axes gizmo and cell parameters shown, and whether bright excitons are labelled.
+- Preferences: how the wave function is displayed (plot type, iso level, number of levels, style, opacities, volume settings), the view (basis, preset, direction and up vectors, side, projection), the structure (atoms, names, bonds and boundaries shown, atom and bond sizes, bond colors), the axes gizmo and cell parameters shown, whether bright excitons are labelled, and the `Appearance` of the 2D plots (lines, symbols, axes colors and fonts, legend, band structure fill and weight factor). Colors that were the theme's defaults follow the theme, so a style made on the dark theme still suits the light one.
 - The last dataset, with its own parameters: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff, and the view of the 3D scene (rotation, zoom and pan).
 
 Each dataset keeps its own parameters: switching to another one and back, or opening it again later from `Open recent` or `Open dataset`, brings them back; a dataset opened for the first time starts from the defaults. Results (dispersion, spectra, wave function) are not kept this way: compute them again, with the parameters already set, or save a session (below).
 
 ### Sessions
 
-A session file (`.vxsession`) keeps a whole setup, to come back to it later or to share it: the dataset, its Q-path, all the parameters and display settings, the exact view of the 3D scene and, optionally, the computed results. Keep several sessions of the same dataset for different figures or excitons, e.g. one per exciton with its own view and colormap.
+A session file (`.vxsession`) keeps a whole setup, to come back to it later or to share it: the dataset, its Q-path, all the parameters and display settings, the exact view of the 3D scene, the `Appearance` of the 2D plots (with the style of each curve, e.g. a color per absorption spectrum) and, optionally, the computed results. Keep several sessions of the same dataset for different figures or excitons, e.g. one per exciton with its own view and colormap.
 
 - `File › Save session` (`Ctrl+S`) saves the current setup in its session file, or asks for one the first time; `Save session as…` (`Ctrl+Shift+S`) saves it in a new one. The name of the session is shown in the title of the window.
 - `File › Open session…` (`Ctrl+Shift+O`) and `Open recent session` restore a session.
@@ -391,7 +392,6 @@ File names are suggested from the dataset and the exciton (e.g. `BiI3_Bulk_8x8x8
 
 ## Future features
 
-- Save and load configurations to disk.
 - Finite-Q band structure plots.
 - Expand the tool to include electronic band structure plots.
 

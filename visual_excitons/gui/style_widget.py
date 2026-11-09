@@ -1,9 +1,19 @@
-from PySide6.QtCore import Signal, Slot, Qt
+from contextlib import ExitStack
+
+from PySide6.QtCore import Signal, Slot, Qt, QSignalBlocker
 from PySide6.QtWidgets import QColorDialog, QWidget, QLabel, QComboBox, QGroupBox, QRadioButton
 from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QGridLayout
 from PySide6.QtWidgets import QStackedLayout, QSizePolicy, QTabWidget, QFontDialog
 
-from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
+from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle, PEN_STYLES
+
+
+def blocked(*widgets):
+    """Context in which `widgets` emit no signals: showing a value must not apply it again."""
+    stack = ExitStack()
+    for widget in widgets:
+        stack.enter_context(QSignalBlocker(widget))
+    return stack
 
 
 class ApplyCurveStyleWidget(QWidget):
@@ -182,17 +192,15 @@ class CurveStyleWidget(QWidget):
         else:
             pen = None
 
+        if pen is None and not self.style.curveStyle.curvePens:
+            pen = self.style.curveStyle.commonPen   # no curves yet: the style they will get
+
         if pen is not None:
-            # Line style
-            penStyles = [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine, Qt.PenStyle.DashDotLine, Qt.PenStyle.DashDotDotLine]
-            styleIndex = penStyles.index(pen.style())
-            self.lineStyleComboBox.setCurrentIndex(styleIndex)
-
-            # Line color
-            self.lineColorDialog.setCurrentColor(pen.color())
-
-            # Line width
-            self.lineWidthSpinBox.setValue(pen.width())
+            with blocked(self.lineStyleComboBox, self.lineColorDialog, self.lineWidthSpinBox):
+                if pen.style() in PEN_STYLES:
+                    self.lineStyleComboBox.setCurrentIndex(PEN_STYLES.index(pen.style()))
+                self.lineColorDialog.setCurrentColor(pen.color())
+                self.lineWidthSpinBox.setValue(pen.width())
 
     @Slot()
     def showWidgets(self, checked):
@@ -257,15 +265,16 @@ class PointStyleWidget(QWidget):
 
     @Slot()
     def setWidgetsValues(self):
-        symbolIndex = self.style.pointStyle.currentPointSymbolIndex()
+        points = self.style.pointStyle
+        symbolIndex, size = points.currentPointSymbolIndex(), points.currentPointSize()
+        if not points.pointSymbols:   # no curves yet: the style they will get
+            symbolIndex, size = points.symbols.index(points.commonPointSymbol), points.commonPointSize
 
-        if symbolIndex is not None:
-            self.symbolStyleComboBox.setCurrentIndex(symbolIndex)
-
-        size = self.style.pointStyle.currentPointSize()
-
-        if size is not None:
-            self.symbolSizeSpinBox.setValue(size)
+        with blocked(self.symbolStyleComboBox, self.symbolSizeSpinBox):
+            if symbolIndex is not None:
+                self.symbolStyleComboBox.setCurrentIndex(symbolIndex)
+            if size is not None:
+                self.symbolSizeSpinBox.setValue(size)
 
     @Slot()
     def showWidgets(self, checked):
@@ -300,11 +309,11 @@ class LegendStyleWidget(QWidget):
 
         textSizeLabel = QLabel('Text Size')
 
-        textSizeSpinBox = QSpinBox()
-        textSizeSpinBox.setRange(1, 100)
-        textSizeSpinBox.setValue(8)
-        textSizeSpinBox.valueChanged.connect(self.style.legendStyle.setTextSize)
-        textSizeSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.textSizeSpinBox = QSpinBox()
+        self.textSizeSpinBox.setRange(1, 100)
+        self.textSizeSpinBox.setValue(self.style.legendStyle.textSize)
+        self.textSizeSpinBox.valueChanged.connect(self.style.legendStyle.setTextSize)
+        self.textSizeSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Background color widgets
 
@@ -322,20 +331,20 @@ class LegendStyleWidget(QWidget):
 
         borderStyleLabel = QLabel('Border Style')
 
-        borderStyleComboBox = QComboBox()
-        borderStyleComboBox.addItems(["Solid Line", "Dash Line", "Dot Line", "Dash-Dot Line", "Dash-Dot-Dot Line"])
-        borderStyleComboBox.setCurrentIndex(0)
-        borderStyleComboBox.currentIndexChanged.connect(self.style.legendStyle.setBorderStyle)
+        self.borderStyleComboBox = QComboBox()
+        self.borderStyleComboBox.addItems(["Solid Line", "Dash Line", "Dot Line", "Dash-Dot Line", "Dash-Dot-Dot Line"])
+        self.borderStyleComboBox.setCurrentIndex(0)
+        self.borderStyleComboBox.currentIndexChanged.connect(self.style.legendStyle.setBorderStyle)
 
         # Border width widgets
 
         borderWidthLabel = QLabel('Border Width')
 
-        borderWidthSpinBox = QSpinBox()
-        borderWidthSpinBox.setRange(0, 7)
-        borderWidthSpinBox.setValue(0)
-        borderWidthSpinBox.valueChanged.connect(self.style.legendStyle.setBorderWidth)
-        borderWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.borderWidthSpinBox = QSpinBox()
+        self.borderWidthSpinBox.setRange(0, 7)
+        self.borderWidthSpinBox.setValue(0)
+        self.borderWidthSpinBox.valueChanged.connect(self.style.legendStyle.setBorderWidth)
+        self.borderWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Border color widgets
 
@@ -353,21 +362,21 @@ class LegendStyleWidget(QWidget):
 
         offsetXLabel = QLabel('Offset X')
 
-        offsetXSpinBox = QSpinBox()
-        offsetXSpinBox.setRange(0, 1000)
-        offsetXSpinBox.setValue(30)
-        offsetXSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetX)
-        offsetXSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.offsetXSpinBox = QSpinBox()
+        self.offsetXSpinBox.setRange(0, 1000)
+        self.offsetXSpinBox.setValue(30)
+        self.offsetXSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetX)
+        self.offsetXSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Offset Y widgets
 
         offsetYLabel = QLabel('Offset Y')
 
-        offsetYSpinBox = QSpinBox()
-        offsetYSpinBox.setRange(0, 1000)
-        offsetYSpinBox.setValue(30)
-        offsetYSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetY)
-        offsetYSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.offsetYSpinBox = QSpinBox()
+        self.offsetYSpinBox.setRange(0, 1000)
+        self.offsetYSpinBox.setValue(30)
+        self.offsetYSpinBox.valueChanged.connect(self.style.legendStyle.setOffsetY)
+        self.offsetYSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         # Main layout
 
@@ -376,21 +385,37 @@ class LegendStyleWidget(QWidget):
         mainLayout.addWidget(textColorLabel, 0, 0)
         mainLayout.addWidget(textColorButton, 0, 1)
         mainLayout.addWidget(textSizeLabel, 1, 0)
-        mainLayout.addWidget(textSizeSpinBox, 1, 1)
+        mainLayout.addWidget(self.textSizeSpinBox, 1, 1)
         mainLayout.addWidget(backgroundColorLabel, 2, 0)
         mainLayout.addWidget(backgroundColorButton, 2, 1)
         mainLayout.addWidget(borderStyleLabel, 3, 0)
-        mainLayout.addWidget(borderStyleComboBox, 3, 1)
+        mainLayout.addWidget(self.borderStyleComboBox, 3, 1)
         mainLayout.addWidget(borderWidthLabel, 4, 0)
-        mainLayout.addWidget(borderWidthSpinBox, 4, 1)
+        mainLayout.addWidget(self.borderWidthSpinBox, 4, 1)
         mainLayout.addWidget(borderColorLabel, 5, 0)
         mainLayout.addWidget(borderColorButton, 5, 1)
         mainLayout.addWidget(offsetXLabel, 6, 0)
-        mainLayout.addWidget(offsetXSpinBox, 6, 1)
+        mainLayout.addWidget(self.offsetXSpinBox, 6, 1)
         mainLayout.addWidget(offsetYLabel, 7, 0)
-        mainLayout.addWidget(offsetYSpinBox, 7, 1)
+        mainLayout.addWidget(self.offsetYSpinBox, 7, 1)
 
         self.setLayout(mainLayout)
+
+    @Slot()
+    def setWidgetsValues(self):
+        legend = self.style.legendStyle
+        with blocked(self.textColorDialog, self.textSizeSpinBox, self.backgroundColorDialog, self.borderStyleComboBox,
+                     self.borderWidthSpinBox, self.borderColorDialog, self.offsetXSpinBox, self.offsetYSpinBox):
+            self.textColorDialog.setCurrentColor(legend.textColor)
+            self.textSizeSpinBox.setValue(legend.textSize)
+            if legend.backgroundColor is not None:
+                self.backgroundColorDialog.setCurrentColor(legend.backgroundColor)
+            if legend.borderPen.style() in PEN_STYLES:
+                self.borderStyleComboBox.setCurrentIndex(PEN_STYLES.index(legend.borderPen.style()))
+            self.borderWidthSpinBox.setValue(legend.borderPen.width())
+            self.borderColorDialog.setCurrentColor(legend.borderPen.color())
+            self.offsetXSpinBox.setValue(legend.offset[0])
+            self.offsetYSpinBox.setValue(legend.offset[1])
 
     def closeDialogs(self):
         self.textColorDialog.close()
@@ -444,11 +469,13 @@ class AxesStyleWidget(QWidget):
 
         axesPenWidthLabel = QLabel('Axes Width')
 
-        axesPenWidthSpinBox = QSpinBox()
-        axesPenWidthSpinBox.setRange(1, 10)
-        axesPenWidthSpinBox.setValue(1)
-        axesPenWidthSpinBox.valueChanged.connect(self.style.axesStyle.setAxesWidth)
-        axesPenWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.axesPenWidthSpinBox = QSpinBox()
+        self.axesPenWidthSpinBox.setRange(1, 10)
+        self.axesPenWidthSpinBox.setValue(self.style.axesStyle.axesWidth)
+        self.axesPenWidthSpinBox.valueChanged.connect(self.style.axesStyle.setAxesWidth)
+        self.axesPenWidthSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        # Width changed in another graph's style, when linked
+        self.style.axesStyle.axesWidthChanged.connect(self.setWidgetsValues)
 
         mainLayout = QGridLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
@@ -457,7 +484,7 @@ class AxesStyleWidget(QWidget):
         mainLayout.addWidget(self.colorButton, 1, 0)
         mainLayout.addWidget(self.fontButton, 1, 1)
         mainLayout.addWidget(axesPenWidthLabel, 2, 0)
-        mainLayout.addWidget(axesPenWidthSpinBox, 2, 1)
+        mainLayout.addWidget(self.axesPenWidthSpinBox, 2, 1)
 
         self.setLayout(mainLayout)
 
@@ -465,6 +492,16 @@ class AxesStyleWidget(QWidget):
         self.lastFontIndex = -1
 
         self.selectElement(0)
+
+    @Slot()
+    def setWidgetsValues(self, *args):
+        element = self.elements[self.elementsComboBox.currentIndex()]
+        with blocked(self.axesPenWidthSpinBox, self.colorDialog, self.fontDialog):
+            self.axesPenWidthSpinBox.setValue(self.style.axesStyle.axesWidth)
+            if element.color is not None:
+                self.colorDialog.setCurrentColor(element.color.getColor())
+            if element.font is not None:
+                self.fontDialog.setCurrentFont(element.font.getFont())
 
     @Slot()
     def selectElement(self, index):
@@ -531,25 +568,27 @@ class FillStyleWidget(QWidget):
 
         weightFactorLabel = QLabel('Weight Factor')
 
-        weightFactorSpin = QDoubleSpinBox()
-        weightFactorSpin.setMinimum(0.0)
-        weightFactorSpin.setMaximum(1000.0)
-        weightFactorSpin.setValue(1.0)
-        weightFactorSpin.valueChanged.connect(self.style.weightFactorChanged)
-        weightFactorSpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.weightFactorSpin = QDoubleSpinBox()
+        self.weightFactorSpin.setMinimum(0.0)
+        self.weightFactorSpin.setMaximum(1000.0)
+        self.weightFactorSpin.setValue(self.style.weightFactor)
+        self.weightFactorSpin.valueChanged.connect(self.style.setWeightFactor)
+        self.weightFactorSpin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         mainLayout = QGridLayout()
         mainLayout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         mainLayout.addWidget(weightsColorLabel, 0, 0)
         mainLayout.addWidget(weightsColorButton, 0, 1)
         mainLayout.addWidget(weightFactorLabel, 1, 0)
-        mainLayout.addWidget(weightFactorSpin, 1, 1)
+        mainLayout.addWidget(self.weightFactorSpin, 1, 1)
 
         self.setLayout(mainLayout)
 
     @Slot()
     def setWidgetsValues(self):
-        self.weightsColorDialog.setCurrentColor(self.style.brush.color())
+        with blocked(self.weightsColorDialog, self.weightFactorSpin):
+            self.weightsColorDialog.setCurrentColor(self.style.brush.color())
+            self.weightFactorSpin.setValue(self.style.weightFactor)
 
     def closeDialogs(self):
         self.weightsColorDialog.close()
@@ -600,6 +639,12 @@ class BandStructureStyleWidget(QWidget):
     @Slot()
     def setWidgetsValues(self):
         self.curveStyleWidget.setWidgetsValues()
+
+    def refresh(self):
+        """Show the values of the style (e.g. once restored)."""
+        self.curveStyleWidget.setWidgetsValues()
+        self.fillStyleWidget.setWidgetsValues()
+        self.axesStyleWidget.setWidgetsValues()
 
     @Slot()
     def setApplyStyleWidget(self, tabIndex):
@@ -690,6 +735,11 @@ class DispersionStyleWidget(QWidget):
         self.curveStyleWidget.setWidgetsValues()
         self.pointStyleWidget.setWidgetsValues()
 
+    def refresh(self):
+        """Show the values of the style (e.g. once restored)."""
+        self.setWidgetsValues()
+        self.axesStyleWidget.setWidgetsValues()
+
     @Slot()
     def setApplyStyleWidget(self, tabIndex):
         if tabIndex == 2:
@@ -776,6 +826,12 @@ class AbsorptionStyleWidget(QWidget):
         self.curveStyleWidget.setWidgetsValues()
         self.pointStyleWidget.setWidgetsValues()
 
+    def refresh(self):
+        """Show the values of the style (e.g. once restored)."""
+        self.setWidgetsValues()
+        self.axesStyleWidget.setWidgetsValues()
+        self.legendStyleWidget.setWidgetsValues()
+
     @Slot()
     def setApplyStyleWidget(self, tabIndex):
         if tabIndex == 2:
@@ -854,6 +910,11 @@ class StyleWidget(QWidget):
 
         dispersionStyle.styleChanged.connect(self.dispersionStyleWidget.setWidgetsValues)
         # bandStructureStyle.styleChanged.connect(self.bandStructureStyleWidget.setWidgetsValues)
+
+    def refresh(self):
+        """Show the values of the three styles (e.g. once restored)."""
+        for widget in (self.dispersionStyleWidget, self.absorptionStyleWidget, self.bandStructureStyleWidget):
+            widget.refresh()
 
     @Slot()
     def switchStyleWidget(self, index):

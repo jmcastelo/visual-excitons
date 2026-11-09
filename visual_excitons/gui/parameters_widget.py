@@ -113,7 +113,8 @@ class ParametersWidget(Inspector):
         # Appearance of the plots
 
         layout = QVBoxLayout()
-        layout.addWidget(StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle))
+        self.styleWidget = StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle)
+        layout.addWidget(self.styleWidget)
         self.addSection('Appearance', layout, expanded=False)
 
         # Publication figures with Matplotlib
