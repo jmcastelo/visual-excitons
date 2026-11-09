@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QTableWidgetItem, QCheckBox
 
 import visual_excitons.gui.main_window as main_window
 from visual_excitons.gui.main_window import MainWindow, SYSTEM_PAGE, SPECTRA_PAGE, WAVEFUNCTION_PAGE
@@ -480,3 +480,49 @@ def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window,
     assert len(view.wfIsoFacesSet) > 2 * small
     p3.smoothingComboBox.setCurrentIndex(0)
     calc.waveFunction = None
+
+
+def test_structure_toggles_apply_to_items_drawn_later(window):
+    """Hidden parts stay hidden when the lattice is redrawn (dataset, supercell, sizes...)."""
+    view = window.wavefunctionPage.excitonWfWidget
+    p3 = window.wavefunctionPage.parameters3DWidget
+    boxes = {box.text(): box for box in p3.findChildren(QCheckBox)}
+    for name in ('Atoms', 'Bonds', 'Cell boundaries'):
+        boxes[name].setChecked(False)
+
+    lattice = np.eye(3) * 6.0
+    view.clearLatticeItems()
+    view.clearLatticeBoundaryItems()
+    view.plotUnitCellBoundaries(lattice, np.zeros(3))
+    view.plotUnitCellAtoms([6], np.zeros((1, 3)), np.zeros(3))
+    view.plotBonds(np.zeros((1, 3)), np.ones((1, 3)), [6], 0.2)
+    assert not any(item.visible() for item in view.latticeBoundaryItems)
+    assert not any(item.visible() for item in view.latticeItems)
+    assert not view.bondsItem.visible()
+
+    boxes['Cell boundaries'].setChecked(True)
+    assert all(item.visible() for item in view.latticeBoundaryItems)
+    view.plotUnitCellBoundaries(lattice, np.ones(3))
+    assert all(item.visible() for item in view.latticeBoundaryItems)
+    for name in ('Atoms', 'Bonds'):
+        boxes[name].setChecked(True)
+
+
+@pytest.mark.data
+def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
+    window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    p3 = window.wavefunctionPage.parameters3DWidget
+    next(box for box in p3.findChildren(QCheckBox) if box.text() == 'Cell boundaries').setChecked(False)
+    window.close()
+
+    restarted = MainWindow()
+    qtbot.addWidget(restarted)
+    view = restarted.wavefunctionPage.excitonWfWidget
+    assert view.latticeBoundaryItems and not any(item.visible() for item in view.latticeBoundaryItems)
+    box = next(b for b in restarted.wavefunctionPage.parameters3DWidget.findChildren(QCheckBox)
+               if b.text() == 'Cell boundaries')
+    assert not box.isChecked()
+    restarted.wavefunctionPage.parameters3DWidget.setSupercell([3, 1, 1])   # redrawn: still hidden
+    assert len(view.latticeBoundaryItems) == 3 and not any(item.visible() for item in view.latticeBoundaryItems)
+    box.setChecked(True)
+    restarted.close()

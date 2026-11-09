@@ -60,6 +60,9 @@ class ExcitonWfWidget(gl.GLViewWidget):
         # Bonds: one mesh for the whole supercell
         self.bondsItem = None
         self.bondsVisible = True
+        # Applied to the boundaries drawn later too (the lattice is redrawn often:
+        # dataset, supercell, atom sizes...)
+        self.boundariesVisible = True
         self.fixedParticleItem = None
         # Plane of the analysis cut (see setCutPlane)
         self.cutPlaneItems = []
@@ -333,6 +336,7 @@ class ExcitonWfWidget(gl.GLViewWidget):
         item = gl.GLLinePlotItem(pos=segments, color=(0.5, 0.5, 0.5, 1.0), width=1.0, antialias=True, mode='lines',
                                  glOptions=OPAQUE_GL_OPTIONS)
         item.translate(offset[0], offset[1], offset[2])
+        item.setVisible(self.boundariesVisible)
         self.latticeBoundaryItems.append(item)
         self.addItem(item)
 
@@ -583,6 +587,6 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     @Slot(Qt.CheckState)
     def viewBoundaries(self, state):
-        visible = (state == Qt.CheckState.Checked)
+        self.boundariesVisible = (state == Qt.CheckState.Checked)
         for item in self.latticeBoundaryItems:
-            item.setVisible(visible)
+            item.setVisible(self.boundariesVisible)
