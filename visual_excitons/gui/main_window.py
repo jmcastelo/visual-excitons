@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
 
         self.theme.themeChanged.connect(self.spectra.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
+        self.theme.themeChanged.connect(self.panels.applyTheme)
         self.setTheme(self.settings.value('theme', 'System'))
 
         # Parameters kept between sessions (see persistence.py): preferences now,

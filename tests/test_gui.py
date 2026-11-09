@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt, QSettings
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import (QApplication, QFormLayout, QLabel, QTableWidgetItem, QCheckBox, QPushButton,
                                QSizePolicy)
 
@@ -149,6 +149,36 @@ def test_theme(window, mode, dark):
     assert window.dispersionStyle.curveStyle.commonPen.color() == colors['foreground']
     background = window.wavefunction.excitonWfWidget.opts['bgcolor']
     assert (background[0] < 0.5) == dark
+
+
+def contrast(a, b):
+    """WCAG contrast ratio of two QColors."""
+    def luminance(color):
+        channels = [c / 255 for c in color.getRgb()[:3]]
+        channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+    high, low = sorted((luminance(a), luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+@pytest.mark.parametrize('mode', ['Dark', 'Light'])
+def test_tab_titles_are_readable(window, mode):
+    """
+    The tab colors follow the theme: QtAds's own stylesheet kept those of the
+    palette it was first applied with, and the titles of the tabs behind were
+    almost black on the dark theme (on the display; offscreen, Qt resolves them
+    again, so the stylesheet itself is checked).
+    """
+    import re
+    window.setTheme(mode)
+    styleSheet = window.panels.manager.styleSheet()
+    background = QApplication.palette().color(QPalette.ColorRole.Window)
+    # Ours come last, so they win over QtAds's
+    behind = re.search(r'ads--CDockWidgetTab QLabel \{ color: (#[0-9a-f]{6}); \}', styleSheet)
+    front = re.search(r'ads--CDockWidgetTab\[activeTab="true"\] QLabel \{ color: (#[0-9a-f]{6}); \}', styleSheet)
+    assert behind and front
+    for color in (behind.group(1), front.group(1)):
+        assert contrast(QColor(color), background) > 4.5, color
 
 
 def test_theme_is_remembered(window):

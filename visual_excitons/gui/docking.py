@@ -12,7 +12,8 @@ layouts (`saveLayouts`); they are preferences, not part of session files.
 """
 
 from PySide6.QtCore import QObject, Signal, QTimer
-from PySide6.QtWidgets import QScrollArea, QFrame, QWidget
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QScrollArea, QFrame, QWidget, QApplication
 import PySide6QtAds as ads
 
 # Dock keys (their object names, used in the saved state) and titles
@@ -83,6 +84,28 @@ CLOSED_NEIGHBOURS = {
 DEFAULT_PRESET = 'Overview'
 
 
+def mixColors(a: QColor, b: QColor, t: float) -> str:
+    """The color a fraction `t` of the way from `a` to `b`, as #rrggbb."""
+    return QColor(round(a.red() + t * (b.red() - a.red())), round(a.green() + t * (b.green() - a.green())),
+                  round(a.blue() + t * (b.blue() - a.blue()))).name()
+
+
+def tabStyleSheet(palette: QPalette) -> str:
+    """
+    Colors of the dock tabs for `palette`. QtAds's own stylesheet takes them
+    from the palette when it is first applied, and keeps them after a theme
+    change: on a dark theme, the titles of the tabs behind ended up almost
+    black on dark grey.
+    """
+    text, window = palette.color(QPalette.ColorRole.WindowText), palette.color(QPalette.ColorRole.Window)
+    return f"""
+ads--CDockWidgetTab {{ background: {window.name()}; border-color: {mixColors(window, text, 0.15)}; }}
+ads--CDockWidgetTab[activeTab="true"] {{ background: {mixColors(window, text, 0.12)}; }}
+ads--CDockWidgetTab QLabel {{ color: {mixColors(window, text, 0.75)}; }}
+ads--CDockWidgetTab[activeTab="true"] QLabel {{ color: {text.name()}; }}
+"""
+
+
 def scrollable(widget: QWidget) -> QScrollArea:
     """`widget` in a frameless scroll area, for forms that can be docked in a small space."""
     area = QScrollArea()
@@ -103,8 +126,17 @@ class Panels(QObject):
         self.window = window
         ads.CDockManager.setConfigFlag(ads.CDockManager.eConfigFlag.FocusHighlighting, False)
         self.manager = ads.CDockManager(window)
+        self.baseStyleSheet = self.manager.styleSheet()
         self.docks = {}
         self.arranging = False
+
+    def applyTheme(self, *args):
+        """Tab colors for the current palette (call after each theme change)."""
+        styleSheet = self.baseStyleSheet + tabStyleSheet(QApplication.palette())
+        self.manager.setStyleSheet(styleSheet)
+        for container in self.manager.floatingWidgets():
+            if container.styleSheet():
+                container.setStyleSheet(styleSheet)
 
     def add(self, key: str, widget: QWidget) -> ads.CDockWidget:
         dock = ads.CDockWidget(self.manager, PANELS[key])

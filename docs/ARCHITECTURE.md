@@ -421,7 +421,7 @@ Every panel is a dock of the Qt Advanced Docking System (`PySide6QtAds`), manage
 - Floating docks are top-level windows of their own, and the application only quits when no window is left open: `MainWindow.closeEvent` saves the state, then calls `closeFloatingWindows()` (in that order, so the floating docks are restored open next time).
 - `panelToggled(key, shown)` reports docks opened or closed by the user (not while a layout is applied: `arranging`). `MainWindow` uses it to keep the `Show the analysis panel` checkbox and the Analysis dock in step.
 - Moving a dock reparents its widget, and an OpenGL widget that moves to another window (floating) gets a new OpenGL context. This works because contexts are shared (`AA_ShareOpenGLContexts`): pyqtgraph compiles its shaders once, for all views.
-- QtAds sets a stylesheet on the dock manager, so a theme change, which repolishes every widget, takes about 0.25 s per window.
+- QtAds sets a stylesheet on the dock manager, so a theme change, which repolishes every widget, takes about 0.25 s per window. That stylesheet takes its colors from the palette when it is first applied and keeps them afterwards (the titles of the tabs behind were almost black on the dark theme), so `Panels.applyTheme()`, connected to `themeChanged`, appends tab colors computed from the current palette (`tabStyleSheet`).
 
 ### Control panels (`inspector.py`)
 
