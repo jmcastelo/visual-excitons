@@ -92,7 +92,7 @@ class ParametersWidget(Inspector):
 
         self.selectedExcitonNote = NoteLabel()
         self.showWavefunctionButton = QPushButton('Wave function of this exciton')
-        self.showWavefunctionButton.setToolTip('Go to the wave-function page with this exciton selected')
+        self.showWavefunctionButton.setToolTip('Bring the Wave function panel to the front, with this exciton selected')
         self.showWavefunctionButton.clicked.connect(self.showWavefunctionRequested)
 
         layout = QVBoxLayout()

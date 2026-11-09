@@ -6,10 +6,10 @@ contents. The panel scrolls when the open sections do not fit, and the labels
 of all its forms share one column width so fields line up across sections.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QPalette, QColor
 from PySide6.QtWidgets import (QWidget, QToolButton, QVBoxLayout, QScrollArea, QFrame, QFormLayout, QLabel,
-                               QSizePolicy, QHBoxLayout, QSlider, QApplication)
+                               QSizePolicy, QHBoxLayout, QSlider, QApplication, QPushButton)
 
 from .theme import themeManager
 from .persistence import PersistentState, GLOBAL
@@ -109,7 +109,19 @@ class Inspector(QScrollArea):
             width = max(label.sizeHint().width() for label in labels)
             for label in labels:
                 label.setMinimumWidth(width)
+        self.fitButtons()
         self.updateMinimumWidth()
+
+    def fitButtons(self):
+        """
+        Buttons as wide as their text, not as the panel: a button alone in a form
+        row or a column would otherwise stretch to the full width.
+        """
+        grow = QSizePolicy.PolicyFlag.GrowFlag.value
+        for button in self.body.findChildren(QPushButton):
+            policy = button.sizePolicy()
+            if policy.horizontalPolicy().value & grow:
+                button.setSizePolicy(QSizePolicy.Policy.Maximum, policy.verticalPolicy())
 
     def updateMinimumWidth(self):
         """
@@ -120,6 +132,13 @@ class Inspector(QScrollArea):
         content = max((section.content.minimumSizeHint().width() for section in self.sections.values()), default=0)
         self.setMinimumWidth(content + margins.left() + margins.right() + self.verticalScrollBar().sizeHint().width()
                              + 2 * self.frameWidth())
+        self.updateGeometry()
+
+    def minimumSizeHint(self):
+        # The minimum width in the hint too: docks size themselves from their
+        # content's hint, and would squeeze the panel below it
+        hint = super().minimumSizeHint()
+        return QSize(max(hint.width(), self.minimumWidth()), hint.height())
 
 
 def formLayout() -> QFormLayout:

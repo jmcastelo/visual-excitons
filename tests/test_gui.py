@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QTableWidgetItem, QCheckBox
+from PySide6.QtWidgets import (QApplication, QFormLayout, QLabel, QTableWidgetItem, QCheckBox, QPushButton,
+                               QSizePolicy)
 
 import visual_excitons.gui.main_window as main_window
 from visual_excitons.gui.main_window import MainWindow
@@ -398,6 +399,11 @@ def test_side_panels_fit_their_content(window):
     for inspector in (window.spectra.inspector, window.wavefunction.inspector):
         for section in inspector.sections.values():
             assert inspector.minimumWidth() >= section.content.minimumSizeHint().width()
+        # Buttons as wide as their text, not stretched to the panel
+        buttons = inspector.body.findChildren(QPushButton)
+        assert buttons
+        for button in buttons:
+            assert not button.sizePolicy().horizontalPolicy().value & QSizePolicy.PolicyFlag.GrowFlag.value, button.text()
 
 
 def fakeWaveFunction(calc, sigma):
