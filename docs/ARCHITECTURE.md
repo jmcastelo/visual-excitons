@@ -75,7 +75,7 @@ visual_excitons/
 │   ├── dispersion_widget.py       ┐
 │   ├── absorption_widget.py       ├ The three 2D plots
 │   ├── band_structure_widget.py   ┘
-│   ├── style_widget.py     "Appearance" editor of the 2D plots
+│   ├── appearance_panel.py The Appearance panel: editor of the 2D plot styles
 │   ├── highlight.py        Ring around the selected exciton
 │   ├── wavefunction_panels.py     3D view, analysis and their controls, wired together
 │   ├── parameters_3d_widget.py    Wave function controls (inspector)
@@ -202,7 +202,7 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `figure_script.py` | `writeFigureScript` | The script is `figures.py` plus a main part loading the data file |
 | `session.py` | `writeSession`, `readSession`, `datasetFingerprint` | See section 9 |
 | `atomic_data.py` | `chemical_symbols`, `covalent_radii` (Å), `jmol_colors`, `BOHR_TO_ANGSTROM`, `ANGSTROM_TO_BOHR` | From ASE |
-| `style.py` | `DispersionStyle`, `AbsorptionStyle`, `BandStructureStyle` | State of the 2D plot styles; edited by `style_widget.py` |
+| `style.py` | `DispersionStyle`, `AbsorptionStyle`, `BandStructureStyle` | State of the 2D plot styles; edited by `appearance_panel.py` |
 
 ---
 
@@ -424,6 +424,12 @@ Every panel is a dock of the Qt Advanced Docking System (`PySide6QtAds`), manage
 - Moving a dock reparents its widget, and an OpenGL widget that moves to another window (floating) gets a new OpenGL context. This works because contexts are shared (`AA_ShareOpenGLContexts`): pyqtgraph compiles its shaders once, for all views.
 - QtAds sets a stylesheet on the dock manager, so a theme change, which repolishes every widget, takes about 0.25 s per window. That stylesheet takes its colors from the palette when it is first applied and keeps them afterwards (the titles of the tabs behind were almost black on the dark theme), so `Panels.applyTheme()`, connected to `themeChanged`, appends tab colors computed from the current palette (`tabStyleSheet`).
 
+### Appearance panel (`appearance_panel.py`)
+
+`AppearancePanel` (an `Inspector`) edits the three styles of `core/style.py`. One set of sections serves the three plots: `setGraph(key)` shows those the plot has and `refresh()` shows its values (also after any style change, coalesced with a zero-delay timer). The plot is chosen with the tab bar, `MainWindow.showAppearance(key)` (the palette action in each plot dock's title bar, `setTitleBarActions`, and in each plot's view box menu), or by clicking a curve (`currentCurveIndexChanged`). `Apply to` sets the style's `applyToAllCurves` and `currentCurveIndex`; curve names come from `MainWindow.curveNames`. With `Same axes style for all plots` (kept as a preference), axes changes are applied to the three styles by the panel itself (`axesTargets`).
+
+Color and font buttons open the panel's one `QColorDialog` / `QFontDialog` through `openReverting()`: modal, previewing as the value changes, and on Cancel restoring the three styles from `state()` snapshots taken when the dialog opened (`setState(..., curves=True)`, so each curve gets its own color back, e.g. after a color or gradient applied to all of them).
+
 ### Control panels (`inspector.py`)
 
 Each control panel is an `Inspector` (a `QScrollArea`) made of `CollapsibleSection`s:
@@ -458,7 +464,7 @@ Values kept between sessions are registered with a **scope**:
 
 Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, `appearance` for the 2D plot styles, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
 
-The **2D plot styles** are one `GLOBAL` entry (`appearance/styles`): `appearance.appearanceState()` gathers `state()` of the three styles (common pen and symbol, the style of each curve, axes colors, fonts and width, legend, fill, weight factor) with the theme they were made on; `restoreAppearance()` maps the colors that were that theme's defaults to the current theme's, then calls `setState()`, and `StyleWidget.refresh()` shows the values (the editors' `setWidgetsValues` block their signals: showing a value must not apply it). The style of each curve only applies when there are as many curves as when saved: at startup there are none, so only the common style applies; `MainWindow.openSession` applies the session's again after `restoreResults`, which gives restored curves the common style.
+The **2D plot styles** are one `GLOBAL` entry (`appearance/styles`): `appearance.appearanceState()` gathers `state()` of the three styles (common pen and symbol, the style of each curve, axes colors, fonts and width, legend, fill, weight factor) with the theme they were made on; `restoreAppearance()` maps the colors that were that theme's defaults to the current theme's, then calls `setState()`, and `AppearancePanel.refresh()` shows the values (with the widgets' signals blocked: showing a value must not apply it). The style of each curve only applies when there are as many curves as when saved: at startup there are none, so only the common style applies; `MainWindow.openSession` applies the session's again after `restoreResults`, which gives restored curves the common style.
 
 A dataset opened for the first time gets the defaults (`MainWindow.datasetDefaults`), not the previous dataset's values.
 
@@ -590,7 +596,7 @@ Tips:
 
 - Results are kept in session files, not when the program is simply closed and reopened (only parameters and the camera are). A disk cache of results keyed by dataset and parameters would make that automatic.
 - There is no "unsaved changes" tracking for sessions: closing does not ask to save.
-- The 2D plot styles (`style.py`, `style_widget.py`) are older code. Switching the theme resets the axes colors and the legend text to the theme's; curves keep their colors unless still at the default.
+- Switching the theme resets the axes colors and the legend text of the 2D plots to the theme's; curves keep their colors unless still at the default.
 - The excitonic band structure is only available at Γ.
 - Boundary atoms (atoms just outside the supercell) and a per-species bond-length table are not implemented.
 - Plain `print` output from yambopy goes to the console.

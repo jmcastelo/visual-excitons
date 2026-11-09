@@ -133,6 +133,7 @@ The main window is made of panels:
 - **Wave function**: the exciton wave function in real space, with the crystal structure.
 - **Analysis**: cuts of the wave function and the distribution of electron–hole distances (see below).
 - **Spectra controls** and **Wave function controls**: the parameters, made of collapsible sections. Click a section header to open or close it; the panel scrolls when its open sections do not fit.
+- **Appearance**: the style of the 2D plots (see [Appearance of the plots](#appearance-of-the-plots)).
 
 **Arranging the panels.** Drag a panel by its tab to put it next to another one, or onto it to make them tabs of one area; the drop indicators show where it will go. The button at the top right of a panel area floats it in its own window (or double-click its tab), and the cross closes it. `View › Panels` shows or hides each panel.
 
@@ -141,9 +142,9 @@ The `Layout` menu arranges the panels for each step of the usual workflow, or sh
 | Layout | Shortcut | Panels |
 |---|---|---|
 | System | `Ctrl+1` | System |
-| Spectra | `Ctrl+2` | Dispersion, absorption, band structure and the spectra controls |
+| Spectra | `Ctrl+2` | Dispersion, absorption, band structure, the spectra controls and the Appearance panel |
 | Wave function | `Ctrl+3` | Wave function, analysis (when on) and the wave function controls |
-| Overview | `Ctrl+4` | All of them: the spectra on the left, the wave function in the middle, the controls (and the System panel) as tabs on the right |
+| Overview | `Ctrl+4` | All of them: the spectra on the left, the wave function in the middle, the controls, the Appearance and the System panel as tabs on the right |
 
 Your own arrangements can be kept too: `Layout › Save layout as…` saves the current one under a name, which then appears in the `Layout` menu; `Layout › Delete layout` removes it. The arrangement of the panels is kept between restarts; it is not stored in session files, since it depends on your screen rather than on the data.
 
@@ -151,7 +152,7 @@ The status bar shows the dataset loaded (name, Bravais lattice and number of Q-p
 
 **Calculations run in the background**, so the window stays usable while they run: you can rotate the 3D view, look at the spectra or change display settings meanwhile. The status bar shows the running calculation, its current stage (e.g. `Loading the wave functions`, `Real-space wave function`) with a progress bar, and how many more are queued. `Cancel` or `Esc` stops it and drops the queued ones; it stops within a fraction of a second. Calculations run one at a time, in the order requested; requesting the same kind of calculation again (e.g. editing the absorption range several times) replaces the queued one instead of piling up. Opening another dataset cancels the calculations on the previous one. Errors are reported in a dialog.
 
-**Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen under `Appearance` are kept.
+**Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen in the Appearance panel are kept.
 
 **Resuming where you left off.** When the program is opened again, it resumes where it was left:
 
@@ -206,10 +207,21 @@ Spectra controls:
 - **Dispersion**: choose the number of excitons and press `Compute dispersion`. Then click a point of the dispersion to plot the absorption spectrum at its Q-point; `Ctrl`-click to keep several spectra together. Clicking a point also selects its exciton (see below).
 - **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. With `Automatic range` (the default), each spectrum spans the energies of its own excitons, plus a margin of 0.5 eV (five times the broadening of the peaks) on both sides; the range of the spectra plotted is shown below. Untick it to set the range by hand with `From` and `To`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
 - **Selected exciton**: click an exciton on the dispersion, or a bright exciton on an absorption spectrum, to select it. It is marked with an orange ring on both plots (on the absorption spectrum, when it is bright there). Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected in the Wave function controls too. `Compute its wave function` computes it with the settings of the Wave function controls (fixed particle and position, supercell, cutoff) and brings the Wave function panel to the front. The memory it needs is shown below the button, with the settings used; as for `Compute wave function`, it is shown in orange with ⚠ when it likely does not fit in the memory available, and the program asks before starting it.
-- **Appearance**: the style of the plots (colors, widths, fonts, etc. of the axes, curves, points, legend and the rest of the elements).
 - **Export**: `Export figure…` (also `File › Export 2D figure…`, `Ctrl+Shift+F`) makes publication figures of the plots, drawn with [Matplotlib](https://matplotlib.org) (see below).
 
-**Publication figures.** The export dialog draws the plots with Matplotlib, as figures for papers, with the colors, line styles and symbols set under `Appearance`, and shows a preview:
+#### Appearance of the plots
+
+The Appearance panel sets the style of the 2D plots. Open it on a plot with the palette button in the title bar of the plot's panel, or with `Appearance…` in the plot's right-click menu; the tabs at its top switch between the three plots. Its sections, those of the plot chosen:
+
+- **Curves**: the line pattern, color and width. `Apply to` chooses whether the changes apply to all the curves or to one of them (named after its exciton, Q-point or band); clicking a curve in a plot chooses it there. With all the curves, `Gradient` colors them along a range of hues, from the first color to the last.
+- **Symbols** (dispersion and absorption): the shape and size of the points; `Different shape per curve` gives each curve a shape of its own.
+- **Axes**: the color and font of the title, axis labels and tick labels, the color and width of the axes, and the background. With `Same axes style for all plots`, the changes apply to the three plots.
+- **Legend** (absorption): its text color and size, background (`None` for a transparent one), border and position.
+- **Fill** (band structure): the color of the excitonic weights around the bands, and their scale (`Weight factor`).
+
+The color and font buttons show the current value and open a dialog that previews the change on the plot as you pick: `OK` keeps it, `Cancel` restores the style as it was, each curve's included. The Appearance is kept between sessions and in session files.
+
+**Publication figures.** The export dialog draws the plots with Matplotlib, as figures for papers, with the colors, line styles and symbols set in the Appearance panel, and shows a preview:
 
 - **Panels**: the dispersion, the absorption spectra and the band structure (those computed), alone or combined, in the order of the list (drag them to reorder), in a row or in a column, with panel letters (a), (b)... With `Dispersion and absorption on one energy axis`, the absorption is drawn rotated next to the dispersion, sharing its energy axis, over the range of the dispersion and of the bright excitons.
 - **Size**: in cm, with the widths of one column (8.6 cm), one and a half (12.9 cm) and two columns (17.8 cm) of usual two-column journals, or any other.

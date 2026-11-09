@@ -41,7 +41,7 @@ def test_presets(window):
     # First run: everything but the analysis (off by default)
     assert openPanels(window) == set(PANELS) - {'analysis'}
     expected = {'System': {'system'},
-                'Spectra': {'dispersion', 'absorption', 'bands', 'spectraControls'},
+                'Spectra': {'dispersion', 'absorption', 'bands', 'spectraControls', 'appearance'},
                 'Wave function': {'wavefunction', 'wavefunctionControls'},
                 'Overview': set(PANELS) - {'analysis'}}
     actions = {action.text(): action for action in window.layoutMenu.actions()}
@@ -88,7 +88,7 @@ def test_layout_is_remembered(window, qtbot, monkeypatch):
     qtbot.addWidget(again)
     assert openPanels(again) == set(PANELS) - {'analysis'}
     again.openLayout('Mine')
-    assert openPanels(again) == {'dispersion', 'absorption', 'spectraControls'}
+    assert openPanels(again) == {'dispersion', 'absorption', 'spectraControls', 'appearance'}
 
     # Not over a preset
     shown = []

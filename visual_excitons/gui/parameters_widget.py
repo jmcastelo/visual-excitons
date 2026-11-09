@@ -3,7 +3,6 @@ from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, 
 
 from .inspector import Inspector, formLayout, NoteLabel
 from .persistence import DATASET
-from .style_widget import StyleWidget
 
 
 class ParametersWidget(Inspector):
@@ -15,7 +14,7 @@ class ParametersWidget(Inspector):
     # Asks the main window to export the plots as a publication figure
     exportFigureRequested = Signal()
 
-    def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle):
+    def __init__(self, options, calculations):
         Inspector.__init__(self)
 
         # All options are contained in this object
@@ -110,13 +109,6 @@ class ParametersWidget(Inspector):
         self.setAutoRange(self.autoRangeCheckBox.isChecked(), recompute=False)
         self.onExcitonSelected()
 
-        # Appearance of the plots
-
-        layout = QVBoxLayout()
-        self.styleWidget = StyleWidget(dispersionStyle, absorptionStyle, bandStructureStyle)
-        layout.addWidget(self.styleWidget)
-        self.addSection('Appearance', layout, expanded=False)
-
         # Publication figures with Matplotlib
         exportButton = QPushButton('Export figure…')
         exportButton.setToolTip('The plots as a publication figure (PDF, SVG, PNG...) or a Python script\n'
@@ -124,7 +116,8 @@ class ParametersWidget(Inspector):
         exportButton.clicked.connect(self.exportFigureRequested)
         layout = QVBoxLayout()
         layout.addWidget(exportButton)
-        layout.addWidget(NoteLabel('Any of the three plots, alone or combined, with the colors and styles above.'))
+        layout.addWidget(NoteLabel('Any of the three plots, alone or combined, with the colors and styles of the '
+                                    'Appearance panel.'))
         self.addSection('Export', layout, expanded=False)
 
         self.alignLabels()

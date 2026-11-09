@@ -130,10 +130,132 @@ def test_appearance_is_resumed(newWindow):
     assert w2.bandStructureStyle.weightFactor == 3.0
     assert w2.calculations.weightFactor == 3.0                     # the band structure uses it
 
-    # The Appearance editor shows them
-    editor = w2.spectra.inspector.styleWidget
-    assert editor.dispersionStyleWidget.curveStyleWidget.lineWidthSpinBox.value() == 4
-    assert editor.absorptionStyleWidget.legendStyleWidget.textSizeSpinBox.value() == 13
-    assert editor.absorptionStyleWidget.pointStyleWidget.symbolSizeSpinBox.value() == 11
-    assert editor.bandStructureStyleWidget.fillStyleWidget.weightFactorSpin.value() == 3.0
+    # The Appearance panel shows them
+    panel = w2.appearancePanel
+    panel.setGraph('dispersion')
+    assert panel.lineWidthSpinBox.value() == 4
+    assert panel.axesColorButtons['ticksColor'].color.name() == '#884400'
+    panel.setGraph('absorption')
+    assert panel.legendTextSizeSpinBox.value() == 13 and panel.symbolSizeSpinBox.value() == 11
+    panel.setGraph('bands')
+    assert panel.weightFactorSpinBox.value() == 3.0
     w2.close()
+
+
+# The Appearance panel
+
+@pytest.fixture
+def panel(qtbot):
+    from visual_excitons.gui.appearance_panel import AppearancePanel
+    dispersion, absorption, bands = styles()
+    widget = AppearancePanel({'dispersion': dispersion, 'absorption': absorption, 'bands': bands})
+    qtbot.addWidget(widget)
+    return widget
+
+
+def test_panel_shows_the_sections_of_each_plot(panel):
+    shown = lambda: {title for title, section in panel.sections.items() if not section.isHidden()}
+    panel.setGraph('dispersion')
+    assert shown() == {'Curves', 'Symbols', 'Axes'} and panel.graphTabs.currentIndex() == 0
+    panel.setGraph('absorption')
+    assert shown() == {'Curves', 'Symbols', 'Axes', 'Legend'}
+    panel.setGraph('bands')
+    assert shown() == {'Curves', 'Axes', 'Fill'} and panel.graphTabs.tabText(panel.graphTabs.currentIndex()) == 'Band structure'
+
+
+def test_apply_to_all_or_one_curve(panel):
+    dispersion = withCurves(panel.styles['dispersion'], 3)
+    panel.setGraph('dispersion')
+    panel.refresh()
+    combo = panel.curveComboBox
+    assert [combo.itemText(i) for i in range(combo.count())] == ['All curves', 'Curve 1', 'Curve 2', 'Curve 3']
+
+    panel.lineWidthSpinBox.setValue(3)
+    assert all(pen.width() == 3 for pen in dispersion.curveStyle.curvePens)
+    combo.setCurrentIndex(2)
+    combo.activated.emit(2)                                      # Curve 2
+    assert not dispersion.applyToAllCurves() and dispersion.currentCurveIndex() == 1
+    assert panel.curvesForm.isRowVisible(panel.gradientRow) is False
+    panel.patternComboBox.setCurrentIndex(1)
+    assert [pen.style() for pen in dispersion.curveStyle.curvePens] == [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine,
+                                                                         Qt.PenStyle.SolidLine]
+
+    # A curve clicked in a plot: chosen here, the panel on its plot
+    panel.setGraph('absorption')
+    dispersion.setApplyToAllCurves(True)
+    dispersion.setCurrentCurveIndex(2)
+    assert panel.graph == 'dispersion' and combo.currentIndex() == 3 and not dispersion.applyToAllCurves()
+
+
+def test_same_axes_for_all_plots(panel):
+    panel.setGraph('dispersion')
+    panel.axesWidthSpinBox.setValue(3)
+    assert panel.styles['dispersion'].axesStyle.axesWidth == 3 and panel.styles['bands'].axesStyle.axesWidth == 1
+    panel.sameAxesCheckBox.setChecked(True)
+    panel.axesWidthSpinBox.setValue(2)
+    assert all(style.axesStyle.axesWidth == 2 for style in panel.styles.values())
+
+
+def test_cancel_restores_the_style(panel):
+    dispersion = withCurves(panel.styles['dispersion'], 3)
+    dispersion.setApplyToAllCurves(False)
+    for index, color in enumerate(('#aa0000', '#00aa00', '#0000aa')):
+        dispersion.setCurrentCurveIndex(index)
+        dispersion.curveStyle.setCurveColor(QColor(color))
+    dispersion.setApplyToAllCurves(True)
+    panel.setGraph('dispersion')
+    panel.curveComboBox.activated.emit(0)                       # all curves
+    colors = lambda: [pen.color().name() for pen in dispersion.curveStyle.curvePens]
+
+    panel.lineColorButton.click()
+    dialog = panel.colorDialog
+    assert dialog.isVisible() and dialog.isModal()
+    dialog.setCurrentColor(QColor('#ffcc00'))                   # live preview: all curves
+    assert colors() == ['#ffcc00'] * 3
+    dialog.reject()
+    assert colors() == ['#aa0000', '#00aa00', '#0000aa']        # each curve back to its own color
+
+    # OK keeps it
+    panel.lineColorButton.click()
+    dialog.setCurrentColor(QColor('#00cccc'))
+    dialog.accept()
+    assert colors() == ['#00cccc'] * 3
+    panel.refresh()
+    assert panel.lineColorButton.color.name() == '#00cccc'
+
+    # The gradient too
+    panel.startHueButton.click()
+    dialog.setCurrentColor(QColor.fromHsv(120, 255, 255))
+    assert colors() != ['#00cccc'] * 3
+    dialog.reject()
+    assert colors() == ['#00cccc'] * 3
+
+
+def test_cancel_restores_legend_and_shared_axes(panel):
+    absorption, bands = panel.styles['absorption'], panel.styles['bands']
+    panel.setGraph('absorption')
+
+    # A legend without background gets none again
+    panel.legendBackgroundButton.click()
+    panel.colorDialog.setCurrentColor(QColor('#336699'))
+    assert absorption.legendStyle.backgroundColor is not None
+    panel.colorDialog.reject()
+    assert absorption.legendStyle.backgroundColor is None
+
+    # Axes for all plots: all of them back to their own colors
+    bands.axesStyle.titleColor.setColor(QColor('#123123'))
+    panel.sameAxesCheckBox.setChecked(True)
+    panel.axesColorButtons['titleColor'].click()
+    panel.colorDialog.setCurrentColor(QColor('#ff00ff'))
+    assert all(style.axesStyle.titleColor.getColor().name() == '#ff00ff' for style in panel.styles.values())
+    panel.colorDialog.reject()
+    assert absorption.axesStyle.titleColor.getColor().name() == '#000000'
+    assert bands.axesStyle.titleColor.getColor().name() == '#123123'
+
+    # Fonts too
+    font = absorption.axesStyle.ticksFont.getFont()
+    panel.axesFontButtons['ticksFont'].click()
+    panel.fontDialog.setCurrentFont(QFont('Serif', 31))
+    assert absorption.axesStyle.ticksFont.getFont().pointSize() == 31
+    panel.fontDialog.reject()
+    assert absorption.axesStyle.ticksFont.getFont().pointSize() == font.pointSize()

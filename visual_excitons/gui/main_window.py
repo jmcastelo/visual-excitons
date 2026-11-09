@@ -24,6 +24,7 @@ from .theme import themeManager, THEME_MODES
 from visual_excitons import __version__
 from .persistence import StateRegistry, PersistentState, GLOBAL, DATASET
 from .appearance import appearanceState, restoreAppearance
+from .appearance_panel import AppearancePanel, appearanceIcon, GRAPHS
 from .image_export import ImageExportDialog, IMAGE_FILTERS, saveImage
 from .figure_export import FigureExportDialog, figureData, figureStyles
 from visual_excitons.core import figures
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self.appearance = PersistentState()
         self.appearance.remember('styles', get=self.appearanceState, set=self.restoreAppearance)
         self.state.add('appearance', self.appearance)
+        self.state.add('appearancePanel', self.appearancePanel.persistence)
         # A dataset opened for the first time starts from the defaults, not from
         # the parameters of the previous one
         self.datasetDefaults = self.state.values(DATASET)
@@ -109,10 +111,6 @@ class MainWindow(QMainWindow):
         self.dispersionStyle = DispersionStyle()
         self.absorptionStyle = AbsorptionStyle()
         self.bandStructureStyle = BandStructureStyle()
-
-        self.dispersionStyle.setLinkedStyles([self.absorptionStyle, self.bandStructureStyle])
-        self.absorptionStyle.setLinkedStyles([self.dispersionStyle, self.bandStructureStyle])
-        self.bandStructureStyle.setLinkedStyles([self.dispersionStyle, self.absorptionStyle])
 
         calc = self.calculations
         self.dispersionStyle.styleChanged.connect(calc.emitExcitonDispersionReady)
@@ -138,8 +136,15 @@ class MainWindow(QMainWindow):
         self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
         self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
 
+        # The styles of the 2D plots
+        self.appearancePanel = AppearancePanel({'dispersion': self.dispersionStyle, 'absorption': self.absorptionStyle,
+                                                'bands': self.bandStructureStyle}, curveNames=self.curveNames)
+        for signal in (self.calculations.excitonAbsorptionReady, self.calculations.excitonBandStructureReady,
+                       self.calculations.excitonDispersionReady):
+            signal.connect(self.appearancePanel.scheduleRefresh)   # the curves to choose from
+
         self.panels = Panels(self)
-        for inspector in (self.spectra.inspector, self.wavefunction.inspector):
+        for inspector in (self.spectra.inspector, self.wavefunction.inspector, self.appearancePanel):
             inspector.setMinimumWidth(max(MIN_CONTROLS_WIDTH, inspector.minimumWidth()))
         for key, widget in (('system', scrollable(self.system)),
                             ('dispersion', self.spectra.dispersionWidget),
@@ -148,8 +153,23 @@ class MainWindow(QMainWindow):
                             ('wavefunction', self.wavefunction.excitonWfWidget),
                             ('analysis', self.wavefunction.analysisWidget),
                             ('spectraControls', self.spectra.inspector),
+                            ('appearance', self.appearancePanel),
                             ('wavefunctionControls', self.wavefunction.inspector)):
             self.panels.add(key, widget)
+
+        # Each plot's style, from its panel's title bar and its right-click menu
+        views = {'dispersion': self.spectra.dispersionWidget.getPlotItem().vb,
+                 'absorption': self.spectra.absorptionWidget.absorption.vb,
+                 'bands': self.spectra.bandStructureWidget.getPlotItem().vb}
+        self.appearanceActions = {}
+        for key, view in views.items():
+            action = QAction(appearanceIcon(), 'Appearance…', self)
+            action.setToolTip(f'The style of the {GRAPHS[key].lower()} plot')
+            action.triggered.connect(lambda checked=False, key=key: self.showAppearance(key))
+            self.panels.docks[key].setTitleBarActions([action])
+            view.menu.addSeparator()
+            view.menu.addAction(action)
+            self.appearanceActions[key] = action
 
         # The analysis checkbox shows and hides its panel, and follows it
         self.analysisCheckBox = self.wavefunction.parameters3DWidget.showAnalysisCheckBox
@@ -393,7 +413,19 @@ class MainWindow(QMainWindow):
 
     def restoreAppearance(self, state, curves=False):
         restoreAppearance(self.plotStyles(), state, self.theme.isDark(), curves)
-        self.spectra.inspector.styleWidget.refresh()
+        self.appearancePanel.refresh()
+
+    def showAppearance(self, key):
+        """The Appearance panel, on the style of plot `key`."""
+        self.appearancePanel.setGraph(key)
+        self.showPanel('appearance')
+
+    def curveNames(self, key, count):
+        """Names of the curves of a plot, for the Appearance panel."""
+        if key == 'absorption':
+            spectra = self.calculations.excAbsData
+            return [f'Q-point {spectra[i]["q"] + 1}' if i < len(spectra) else f'Spectrum {i + 1}' for i in range(count)]
+        return [f'{"Exciton" if key == "dispersion" else "Band"} {i + 1}' for i in range(count)]
 
     # Datasets
 

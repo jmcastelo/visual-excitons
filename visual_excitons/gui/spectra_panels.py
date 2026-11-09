@@ -68,7 +68,7 @@ class SpectraPanels(QObject):
 
         # Parameters widget
 
-        self.parametersWidget = ParametersWidget(options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle)
+        self.parametersWidget = ParametersWidget(options, calculations)
         self.parametersWidget.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
         self.parametersWidget.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
         self.inspector = self.parametersWidget

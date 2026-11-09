@@ -25,6 +25,7 @@ PANELS = {
     'wavefunction': 'Wave function',
     'analysis': 'Analysis',
     'spectraControls': 'Spectra controls',
+    'appearance': 'Appearance',
     'wavefunctionControls': 'Wave function controls',
 }
 
@@ -47,7 +48,8 @@ PRESETS = {
         'steps': [('dispersion', CENTER, None),
                   ('absorption', RIGHT, 'dispersion'),
                   ('bands', BOTTOM, 'dispersion'),
-                  ('spectraControls', RIGHT, None)],
+                  ('spectraControls', RIGHT, None),
+                  ('appearance', TAB, 'spectraControls')],
         'sizes': [('spectraControls', [0.78, 0.22]), ('absorption', [0.5, 0.5])],
     },
     'Wave function': {
@@ -63,6 +65,7 @@ PRESETS = {
                   ('absorption', BOTTOM, 'dispersion'),
                   ('analysis', BOTTOM, 'wavefunction'),
                   ('spectraControls', RIGHT, None),
+                  ('appearance', TAB, 'spectraControls'),
                   ('wavefunctionControls', TAB, 'spectraControls'),
                   ('system', TAB, 'spectraControls')],
         'sizes': [('spectraControls', [0.32, 0.46, 0.22]), ('absorption', [0.5, 0.5]), ('analysis', [0.6, 0.4])],
@@ -78,6 +81,7 @@ CLOSED_NEIGHBOURS = {
     'wavefunction': ['dispersion', 'absorption', 'system'],
     'analysis': ['wavefunction', 'absorption', 'system'],
     'spectraControls': ['wavefunctionControls', 'system'],
+    'appearance': ['spectraControls', 'wavefunctionControls', 'system'],
     'wavefunctionControls': ['spectraControls', 'system'],
 }
 

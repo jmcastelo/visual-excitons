@@ -340,8 +340,8 @@ class LegendStyle(QObject):
     def setState(self, state):
         self.setTextColor(QColor(state['textColor']))
         self.setTextSize(int(state['textSize']))
-        if state.get('backgroundColor') is not None:
-            self.setBackgroundColor(QColor(state['backgroundColor']))
+        background = state.get('backgroundColor')
+        self.setBackgroundColor(None if background is None else QColor(background))
         setPen(self.borderPen, state['border'])
         self.borderPenChanged.emit(self.borderPen)
         self.offset[:] = [int(value) for value in state['offset']]
@@ -398,42 +398,6 @@ class BaseStyle(QObject):
         self.common = StyleCommon()
         self.axesStyle = AxesStyle()
 
-        self.linkedStyles = []
-        self.connectStyles = False
-
-    def setLinkedStyles(self, styles):
-        self.linkedStyles = styles
-
-    def setConnectStyles(self, conn):
-        self.connectStyles = conn
-        for i in range(len(self.linkedStyles)):
-            self.linkedStyles[i].connectStyles = conn
-
-    def linkStyles(self):
-        if self.connectStyles:
-            for i in range(len(self.linkedStyles)):
-                self.axesStyle.axesColor.changed.connect(self.linkedStyles[i].axesStyle.axesColor.setColor)
-                self.axesStyle.axesWidthChanged.connect(self.linkedStyles[i].axesStyle.setAxesWidth)
-                self.axesStyle.backgroundColor.changed.connect(self.linkedStyles[i].axesStyle.backgroundColor.setColor)
-                self.axesStyle.labelsColor.changed.connect(self.linkedStyles[i].axesStyle.labelsColor.setColor)
-                self.axesStyle.labelsFont.changed.connect(self.linkedStyles[i].axesStyle.labelsFont.setFont)
-                self.axesStyle.ticksColor.changed.connect(self.linkedStyles[i].axesStyle.ticksColor.setColor)
-                self.axesStyle.ticksFont.changed.connect(self.linkedStyles[i].axesStyle.ticksFont.setFont)
-                self.axesStyle.titleColor.changed.connect(self.linkedStyles[i].axesStyle.titleColor.setColor)
-                self.axesStyle.titleFont.changed.connect(self.linkedStyles[i].axesStyle.titleFont.setFont)
-
-    def unlinkStyles(self):
-        if self.connectStyles:
-            for i in range(len(self.linkedStyles)):
-                self.axesStyle.axesColor.changed.disconnect(self.linkedStyles[i].axesStyle.axesColor.setColor)
-                self.axesStyle.axesWidthChanged.disconnect(self.linkedStyles[i].axesStyle.setAxesWidth)
-                self.axesStyle.backgroundColor.changed.disconnect(self.linkedStyles[i].axesStyle.backgroundColor.setColor)
-                self.axesStyle.labelsColor.changed.disconnect(self.linkedStyles[i].axesStyle.labelsColor.setColor)
-                self.axesStyle.labelsFont.changed.disconnect(self.linkedStyles[i].axesStyle.labelsFont.setFont)
-                self.axesStyle.ticksColor.changed.disconnect(self.linkedStyles[i].axesStyle.ticksColor.setColor)
-                self.axesStyle.ticksFont.changed.disconnect(self.linkedStyles[i].axesStyle.ticksFont.setFont)
-                self.axesStyle.titleColor.changed.disconnect(self.linkedStyles[i].axesStyle.titleColor.setColor)
-                self.axesStyle.titleFont.changed.disconnect(self.linkedStyles[i].axesStyle.titleFont.setFont)
 
     def currentCurveIndex(self):
         return self.common.currentCurveIndex
