@@ -11,8 +11,8 @@ The arrangement is kept between restarts (`saveState`), as are the user's
 layouts (`saveLayouts`); they are preferences, not part of session files.
 """
 
-from PySide6.QtCore import QObject, Signal, QTimer, QEvent, QRectF, QPointF, Qt
-from PySide6.QtGui import QPalette, QColor, QAction, QIcon, QPixmap, QPainter, QPen, QPolygonF
+from PySide6.QtCore import QObject, Signal, QTimer, QEvent
+from PySide6.QtGui import QPalette, QColor, QAction, QIcon
 from PySide6.QtWidgets import QScrollArea, QFrame, QWidget, QApplication
 import PySide6QtAds as ads
 
@@ -119,26 +119,13 @@ def scrollable(widget: QWidget) -> QScrollArea:
     return area
 
 
-def attachIcon(size=16) -> QIcon:
-    """A window with an arrow into its corner: back into the main window."""
-    s = size * 2
-    pixmap = QPixmap(s, s)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    color = QColor(128, 128, 128)
-    painter.setPen(QPen(color, s * 0.08))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawRect(QRectF(s * 0.1, s * 0.1, s * 0.8, s * 0.8))
-    painter.setBrush(color)
-    painter.drawRect(QRectF(s * 0.1, s * 0.55, s * 0.35, s * 0.35))
-    painter.setPen(QPen(color, s * 0.09))
-    painter.drawLine(QPointF(s * 0.82, s * 0.18), QPointF(s * 0.5, s * 0.5))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawPolygon(QPolygonF([QPointF(s * 0.42, s * 0.58), QPointF(s * 0.42, s * 0.36),
-                                   QPointF(s * 0.64, s * 0.58)]))
-    painter.end()
-    return QIcon(pixmap)
+def attachIcon() -> QIcon:
+    """QtAds's own detach icon (two windows), in its version for the current theme."""
+    dark = QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    suffix = '_dark' if dark else ''
+    icon = QIcon(f':/ads/images/detach-button{suffix}.svg')
+    icon.addFile(f':/ads/images/detach-button-disabled{suffix}.svg', mode=QIcon.Mode.Disabled)
+    return icon
 
 
 def side(fromRect, toRect):
@@ -185,6 +172,8 @@ class Panels(QObject):
         """Tab colors for the current palette (call after each theme change)."""
         styleSheet = self.baseStyleSheet + tabStyleSheet(QApplication.palette())
         self.manager.setStyleSheet(styleSheet)
+        for action in self.attachActions.values():
+            action.setIcon(attachIcon())
         for container in self.manager.floatingWidgets():
             if container.styleSheet():
                 container.setStyleSheet(styleSheet)
