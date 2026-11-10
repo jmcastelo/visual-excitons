@@ -120,6 +120,23 @@ def deleteWindows():
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+@pytest.fixture(autouse=True)
+def noUnexpectedDialogs(monkeypatch):
+    """
+    A message box would wait forever for an answer offscreen: one that a test
+    does not expect (and replace) fails it instead.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    def unexpected(name):
+        def show(*args, **kwargs):
+            text = next((arg for arg in args[1:] if isinstance(arg, str)), '')
+            raise AssertionError(f'Unexpected QMessageBox.{name}: {text}')
+        return show
+    for name in ('warning', 'question', 'critical', 'information'):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(unexpected(name)))
+
+
 @pytest.fixture
 def lattice():
     """YamboLatticeDB loader for a dataset in data/ (skips when missing)."""

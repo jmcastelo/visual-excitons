@@ -7,7 +7,7 @@ status bar and persistent settings frame them.
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot, QSettings
+from PySide6.QtCore import Qt, Slot, QSettings, QTimer, QEvent
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox, QApplication,
                                QProgressBar, QToolButton, QInputDialog)
@@ -104,6 +104,19 @@ class MainWindow(QMainWindow):
             self.resize(1600, 1000)
         self.restoreLayout()
         self.openInitialDataset()
+
+        # Unsaved changes of the session: what a session file would hold is
+        # compared with what was saved, shortly after each input and change of
+        # the results (a signature of it: cheap, and back to unmodified when a
+        # change is undone)
+        self.savedSignature = None
+        self.modifiedTimer = QTimer(self)
+        self.modifiedTimer.setSingleShot(True)
+        self.modifiedTimer.setInterval(150)
+        self.modifiedTimer.timeout.connect(self.updateModified)
+        self.calculations.resultsChanged.connect(self.modifiedTimer.start)
+        self.calculations.excitonSelected.connect(self.modifiedTimer.start)
+        QApplication.instance().installEventFilter(self)
 
     # Construction
 
@@ -460,7 +473,7 @@ class MainWindow(QMainWindow):
             action = QAction(datasetName(dataset), self)
             action.setToolTip(dataset.get('save') or '')
             action.setEnabled(datasetExists(dataset))
-            action.triggered.connect(lambda checked=False, dataset=dataset: self.openDataset(dataset))
+            action.triggered.connect(lambda checked=False, dataset=dataset: self.maybeSaveSession('opening another dataset') and self.openDataset(dataset))
             self.recentMenu.addAction(action)
         self.recentMenu.setEnabled(bool(recent))
 
@@ -476,6 +489,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def chooseDataset(self):
+        if not self.maybeSaveSession('opening another dataset'):
+            return
         start = str(Path(self.dataset['save']).parent.parent) if self.dataset and self.dataset.get('save') else str(Path.cwd())
         folder = QFileDialog.getExistingDirectory(self, 'Open dataset', start, QFileDialog.Option.ShowDirsOnly)
         if not folder:
@@ -494,6 +509,7 @@ class MainWindow(QMainWindow):
         self.storeDatasetState()
         # Saving now must not overwrite the session of another setup
         self.sessionPath = None
+        self.setWindowModified(False)
 
         # What was saved for this dataset (Q-path, parameters), even when it is
         # found again through Open dataset
@@ -553,7 +569,8 @@ class MainWindow(QMainWindow):
         if self.options.nQpoints:
             parts.append(f'{self.options.nQpoints} Q-points')
         self.datasetLabel.setText('  ·  '.join(parts))
-        title = [Path(self.sessionPath).stem] if self.sessionPath else []
+        # [*]: where Qt shows the unsaved changes mark
+        title = [Path(self.sessionPath).stem + '[*]'] if self.sessionPath else []
         title += [name] if name else []
         self.setWindowTitle(' — '.join(title + ['Visual Excitons']))
 
@@ -575,7 +592,7 @@ class MainWindow(QMainWindow):
             action = QAction(Path(path).stem, self)
             action.setToolTip(path)
             action.setEnabled(Path(path).is_file())
-            action.triggered.connect(lambda checked=False, path=path: self.openSession(path))
+            action.triggered.connect(lambda checked=False, path=path: self.maybeSaveSession('opening another session') and self.openSession(path))
             self.recentSessionsMenu.addAction(action)
         self.recentSessionsMenu.setEnabled(bool(recent))
 
@@ -633,6 +650,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue('sessionDir', str(Path(path).resolve().parent))
         self.addRecentSession(path)
         self.updateDatasetLabel()
+        self.markSessionSaved()
         note = '' if manifest['results'] or not self.sessionResultsAction.isChecked() else ' (no results to store)'
         if self.calculations.isBusy():
             note += '; the calculation still running is not included'
@@ -640,6 +658,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def chooseSession(self):
+        if not self.maybeSaveSession('opening another session'):
+            return
         filename, _ = QFileDialog.getOpenFileName(self, 'Open session', self.sessionFolder(), SESSION_FILTER)
         if filename:
             self.openSession(filename)
@@ -685,7 +705,59 @@ class MainWindow(QMainWindow):
         self.settings.setValue('sessionDir', str(Path(path).resolve().parent))
         self.addRecentSession(path)
         self.updateDatasetLabel()
+        self.markSessionSaved()
+        # Again once what opening it started has settled (e.g. the view)
+        QTimer.singleShot(0, self.markSessionSaved)
         self.statusBar().showMessage(message, 10000)
+
+    # Unsaved changes
+
+    def sessionSignature(self):
+        """What a session file of the current setup would hold, as a string (its results by version)."""
+        state = {**self.state.values(GLOBAL), **self.state.values(DATASET)}
+        # Not part of the setup: open sections, and the Appearance panel's own settings
+        state = {key: value for key, value in state.items()
+                 if '/section/' not in key and not key.startswith('appearancePanel/')}
+        dataset = {key: value for key, value in (self.dataset or {}).items() if key != 'state'}
+        results = None
+        if self.sessionResultsAction.isChecked():
+            results = [self.calculations.resultsVersion, list(self.calculations.selectedExciton or [])]
+        return json.dumps([state, dataset, results], sort_keys=True, default=str)
+
+    def markSessionSaved(self):
+        self.savedSignature = self.sessionSignature() if self.sessionPath else None
+        self.setWindowModified(False)
+
+    @Slot()
+    def updateModified(self):
+        modified = self.sessionPath is not None and self.sessionSignature() != self.savedSignature
+        if modified != self.isWindowModified():
+            self.setWindowModified(modified)
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.KeyRelease, QEvent.Type.Wheel):
+            if self.sessionPath is not None:
+                self.modifiedTimer.start()
+        return False
+
+    def maybeSaveSession(self, action):
+        """
+        Before `action` (e.g. "closing"), offer to save the unsaved changes of
+        the session; False if the user cancels (or saving failed).
+        """
+        self.updateModified()
+        if not self.isWindowModified():
+            return True
+        name = Path(self.sessionPath).stem
+        answer = QMessageBox.warning(
+            self, 'Unsaved changes', f'The session {name} has changes that are not saved.\n\n'
+            f'Save them before {action}?',
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save)
+        if answer == QMessageBox.StandardButton.Save:
+            self.writeSessionFile(self.sessionPath)
+            return not self.isWindowModified()
+        return answer == QMessageBox.StandardButton.Discard
 
     def locateDataset(self, dataset):
         """Ask for the folder of a dataset that is not where the session says; None if not found."""
@@ -842,6 +914,9 @@ class MainWindow(QMainWindow):
                           '<a href="https://www.yambo-code.eu/">Yambo</a>, read through YamboPy.')
 
     def closeEvent(self, event):
+        if not self.maybeSaveSession('closing'):
+            event.ignore()
+            return
         # Stop the calculations; the running one ends at its next progress check
         self.calculations.cancel()
         self.calculations.tasks.waitForDone(10000)

@@ -477,6 +477,7 @@ A session file is a zip with `session.json` (manifest) and `results.npz` (arrays
 
 - Saving (`MainWindow.writeSessionFile`) writes to a temporary file and renames it, so an interrupted save never breaks an existing session.
 - Opening (`MainWindow.openSession`): restores the `global` values, then opens the dataset with the session's `dataset` values (camera included), then, if the fingerprint matches (`fingerprintsMatch`; sizes only when the dataset was located elsewhere), `Calculations.restoreResults()`, which goes through the same `_apply…` methods as real calculations, so plots, curve styles and dependent panels update as usual.
+- **Unsaved changes** (`*` in the title, through Qt's `[*]` placeholder and `setWindowModified`): `MainWindow.sessionSignature()` is what a session file would hold, as a JSON string: the state values (except open sections, `/section/`, and the Appearance panel's own settings), the dataset, and, when results are stored, `Calculations.resultsVersion` (increased by `markResultsChanged()` wherever results are applied or cleared, which also emits `resultsChanged`) with the selected exciton. `markSessionSaved()` keeps it when a session is saved or opened (again after a zero-delay timer, once what opening started has settled); `updateModified()` compares, 150 ms after each mouse, key or wheel release (application event filter) and each change of the results. `maybeSaveSession(action)` asks Save / Discard / Cancel before closing (`closeEvent`) and before opening another dataset or session from the menus (not in `openDataset` / `openSession` themselves, which tests and sessions call).
 - Anything new worth keeping in sessions: parameters go through the persistence registry (section 9) and are included automatically; results need `resultsSnapshot` / `restoreResults` (store arrays in `arrays`, everything else JSON-able in `meta`).
 
 Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
@@ -535,6 +536,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - Qt runs on the **offscreen** platform (unless `QT_QPA_PLATFORM` is set), and settings go to a temporary directory: tests never touch the user's settings.
 - `datasetPath(name)` and the `lattice` fixture skip tests whose dataset in `data/` is missing (`data` marker).
 - OpenGL context sharing is enabled as in `main.py`.
+- `noUnexpectedDialogs` (autouse) makes the `QMessageBox` static functions fail the test: offscreen, a message box would wait forever for an answer. Tests that expect one replace it with `monkeypatch`.
 - `deleteWindows` (autouse) deletes the top-level widgets each test leaves. Closed windows stay alive through their signal connections, and every theme change repolishes all of them: without it, the GUI tests get slower and slower as they run (several times slower in total).
 
 Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
@@ -596,7 +598,6 @@ Tips:
 ## 13. Known limitations and ideas
 
 - Results are kept in session files, not when the program is simply closed and reopened (only parameters and the camera are). A disk cache of results keyed by dataset and parameters would make that automatic.
-- There is no "unsaved changes" tracking for sessions: closing does not ask to save.
 - Switching the theme resets the axes colors and the legend text of the 2D plots to the theme's; curves keep their colors unless still at the default.
 - The excitonic band structure is only available at Γ.
 - Boundary atoms (atoms just outside the supercell) and a per-species bond-length table are not implemented.

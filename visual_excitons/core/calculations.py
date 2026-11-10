@@ -191,6 +191,8 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
 
 
 class Calculations(QObject):
+    # The results changed: computed, restored, cleared...
+    resultsChanged = Signal()
     qPathReady = Signal(list, list)
 
     excitonDispersionReady = Signal(list, list, list, list)
@@ -246,6 +248,8 @@ class Calculations(QObject):
         self.dispersionAxes = {}
 
         self.excAbsData = []
+        # Increased with every change of the results (for "unsaved changes")
+        self.resultsVersion = 0
         self.showExcitonLabels = False
 
         self.k = []
@@ -291,9 +295,15 @@ class Calculations(QObject):
         title = message[:-1] if message.endswith('…') else message
         self.errorOccurred.emit(f'{title} failed', reason)
 
+    def markResultsChanged(self):
+        """Note a change of the results (emitted at its start: listeners check them later)."""
+        self.resultsVersion += 1
+        self.resultsChanged.emit()
+
     @Slot()
     def resetDataset(self):
         """Forget everything computed from the previous dataset."""
+        self.markResultsChanged()
         self.tasks.reset()
         self.lattice = None
         self.excitonDispersion = None
@@ -373,6 +383,7 @@ class Calculations(QObject):
                           self._applyDispersion, key='dispersion')
 
     def _applyDispersion(self, result):
+        self.markResultsChanged()
         self.lattice = result['lattice']
         self.excitonDispersion = result['excitonDispersion']
         self.collinear_qpoints = result['collinearQPoints']
@@ -426,6 +437,7 @@ class Calculations(QObject):
 
     def _updateAbsorptionCurves(self, qPointIndex, toggleCurve, data):
         """Curves after a click on Q-point `qPointIndex`, with its spectrum `data` if newly computed."""
+        self.markResultsChanged()
         curveIndex = self.absorptionCurveIndex(qPointIndex)
 
         if curveIndex < 0:
@@ -471,6 +483,7 @@ class Calculations(QObject):
                           key='absorption-recompute')
 
     def _applyRecomputedSpectra(self, spectra):
+        self.markResultsChanged()
         # Curves may have been added or dropped meanwhile: update those still shown
         for i, data in enumerate(self.excAbsData):
             if data['q'] in spectra:
@@ -489,6 +502,7 @@ class Calculations(QObject):
         parallel to the curves (see excitonAbsorptionCurveRemoved), which would
         otherwise keep entries of curves no longer there.
         """
+        self.markResultsChanged()
         for index in reversed(range(len(self.excAbsData))):
             self.excAbsData.pop(index)
             self.excitonAbsorptionCurveRemoved.emit(index)
@@ -515,6 +529,7 @@ class Calculations(QObject):
                           self._applyBandStructure, key='band-structure')
 
     def _applyBandStructure(self, result):
+        self.markResultsChanged()
         self.k, self.bands, self.weights = result['k'], result['bands'], result['weights']
         self.excitonBandStructureNumCurvesChanged.emit(len(self.bands))
         self.excitonBandStructureInit.emit()
@@ -558,6 +573,7 @@ class Calculations(QObject):
                           self._applyWaveFunction, key='wave-function')
 
     def _applyWaveFunction(self, result):
+        self.markResultsChanged()
         self.lattice = result['lattice']
         self.waveFunction = result['waveFunction']
         self.wfAtomPositions = result['atomPositions']
@@ -620,6 +636,7 @@ class Calculations(QObject):
         Show results stored by resultsSnapshot, as if just computed. The dataset
         must be open (the lattice is read from it).
         """
+        self.markResultsChanged()
         lattice = self.lattice
         if lattice is None:
             with databaseAccess():

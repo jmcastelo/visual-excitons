@@ -148,6 +148,11 @@ def test_results_round_trip(qtbot):
 
 # Through the main window
 
+def shownTitle(window):
+    """The title as shown: Qt replaces [*] with * when there are unsaved changes."""
+    return window.windowTitle().replace('[*]', '*' if window.isWindowModified() else '')
+
+
 def injectResults(window, wfShape=(54, 54, 18), supercell=(3, 3, 1)):
     """Give the window synthetic results as a calculation would (signals, curve styles...)."""
     from visual_excitons.core.session import jsonable
@@ -206,7 +211,7 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     camera = view.cameraState()
     path = tmp_path / 'setup.vxsession'
     w.writeSessionFile(str(path))
-    assert w.sessionPath == str(path.resolve()) and w.windowTitle().startswith('setup — BiI3_Bulk_8x8x8')
+    assert w.sessionPath == str(path.resolve()) and shownTitle(w).startswith('setup — BiI3_Bulk_8x8x8')
     w.close()
 
     w2 = newWindow()
@@ -228,7 +233,7 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
 
     # Opening a dataset afterwards forgets the session: Save must not overwrite it
     w2.openDataset(main_window.findDataset(folder))
-    assert w2.sessionPath is None and not w2.windowTitle().startswith('setup')
+    assert w2.sessionPath is None and not shownTitle(w2).startswith('setup')
     w2.close()
 
 
@@ -265,3 +270,71 @@ def test_changed_or_moved_dataset(newWindow, monkeypatch, tmp_path):
     w4 = newWindow()
     w4.openSession(str(path))
     assert w4.sessionPath is None
+
+
+@pytest.mark.data
+def test_unsaved_changes(newWindow, monkeypatch, tmp_path):
+    import visual_excitons.gui.main_window as main_window
+    from PySide6.QtWidgets import QMessageBox
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    w.updateModified()
+    assert not w.isWindowModified()                              # no session: nothing to mark
+    path = tmp_path / 'mine.vxsession'
+    w.writeSessionFile(str(path))
+    assert not w.isWindowModified() and shownTitle(w).startswith('mine — ')
+
+    # A change: marked; undone: not any more
+    p3 = w.wavefunction.parameters3DWidget
+    original = p3.colormapComboBox.currentText()
+    p3.colormapComboBox.setCurrentText('Magma' if original != 'Magma' else 'Inferno')
+    w.updateModified()
+    assert w.isWindowModified() and shownTitle(w).startswith('mine* — ')
+    p3.colormapComboBox.setCurrentText(original)
+    w.updateModified()
+    assert not w.isWindowModified()
+
+    # Opening or closing a section is not a change of the session; new results are
+    next(iter(p3.sections.values())).setExpanded(False)
+    w.updateModified()
+    assert not w.isWindowModified()
+    w.calculations.markResultsChanged()
+    w.updateModified()
+    assert w.isWindowModified()
+
+    # Closing asks: Cancel keeps the window, Save saves and closes
+    answers = []
+    def answer(button):
+        def ask(parent, title, text, buttons, default):
+            answers.append(text)
+            return button
+        return ask
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Cancel))
+    assert not w.close() and 'mine has changes that are not saved' in answers[-1] and 'closing' in answers[-1]
+    opened = []
+    monkeypatch.setattr(main_window.QFileDialog, 'getExistingDirectory', lambda *args, **kwargs: opened.append(1) or '')
+    w.chooseDataset()
+    assert opened == [] and 'opening another dataset' in answers[-1]   # cancelled before choosing
+
+    before = path.stat().st_mtime_ns
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Save))
+    assert w.close() and path.stat().st_mtime_ns != before
+
+
+@pytest.mark.data
+def test_discard_closes_without_saving(newWindow, monkeypatch, tmp_path):
+    import visual_excitons.gui.main_window as main_window
+    from PySide6.QtWidgets import QMessageBox
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    path = tmp_path / 'mine.vxsession'
+    w.writeSessionFile(str(path))
+    before = path.stat().st_mtime_ns
+    w.calculations.markResultsChanged()
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Discard)
+    assert w.close() and path.stat().st_mtime_ns == before
+    # Not modified: closing does not ask
+    w2 = newWindow()
+    w2.openSession(str(path))
+    w2.updateModified()
+    assert not w2.isWindowModified() and w2.close()

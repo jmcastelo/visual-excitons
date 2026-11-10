@@ -168,6 +168,7 @@ A session file (`.vxsession`) keeps a whole setup, to come back to it later or t
 
 - `File › Save session` (`Ctrl+S`) saves the current setup in its session file, or asks for one the first time; `Save session as…` (`Ctrl+Shift+S`) saves it in a new one. The name of the session is shown in the title of the window.
 - `File › Open session…` (`Ctrl+Shift+O`) and `Open recent session` restore a session.
+- Changes not yet saved in the session are marked with `*` after its name in the title: parameters, display settings, the view of the 3D scene, the Appearance of the plots and, when results are stored in sessions, new results. Undoing a change removes the mark; opening or closing sections, the layout of the panels and the theme are not part of a session, so they do not count. Closing the window, or opening another dataset or session, with unsaved changes asks whether to save them (`Save`), lose them (`Discard`) or go back (`Cancel`).
 - `Store results in sessions` (on by default) stores the computed results: dispersion, absorption spectra, band structure, the selected exciton and the wave function. Opening the session then shows them at once, without computing anything. The files stay small (the wave function is stored compressed, in single precision): e.g. 0.2 MB for a BiI3 session with all of them.
 
 When a session is opened:
