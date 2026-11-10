@@ -182,7 +182,7 @@ Opening another dataset or session leaves the current session: `Save session` th
 
 A dataset is the set of directories with the databases of one calculation:
 
-- **SAVE** directory: contains `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters are detected from it.
+- **SAVE** directory: contains `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters are detected from it, from the symmetry of the cell: centred lattices (FCC, BCC, body-centred tetragonal...) are recognised whatever primitive vectors the calculation used, and whatever their orientation.
 - **BSE** directory: contains the `ndb.BS_diago_Q*` files, one per Q-point.
 - **GW** directory: contains `ndb.QP`, for DFT+GW+BSE calculations.
 

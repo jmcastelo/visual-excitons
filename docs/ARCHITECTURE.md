@@ -35,7 +35,7 @@ Stack:
 | Numerics | NumPy, SciPy | Everything numerical |
 | System | psutil (optional) | Available memory, cross-platform |
 
-The fork's `ase-bz` branch provides the `BrillouinZone` class and the `get_lattice_data` / `IBRAV_REQUIRED_PARAMETERS` helpers used for Bravais lattices and Q-paths, and a patch to `ExcitonDispersion` (marked "Commented by JMC") needed by this app.
+The fork's `ase-bz` branch provides the `BrillouinZone` class and the `lattice_data_for_cell` / `get_lattice_data` / `IBRAV_REQUIRED_PARAMETERS` helpers used for Bravais lattices and Q-paths, and a patch to `ExcitonDispersion` (marked "Commented by JMC") needed by this app.
 
 It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__init__.py`): `pip install -e ".[test]"` for development, then run `visual-excitons`, `python -m visual_excitons` or `python visual_excitons/main.py` (the last one puts the repository root on `sys.path` itself). Tests: `pytest` (see [Testing](#11-testing)). See the README for installation, including working on the YamboPy fork alongside.
 
@@ -157,6 +157,7 @@ Holds the user's parameters and the lattice state:
 
 - Data directories (`saveDir`, `diagoDir`, `qpDir`), calculation type (`gw`), number of Q-points (`nQpoints`).
 - Lattice: `cell` (lattice vectors, rows, Bohr), `latticeParameters`, `ibrav`, `variant`, high-symmetry points, the Q-path `qBZ` (a yambopy `BrillouinZone`) and extra points.
+- Lattice detection: `detectLatticeType()` identifies the lattice from the symmetry of the cell, with yambopy's `lattice_data_for_cell` (spglib), so centred lattices are found whatever the primitive vectors and orientation (comparing the primitive vector lengths with the standard cells did not: an FCC crystal could come out rhombohedral). The ibrav comes from the variant (`ibravCandidates`; for the lattices with two orientations, ±3, ±5, ±9, the one whose standard cell is the dataset's). For the detected ibrav, `setLatticeData` takes the special points from the cell (in its own reduced coordinates, those of Yambo's Q-points) and `setBrillouinZone` builds the zone with `BrillouinZone(cell=...)` (`latticeFromCell`); an ibrav chosen by hand goes through `get_lattice_data(ibrav, latticeParameters)`.
 - Parameters of the calculations and displays (energies, exciton count, fixed particle positions, supercell, cutoff, iso levels, opacities, atom/bond sizes...).
 - View directions: `viewBases`, `viewPresets` and `viewVectorToCartesian()`.
 

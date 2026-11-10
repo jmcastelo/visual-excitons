@@ -224,6 +224,49 @@ def test_new_lattice_clears_the_q_path():
     assert options.qBZ is None and options.extraHighSymmetryPoints == {}
 
 
+def optionsWithCell(cell):
+    from visual_excitons.core.options import get_cell_params
+    options = Options()
+    options.cell = np.asarray(cell, dtype=float)
+    options.latticeParameters = get_cell_params(options.cell)
+    return options
+
+
+A = 6.8
+@pytest.mark.parametrize('cell, ibrav, variant', [
+    (A / 2 * np.array([[-1, 0, 1], [0, 1, 1], [-1, 1, 0]]), 2, 'FCC'),       # Quantum ESPRESSO's vectors
+    (A / 2 * np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]]), 2, 'FCC'),        # other primitive vectors
+    (A / 2 * np.array([[1, 1, 1], [-1, 1, 1], [-1, -1, 1]]), 3, 'BCC'),
+    (0.9 * np.array([[-2, 2, 4], [2, -2, 4], [2, 2, -4]]), 7, 'BCT2'),
+    (np.array([[0, A, 0], [-A, 0, 0], [0, 0, A]]), 1, 'CUB'),                # rotated
+    (np.array([[3, 0, 0], [1.5, 1.5 * np.sqrt(3), 0], [0, 0, 5]]), 4, 'HEX'), # 60 degrees
+])
+def test_lattice_detected_from_the_cell(cell, ibrav, variant):
+    """Centred lattices too: the primitive vector lengths alone took an FCC crystal for a rhombohedral one."""
+    options = optionsWithCell(cell)
+    assert options.detectLatticeType() == ibrav
+    options.setIbrav(ibrav)
+    options.setLatticeData(ibrav)
+    assert options.variant == variant and options.latticeFromCell
+    # The Brillouin zone of the cell itself: its special points in the cell's reduced coordinates
+    options.setBrillouinZone(npoints=40)
+    np.testing.assert_allclose(options.qBZ.cell, options.cell)
+    assert options.getPathString() == options.defaultPath
+
+
+def test_lattice_chosen_by_hand_uses_the_parameters():
+    options = optionsWithCell(np.eye(3) * A)
+    assert options.detectLatticeType() == 1
+    options.setIbrav(6)                                                        # tetragonal, by hand
+    options.setLatticeData(6)
+    assert options.variant == 'TET' and not options.latticeFromCell
+
+
+def test_unsupported_lattice_is_not_detected():
+    triclinic = [[3.0, 0.1, 0.2], [0.4, 4.1, 0.3], [0.5, 0.6, 5.3]]
+    assert optionsWithCell(triclinic).detectLatticeType() is None
+
+
 def test_new_dispersion_or_dataset_drops_curve_styles(calculations):
     """Curves and their styles stay parallel when all curves are dropped at once."""
     style = AbsorptionStyle()
