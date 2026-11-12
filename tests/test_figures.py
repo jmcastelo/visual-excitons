@@ -86,6 +86,23 @@ def test_styles_are_carried_over():
     assert not [line for line in figure.axes[0].lines if line.get_markerfacecolor() == 'none']
 
 
+def test_path_labels_are_typeset(tmp_path):
+    """As yambopy writes them: Greek names, subscripts, primes, and merged section ends."""
+    from visual_excitons.core.figures import pathLabels
+    labels = ['G', 'X', 'Sigma1', "K'", 'K \u2014 U', 'Y1', 'Z|Sigma', 'not a label']
+    assert pathLabels(labels, True) == [r'$\Gamma$', 'X', r'$\Sigma_{1}$', r'$\mathrm{K}^{\prime}$', 'K|U',
+                                        r'$\mathrm{Y}_{1}$', r'$\mathrm{Z}|\Sigma$', 'not a label']
+    assert pathLabels(['G', 'K \u2014 U'], False) == ['G', 'K|U']
+    # Drawn without missing glyphs in every font
+    data = sampleData()
+    data['dispersion']['labels'] = ['Sigma1', 'G', "K'", 'K \u2014 U']
+    for font in figures.FONTS:
+        figure = buildFigure(data, STYLES, {'panels': ['dispersion'], 'font': font})
+        with warnings.catch_warnings():
+            warnings.filterwarnings('error', message='Glyph')
+            saveFigure(figure, tmp_path / 'labels.png')
+
+
 def test_shared_energy_axis():
     data = sampleData()
     figure = buildFigure(data, STYLES, {'panels': ['dispersion', 'absorption'], 'shareEnergy': True})

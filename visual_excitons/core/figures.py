@@ -22,8 +22,11 @@ Styles (`styles`, a dict per plot): {'curves': [{'color', 'width', 'dash',
 Options (`options`, see DEFAULT_OPTIONS): panels, arrangement, size, fonts...
 """
 
+import re
+
 import matplotlib
 from matplotlib.figure import Figure
+
 import numpy as np
 
 DEFAULT_OPTIONS = {
@@ -40,7 +43,7 @@ DEFAULT_OPTIONS = {
     'excitonBars': True,        # bright and dark excitons below the absorption
     'labelExcitons': False,     # index of the bright excitons
     'highlight': True,          # the selected exciton
-    'gamma': True,              # write the label G of the Q-path as Γ
+    'gamma': True,              # Q-path labels typeset: Γ for G, Greek letters, subscripts, primes
     'titles': False,
 }
 
@@ -79,9 +82,46 @@ def rcParameters(options):
     return parameters
 
 
-def pathLabels(labels, gamma):
-    """Labels of the high-symmetry points; G as Γ if `gamma` (as math text: every font has it)."""
-    return [r'$\Gamma$' if gamma and label in ('G', 'Gamma', 'GAMMA') else label for label in labels]
+# Labels of special points, as yambopy writes them (yambopy.bz.labels): a capital
+# letter or a capitalised Greek name, then a subscript and primes, e.g. G (Γ),
+# Sigma1 (Σ₁), K' (K′); a jump between path sections joins two of them with
+# ' — ' (or '|'). Parsed here too: exported scripts do not need yambopy.
+GREEK_LABELS = ('Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega')
+LABEL_PATTERN = re.compile(r"(%s|[A-Z])([0-9]*)('*)" % '|'.join(sorted(GREEK_LABELS, key=len, reverse=True)))
+MERGED_LABEL = re.compile(r'\s*(?:—|\|)\s*')
+
+
+def mathLabel(label):
+    """A special-point label as math text (upright, e.g. $\\Sigma_{1}$), or None if it is not one."""
+    match = LABEL_PATTERN.fullmatch(label.strip())
+    if match is None:
+        return None
+    base, subscript, primes = match.groups()
+    base = '\\Gamma' if base in ('G', 'Gamma') else '\\' + base if base in GREEK_LABELS else '\\mathrm{%s}' % base
+    return base + ('_{%s}' % subscript if subscript else '') + ('^{%s}' % ('\\prime' * len(primes)) if primes else '')
+
+
+def pathLabels(labels, typeset):
+    """
+    Labels of the high-symmetry points: typeset if `typeset` (Γ for G, Greek
+    letters, subscripts, primes; as math text, which every font has), merged
+    ones as A|B. Labels that are plain letters stay plain text, in the font of
+    the figure.
+    """
+    shown = []
+    for label in labels:
+        parts = MERGED_LABEL.split(str(label))
+        if not typeset:
+            shown.append('|'.join(parts))
+            continue
+        maths = [mathLabel(part) for part in parts]
+        if any(math is None for math in maths):
+            shown.append(str(label))            # not a special-point label: as it is
+        elif all(math.startswith('\\mathrm') and '_' not in math and '^' not in math for math in maths):
+            shown.append('|'.join(parts))       # plain letters
+        else:
+            shown.append('$' + '|'.join(maths) + '$')
+    return shown
 
 
 def curveStyle(styles, i):

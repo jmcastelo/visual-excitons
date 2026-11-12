@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
+from visual_excitons.core.options import tickLabels
 
 
 class BandStructureWidget(pg.PlotWidget):
@@ -88,7 +89,7 @@ class BandStructureWidget(pg.PlotWidget):
     @Slot()
     def setXAxis(self, x, labels):
         xAxis = pg.AxisItem('bottom', text = 'K-Path')
-        xAxis.setTicks([list(zip(x, labels))])
+        xAxis.setTicks([list(zip(x, tickLabels(labels)))])
         xAxis.setGrid(128)
 
         self.setAxisItems({'bottom': xAxis})

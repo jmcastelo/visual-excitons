@@ -772,3 +772,12 @@ def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
     assert len(view.latticeBoundaryItems) == 3 and not any(item.visible() for item in view.latticeBoundaryItems)
     box.setChecked(True)
     restarted.close()
+
+
+def test_path_labels_on_the_plots(window):
+    """Typeset as yambopy renders them; a label it cannot read is shown as it is."""
+    from visual_excitons.core.options import tickLabels
+    assert tickLabels(['G', 'Sigma1', "K'", 'K — U', 'old|style']) == ['Γ', 'Σ₁', 'K′', 'K|U', 'old|style']
+    window.spectra.dispersionWidget.setXAxis([0.0, 1.0, 2.0], ['G', 'Sigma1', 'K — U'])
+    ticks = window.spectra.dispersionWidget.getAxis('bottom')._tickLevels[0]
+    assert [label for x, label in ticks] == ['Γ', 'Σ₁', 'K|U']

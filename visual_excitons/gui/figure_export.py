@@ -164,7 +164,7 @@ class FigureExportDialog(QDialog):
                                ('excitonBars', 'Bright and dark excitons below the absorption', ''),
                                ('labelExcitons', 'Index of the bright excitons', ''),
                                ('highlight', 'Ring around the selected exciton', ''),
-                               ('gamma', 'Γ instead of G on the path', ''),
+                               ('gamma', 'Typeset path labels (Γ, Σ₁, K′)', ''),
                                ('titles', 'Titles of the panels', '')):
             box = QCheckBox(text)
             box.setChecked(bool(saved[key]))

@@ -4,6 +4,7 @@ import numpy as np
 
 from .theme import plotForeground
 from .highlight import ExcitonHighlight
+from visual_excitons.core.options import tickLabels
 
 
 class DispersionWidget(pg.PlotWidget):
@@ -108,10 +109,10 @@ class DispersionWidget(pg.PlotWidget):
     @Slot()
     def setXAxis(self, x, labels):
         if not self.singleQPoint:
-            self.getAxis('bottom').setTicks([list(zip(x, labels))])
+            self.getAxis('bottom').setTicks([list(zip(x, tickLabels(labels)))])
             self.getAxis('bottom').setGrid(128)
         else:
-            self.getAxis('bottom').setTicks([[(0.0, 'G')]])
+            self.getAxis('bottom').setTicks([[(0.0, 'Γ')]])
 
     @Slot()
     def setAxesColor(self, color):

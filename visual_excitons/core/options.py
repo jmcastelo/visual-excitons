@@ -32,6 +32,22 @@ VARIANT_IBRAV = {'CUB': [1], 'FCC': [2], 'BCC': [3, -3], 'HEX': [4], 'RHL': [5, 
                  'ORC': [8], 'ORCC': [9, -9], 'ORCF': [10], 'ORCI': [11]}
 
 
+def tickLabels(labels):
+    """
+    Path labels as shown on the plots: Γ, Σ₁, K′, merged sections as K|U
+    (yambopy's Unicode rendering); a label it cannot read (e.g. from an older
+    session file) is shown as it is.
+    """
+    from yambopy.bz.labels import format_label
+    shown = []
+    for label in labels:
+        try:
+            shown.append(format_label(str(label), 'unicode'))
+        except ValueError:
+            shown.append(str(label))
+    return shown
+
+
 def ibravCandidates(variant):
     """The ibrav values of a lattice variant (e.g. BCT2 -> [7], RHL1 -> [5, -5])."""
     return VARIANT_IBRAV.get(variant.rstrip('0123456789'), [])
