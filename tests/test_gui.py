@@ -781,3 +781,14 @@ def test_path_labels_on_the_plots(window):
     window.spectra.dispersionWidget.setXAxis([0.0, 1.0, 2.0], ['G', 'Sigma1', 'K — U'])
     ticks = window.spectra.dispersionWidget.getAxis('bottom')._tickLevels[0]
     assert [label for x, label in ticks] == ['Γ', 'Σ₁', 'K|U']
+
+
+def test_path_density_default_and_unit(window):
+    """Per Bohr⁻¹, as yambopy takes it: enough points along a default path."""
+    from visual_excitons.gui.options_widget import DEFAULT_PATH_DENSITY
+    spin = window.system.densitySpin
+    assert spin.value() == DEFAULT_PATH_DENSITY and spin.suffix() == ' per Bohr⁻¹'
+    import numpy as np
+    from yambopy import BrillouinZone
+    cell = 10.26 / 2 * np.array([[-1, 0, 1], [0, 1, 1], [-1, 1, 0]])      # silicon
+    assert len(BrillouinZone(cell=cell, density=spin.value()).kpoints_distances()) > 100

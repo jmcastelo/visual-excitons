@@ -7,9 +7,12 @@ from pathlib import Path
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
 from .inspector import NoteLabel
 
+# Default density of points along the Q-path, per Bohr⁻¹ (see densitySpin)
+DEFAULT_PATH_DENSITY = 300
+
 
 class OptionsWidget(QWidget):
-    """System page: data directories, crystal lattice and Brillouin-zone path."""
+    """System panel: data directories, crystal lattice and Brillouin-zone path."""
 
     # A Q-path was set successfully: its state (see qPathState), to be saved
     qPathApplied = Signal(dict)
@@ -114,8 +117,14 @@ class OptionsWidget(QWidget):
         self.numPointsSpin = QSpinBox(minimum=0, maximum=999999)
         self.numPointsSpin.setValue(100)
 
-        self.densitySpin = QDoubleSpinBox(minimum=0, maximum=9999, singleStep=0.1)
-        self.densitySpin.setValue(10.0)
+        # Points per unit of reciprocal length of the cell (without 2π), as
+        # yambopy's BrillouinZone takes it: the cell is in Bohr. 300 gives about
+        # 100-250 points along the default paths of common crystals
+        self.densitySpin = QDoubleSpinBox(minimum=0, maximum=99999, singleStep=10, decimals=1)
+        self.densitySpin.setValue(DEFAULT_PATH_DENSITY)
+        self.densitySpin.setSuffix(' per Bohr⁻¹')
+        self.densitySpin.setToolTip('Points per unit of length along the path in reciprocal space, '
+                                    'in Bohr⁻¹ (without 2π)')
         self.densitySpin.setVisible(False)
 
         self.interpolationComboBox = QComboBox()
