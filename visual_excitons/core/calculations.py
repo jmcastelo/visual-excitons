@@ -25,13 +25,17 @@ class PointData:
 # Calculations proper. They run in the worker thread (see tasks.py): they only
 # use their arguments, never the state shared with the GUI.
 
-def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints):
+def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints, bseFiles=None):
     """
     The excitonic dispersion along the Q-path. With every Q-point of the grid
     computed, through yambopy's ExcitonDispersion, interpolated; with only some
     (`qPoints`, indices from 0), the computed Q-points on the path, not
     interpolated (the interpolation needs them all), and a note saying so.
+    `bseFiles` (Q-point index -> file name) gives the files of other names;
+    ExcitonDispersion only reads the standard ones.
     """
+    bseFiles = bseFiles or {}
+    standardNames = all(bseFiles.get(q, f'ndb.BS_diago_Q{q + 1}') == f'ndb.BS_diago_Q{q + 1}' for q in qPoints)
     context.stage('Loading the lattice')
     lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
     collinearQPoints, qIndices, x = qBZ.find_collinear_grid(lattice)
@@ -39,7 +43,7 @@ def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints):
     nIbz = int(lattice.ibz_nkpoints)
     note = ''
 
-    if list(qPoints) == list(range(nIbz)):
+    if list(qPoints) == list(range(nIbz)) and standardNames:
         # One exciton database per Q-point (counted by the progress hooks)
         context.stage('Loading the excitons of each Q-point', nIbz)
         excitonDispersion = ExcitonDispersion(lattice, nExcitons, diagoDir)
@@ -57,8 +61,8 @@ def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints):
         context.stage('Loading the excitons of each Q-point', len(distinct))
         energies = {}
         for q in distinct:
-            excitonDB = YamboExcitonDB.from_db_file(lattice, filename='ndb.BS_diago_Q%d' % (q + 1), folder=diagoDir,
-                                                    neigs=nExcitons)
+            excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFiles.get(q, 'ndb.BS_diago_Q%d' % (q + 1)),
+                                                    folder=diagoDir, neigs=nExcitons)
             energies[q] = np.asarray(excitonDB.eigenvalues.real[:nExcitons])
             context.advance()
         count = min(len(values) for values in energies.values())
@@ -68,8 +72,12 @@ def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints):
             shown = 'it' if len(distinct) == 1 else 'them'
         else:
             shown = f'those on the path ({qPointNames(distinct)})'
-        note = (f'Only {qPointNames(qPoints)} computed ({len(qPoints)} of the {nIbz} Q-points of the grid): the '
-                f'dispersion shows {shown}, not interpolated (that needs every Q-point).')
+        if list(qPoints) == list(range(nIbz)):
+            note = ('Every Q-point was computed, but some BSE databases have other names than ndb.BS_diago_Q<n>: the '
+                    'dispersion is not interpolated (yambopy reads the standard names only).')
+        else:
+            note = (f'Only {qPointNames(qPoints)} computed ({len(qPoints)} of the {nIbz} Q-points of the grid): the '
+                    f'dispersion shows {shown}, not interpolated (that needs every Q-point).')
         if len(distinct) < len(qPoints):
             note += ' The spectra of the others can be added from the Absorption section.'
 
@@ -107,10 +115,11 @@ def automaticAbsorptionRange(excitonEnergies, margin=ABSORPTION_AUTO_MARGIN):
 
 
 def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyMin, energyMax, minIntensity,
-                      autoRange=False):
-    filename = "ndb.BS_diago_Q%d" % (qPointIndex + 1)
+                      autoRange=False, bseFiles=None):
+    filename = (bseFiles or {}).get(qPointIndex, "ndb.BS_diago_Q%d" % (qPointIndex + 1))
     if not (Path(diagoDir) / filename).is_file():
-        raise ValueError(f'Q-point {qPointIndex + 1} was not computed: there is no {filename} in the BSE directory.')
+        raise ValueError(f'Q-point {qPointIndex + 1} was not computed: there is no BSE database for it ({filename}) '
+                         'in the BSE directory.')
     excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir)
     if autoRange:
         energyMin, energyMax = automaticAbsorptionRange(excitonDB.eigenvalues.real)
@@ -138,13 +147,15 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
             'darkExcEnergy': darkExcitons[:, 0], 'data': pointsData, 'range': (energyMin, energyMax)}
 
 
-def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, excitonIndices):
+def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, excitonIndices, bseFiles=None,
+                         qpFile='ndb.QP'):
     context.stage('Loading the databases')
-    if not (Path(diagoDir) / 'ndb.BS_diago_Q1').is_file():
+    gammaFile = (bseFiles or {}).get(0, 'ndb.BS_diago_Q1')
+    if not (Path(diagoDir) / gammaFile).is_file():
         raise ValueError('The band structure needs the excitons at Γ, ndb.BS_diago_Q1, which were not computed.')
-    excitonDB = YamboExcitonDB.from_db_file(lattice, filename='ndb.BS_diago_Q1', folder=diagoDir)
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=gammaFile, folder=diagoDir)
     if gw:
-        energies = YamboQPDB.from_db(folder=qpDir)
+        energies = YamboQPDB.from_db(filename=qpFile or 'ndb.QP', folder=qpDir)
     else:
         energies = YamboElectronsDB.from_db_file(folder=saveDir)
 
@@ -156,7 +167,7 @@ def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, ex
 
 
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
-                        cutoff_ry, supercell, cache=None, block_size=256):
+                        cutoff_ry, supercell, cache=None, block_size=256, bseFile=None):
     """
     Real-space probability density of exciton `exc_index` (1-based) at Q-point
     `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>), with the effective
@@ -170,7 +181,7 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
         lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
 
     context.stage('Loading the exciton')
-    filename = 'ndb.BS_diago_Q%d' % (q_index + 1)
+    filename = bseFile or 'ndb.BS_diago_Q%d' % (q_index + 1)
     # Load the states up to the requested one, plus a margin for the states
     # degenerate with it
     excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir, neigs=exc_index + 20)
@@ -426,10 +437,10 @@ class Calculations(QObject):
             return self._reject(message, 'No BSE directory: choose one on the System page first.')
 
         if not options.qPoints:
-            return self._reject(message, 'The BSE directory has no ndb.BS_diago_Q* files.')
+            return self._reject(message, 'The BSE directory has no BSE databases (ndb.BS_diago_Q*).')
 
         arguments = dict(saveDir=options.saveDir, diagoDir=options.diagoDir, nExcitons=options.nExcitons,
-                         qBZ=options.qBZ, qPoints=list(options.qPoints))
+                         qBZ=options.qBZ, qPoints=list(options.qPoints), bseFiles=dict(options.bseFiles))
         self.tasks.submit(message, lambda context: computeDispersion(context, **arguments),
                           self._applyDispersion, key='dispersion')
 
@@ -470,7 +481,8 @@ class Calculations(QObject):
         """Snapshot of the inputs of the absorption spectra."""
         o = self.options
         return dict(lattice=self.lattice, diagoDir=o.diagoDir, energyStep=o.energyStep, energyMin=o.energyMin,
-                    energyMax=o.energyMax, minIntensity=o.excMinIntensity, autoRange=o.absorptionAutoRange)
+                    energyMax=o.energyMax, minIntensity=o.excMinIntensity, autoRange=o.absorptionAutoRange,
+                    bseFiles=dict(o.bseFiles))
 
     def computeAbsorptionSpectrum(self, index, qPointIndex, parameters):
         return computeAbsorption(qPointIndex=qPointIndex, index=index, **parameters)
@@ -601,7 +613,8 @@ class Calculations(QObject):
 
         o = self.options
         arguments = dict(lattice=self.lattice, diagoDir=o.diagoDir, gw=o.gw, qpDir=o.qpDir, saveDir=o.saveDir,
-                         qBZ=o.qBZ, excitonIndices=tuple(point.data().j for point in points))
+                         qBZ=o.qBZ, excitonIndices=tuple(point.data().j for point in points),
+                         bseFiles=dict(o.bseFiles), qpFile=o.qpFile)
         self.tasks.submit('Interpolating the excitonic band structure…',
                           lambda context: computeBandStructure(context, **arguments),
                           self._applyBandStructure, key='band-structure')
@@ -645,6 +658,7 @@ class Calculations(QObject):
         if missing:
             return self._reject('Computing the exciton wave function…', missing)
         arguments = dict(lattice=self.lattice, saveDir=self.options.saveDir, diagoDir=self.options.diagoDir,
+                         bseFile=self.options.bseFile(q_index),
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
                          cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
@@ -790,7 +804,7 @@ class Calculations(QObject):
                 self.planeWaves = PlaneWaves(self.options.saveDir, self.lattice)
             key = (self.options.diagoDir, q_index, exc_index)
             if key not in self.excitonSizes:
-                filename = 'ndb.BS_diago_Q%d' % (q_index + 1)
+                filename = self.options.bseFile(q_index)
                 excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.options.diagoDir,
                                                         neigs=exc_index + 20)
                 if exc_index > len(excitonDB.eigenvalues):

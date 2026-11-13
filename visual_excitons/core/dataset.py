@@ -2,27 +2,30 @@
 Datasets: the directories of the databases of one calculation.
 
 A dataset is a SAVE directory (ns.db1), a BSE directory (ndb.BS_diago_Q*)
-and, for GW calculations, a QP directory (ndb.QP). They can be found inside a
-common folder, as in data/<system>/{save, diagos, qp}.
+and, for GW calculations, a QP directory (ndb.QP, or QP databases of other
+names: they are recognised by their content, see databases.py). They can be
+found inside a common folder, as in data/<system>/{save, diagos, qp}.
 """
 
 import os
 from pathlib import Path
+
+from .databases import hasDatabase, qpDatabases, LATTICE, QP, BSE
 
 
 # How deep to look below the chosen folder
 SEARCH_DEPTH = 3
 
 
-def _directoriesWith(root: Path, pattern: str, depth: int):
-    """Directories at most `depth` levels below `root` (included) holding files matching `pattern`, shallowest first."""
+def _directoriesWith(root: Path, kind: str, depth: int):
+    """Directories at most `depth` levels below `root` (included) holding databases of `kind`, shallowest first."""
     found = []
     level = [root]
     for _ in range(depth + 1):
         nextLevel = []
         for directory in level:
             try:
-                if any(directory.glob(pattern)):
+                if hasDatabase(directory, kind):
                     found.append(directory)
                 nextLevel += sorted(child for child in directory.iterdir() if child.is_dir() and not child.name.startswith('.'))
             except OSError:
@@ -40,7 +43,7 @@ def findDataset(folder):
     root = Path(folder).expanduser().resolve()
     dataset = {'save': None, 'diago': None, 'qp': None}
 
-    saves = _directoriesWith(root, 'ns.db1', SEARCH_DEPTH)
+    saves = _directoriesWith(root, LATTICE, SEARCH_DEPTH)
     if saves:
         save = saves[0]
         dataset['save'] = str(save)
@@ -48,11 +51,14 @@ def findDataset(folder):
         # directory: look only there, so as not to mix different systems
         root = save if save == root else save.parent
 
-    for key, pattern in (('diago', 'ndb.BS_diago_Q*'), ('qp', 'ndb.QP')):
-        directories = _directoriesWith(root, pattern, SEARCH_DEPTH)
+    for key, kind in (('diago', BSE), ('qp', QP)):
+        directories = _directoriesWith(root, kind, SEARCH_DEPTH)
         if directories:
             dataset[key] = str(directories[0])
     dataset['gw'] = dataset['qp'] is not None
+    if dataset['qp']:
+        # The QP database used there, by default (several may be found)
+        dataset['qpFile'] = qpDatabases(dataset['qp'])[0]['name']
     return dataset
 
 

@@ -13,16 +13,22 @@ from visual_excitons.core.style import AbsorptionStyle
 # Datasets
 
 def makeDataset(root, name, gw=True):
-    for directory, filename in [('save', 'ns.db1'), ('diagos', 'ndb.BS_diago_Q1'), ('qp', 'ndb.QP')][:3 if gw else 2]:
+    """A dataset's folders (an empty ns.db1 and BSE file are found by name; a QP database by its content)."""
+    from conftest import writeQPDatabase
+    for directory, filename in [('save', 'ns.db1'), ('diagos', 'ndb.BS_diago_Q1')]:
         (root / name / directory).mkdir(parents=True)
         (root / name / directory / filename).touch()
+    if gw:
+        (root / name / 'qp').mkdir(parents=True)
+        writeQPDatabase(root / name / 'qp' / 'ndb.QP')
     return root / name
 
 
 def test_find_dataset(tmp_path):
     folder = makeDataset(tmp_path, 'BiI3')
     dataset = findDataset(folder)
-    assert dataset == {'save': str(folder / 'save'), 'diago': str(folder / 'diagos'), 'qp': str(folder / 'qp'), 'gw': True}
+    assert dataset == {'save': str(folder / 'save'), 'diago': str(folder / 'diagos'), 'qp': str(folder / 'qp'), 'gw': True,
+                       'qpFile': 'ndb.QP'}
     assert datasetName(dataset) == 'BiI3' and datasetExists(dataset)
 
 

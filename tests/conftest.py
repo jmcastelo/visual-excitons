@@ -137,6 +137,36 @@ def noUnexpectedDialogs(monkeypatch):
         monkeypatch.setattr(QMessageBox, name, staticmethod(unexpected(name)))
 
 
+def writeQPDatabase(path, bands=(140, 157), kpoints=4):
+    """A minimal QP database (the variables that identify one), for tests."""
+    from netCDF4 import Dataset
+    import numpy as np
+    nb = bands[1] - bands[0] + 1
+    with Dataset(path, 'w') as database:
+        database.createDimension('n', nb * kpoints)
+        database.createDimension('three', 3)
+        database.createDimension('two', 2)
+        database.createDimension('k', kpoints)
+        table = np.array([[b, b, k] for k in range(1, kpoints + 1) for b in range(bands[0], bands[1] + 1)], dtype=float).T
+        database.createVariable('QP_table', 'f8', ('three', 'n'))[:] = table
+        database.createVariable('QP_E', 'f8', ('n', 'two'))[:] = 0.0
+        database.createVariable('QP_Eo', 'f8', ('n',))[:] = 0.0
+        database.createVariable('QP_kpts', 'f8', ('three', 'k'))[:] = 0.0
+    return path
+
+
+def writeBSEDatabase(path, excitons=3):
+    """A minimal BSE database (the variables that identify one), for tests."""
+    from netCDF4 import Dataset
+    with Dataset(path, 'w') as database:
+        database.createDimension('e', excitons)
+        database.createDimension('two', 2)
+        database.createDimension('five', 5)
+        database.createVariable('BS_Energies', 'f8', ('e', 'two'))[:] = 0.1
+        database.createVariable('BS_TABLE', 'f8', ('five', 'e'))[:] = 1.0
+    return path
+
+
 @pytest.fixture
 def lattice():
     """YamboLatticeDB loader for a dataset in data/ (skips when missing)."""

@@ -1,10 +1,11 @@
-from PySide6.QtCore import Slot, Qt, Signal
+from PySide6.QtCore import Slot, Qt, Signal, QTimer
 from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout
 from PySide6.QtWidgets import QComboBox, QGroupBox, QFormLayout, QGridLayout, QSizePolicy, QMessageBox, QSpinBox, QDoubleSpinBox
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QMenu, QHeaderView
 from pathlib import Path
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
+from visual_excitons.core.consistency import checkDataset, summary, Busy, OK, INFO, WARNING, ERROR
 from .inspector import NoteLabel
 
 # Default density of points along the Q-path, per Bohr⁻¹ (see densitySpin)
@@ -62,11 +63,43 @@ class OptionsWidget(QWidget):
         _, self.diagoDirEdit, _, self.diagoLabel = directoryRow(
             1, 'BSE:', 'Directory with the ndb.BS_diago_Q* databases, one per Q-point', self.selectDiagoDir, self.editDiagoDir)
         self.qpDirLabel, self.qpDirEdit, self.selectQPDirButton, self.qpLabel = directoryRow(
-            2, 'GW:', 'Directory with the ndb.QP database of the GW calculation', self.selectQPDir, self.editQPDir)
+            2, 'GW:', 'Directory with the QP databases of the GW calculation (ndb.QP, or others recognised by their '
+                      'content, e.g. ndb.QP_140_146)', self.selectQPDir, self.editQPDir)
+
+        # The QP database used, when the directory has several (e.g. merged and partial ones)
+        self.qpFileLabel = QLabel('QP database:')
+        self.qpFileComboBox = QComboBox()
+        self.qpFileComboBox.setToolTip('The QP database used: ndb.QP by default, otherwise the widest band range')
+        self.qpFileComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.qpFileComboBox.activated.connect(lambda index: self.options.setQPFile(self.qpFileComboBox.itemData(index)))
+        dirLayout.addWidget(self.qpFileLabel, 7, 0)
+        dirLayout.addWidget(self.qpFileComboBox, 7, 1)
+        self.options.qpDatabasesChanged.connect(self.setQPDatabases)
+        self.setQPDatabases([], '')
+
+        # Whether the databases belong together (see core/consistency.py)
+        self.checksLabel = QLabel()
+        self.checksLabel.setTextFormat(Qt.TextFormat.RichText)
+        self.checksLabel.setWordWrap(True)
+        self.checksDetailsButton = QPushButton('Details…')
+        self.checksDetailsButton.setToolTip('The checks of the databases, one by one')
+        self.checksDetailsButton.clicked.connect(self.showChecks)
+        self.checksDetailsButton.setEnabled(False)
+        dirLayout.addWidget(QLabel('Checks:'), 9, 0)
+        dirLayout.addWidget(self.checksLabel, 9, 1)
+        dirLayout.addWidget(self.checksDetailsButton, 9, 2)
+        self.findings = []
+        self.checkTimer = QTimer(self)
+        self.checkTimer.setSingleShot(True)
+        self.checkTimer.setInterval(300)
+        self.checkTimer.timeout.connect(self.runChecks)
+        for signal in (self.options.databaseFound, self.options.diagoDirChanged, self.options.qpDirChanged,
+                       self.options.gwChanged):
+            signal.connect(lambda *args: self.checkTimer.start())
 
         self.setStatus(self.saveLabel, 'ns.db1 not found!')
-        self.setStatus(self.diagoLabel, 'ndb.BS_diago_Q* not found!')
-        self.setStatus(self.qpLabel, 'ndb.QP not found!')
+        self.setStatus(self.diagoLabel, 'No BSE databases (ndb.BS_diago_Q*) found!')
+        self.setStatus(self.qpLabel, 'No QP database (ndb.QP) found!')
 
         self.options.saveDirChanged.connect(self.setSaveLabel)
         self.options.diagoDirChanged.connect(self.setDiagoLabel)
@@ -192,9 +225,56 @@ class OptionsWidget(QWidget):
     @staticmethod
     def setStatus(label, text):
         """Status of a directory, with a green tick or a red cross."""
-        ok = 'not found' not in text
+        ok = 'not found' not in text and not text.startswith('No ')
         symbol, color = ('✓', '#2e9e4f') if ok else ('✗', '#d9453b')
         label.setText(f'<span style="color:{color}; font-weight:bold">{symbol}</span>&nbsp;{text}')
+
+    @Slot(list, str)
+    def setQPDatabases(self, databases, current):
+        """The QP databases to choose from (shown with GW, when there is one at least)."""
+        self.qpFileComboBox.clear()
+        for info in databases:
+            self.qpFileComboBox.addItem(f'{info["name"]}: bands {info["bands"][0]}–{info["bands"][1]}, '
+                                        f'{info["kpoints"]} k-points', info['name'])
+        if current:
+            self.qpFileComboBox.setCurrentIndex(max(0, self.qpFileComboBox.findData(current)))
+        shown = self.options.gw and bool(databases)
+        self.qpFileLabel.setVisible(shown)
+        self.qpFileComboBox.setVisible(shown)
+        self.qpFileComboBox.setEnabled(len(databases) > 1)
+
+    @Slot()
+    def runChecks(self):
+        """Check that the databases belong together, and show the result."""
+        o = self.options
+        if not o.saveDir:
+            self.findings = []
+            self.checksLabel.setText('')
+            self.checksDetailsButton.setEnabled(False)
+            return
+        qpPath = f'{o.qpDir}/{o.qpFile}' if o.gw and o.qpDir and o.qpFile else None
+        try:
+            self.findings = checkDataset(o.saveDir, qpPath, o.diagoDir or None, o.bseFiles, o.bseProblems)
+        except Busy:
+            self.checkTimer.start(1000)     # a calculation is reading them: later
+            return
+        level = summary(self.findings)
+        problems = [f for f in self.findings if f['level'] in (ERROR, WARNING)]
+        if level == OK:
+            text = '<span style="color:#2e9e4f; font-weight:bold">✓</span>&nbsp;The databases belong together.'
+        else:
+            symbol, color = ('✗', '#d9453b') if level == ERROR else ('⚠', '#d9822b')
+            first = problems[0]['text']
+            more = f' (and {len(problems) - 1} more)' if len(problems) > 1 else ''
+            text = f'<span style="color:{color}; font-weight:bold">{symbol}</span>&nbsp;{first}{more}'
+        self.checksLabel.setText(text)
+        self.checksDetailsButton.setEnabled(True)
+
+    @Slot()
+    def showChecks(self):
+        symbols = {OK: '✓', INFO: 'ℹ', WARNING: '⚠', ERROR: '✗'}
+        lines = [f'{symbols[f["level"]]} {f["area"]}: {f["text"]}' for f in self.findings]
+        QMessageBox.information(self, 'Dataset check', '\n\n'.join(lines) or 'Nothing to check.')
 
     @Slot(int)
     def setGW(self, index):
@@ -203,6 +283,7 @@ class OptionsWidget(QWidget):
         self.qpDirLabel.setVisible(gw)
         self.qpDirEdit.setVisible(gw)
         self.selectQPDirButton.setVisible(gw)
+        self.setQPDatabases(self.options.qpDatabases, self.options.qpFile)
         self.qpLabel.setVisible(gw)
 
     @Slot()

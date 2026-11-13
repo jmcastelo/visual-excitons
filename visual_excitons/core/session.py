@@ -125,7 +125,8 @@ def datasetFingerprint(dataset):
     if dataset.get('save'):
         fingerprint['save'] = describe([os.path.join(dataset['save'], 'ns.db1')])
     if dataset.get('diago'):
-        fingerprint['diago'] = describe(Path(dataset['diago']).glob('ndb.BS_diago_Q*'))
+        from .databases import bseFiles
+        fingerprint['diago'] = describe([Path(dataset['diago']) / name for name in bseFiles(dataset['diago'])[0].values()])
     if dataset.get('qp'):
-        fingerprint['qp'] = describe([os.path.join(dataset['qp'], 'ndb.QP')])
+        fingerprint['qp'] = describe([os.path.join(dataset['qp'], dataset.get('qpFile') or 'ndb.QP')])
     return fingerprint

@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self.calculations.densityExported.connect(
             lambda filename: self.statusBar().showMessage(f'Probability density saved to {filename}', 6000))
         self.options.databaseFound.connect(self.onDatasetForExports)
+        self.options.qpDatabasesChanged.connect(self.onQPDatabaseChosen)
 
         self.theme.themeChanged.connect(self.spectra.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
@@ -521,7 +522,7 @@ class MainWindow(QMainWindow):
         if dataset.get('diago'):
             self.options.setDiagoDir(dataset['diago'])
         if dataset.get('qp'):
-            self.options.setQPDir(dataset['qp'])
+            self.options.setQPDir(dataset['qp'], dataset.get('qpFile'))
 
         # The Q-path last set on this dataset, if any
         qPath = dataset.get('qPath')
@@ -550,6 +551,12 @@ class MainWindow(QMainWindow):
             return json.loads(self.settings.value(key, json.dumps(default)))
         except (TypeError, ValueError):
             return default
+
+    @Slot(list, str)
+    def onQPDatabaseChosen(self, databases, name):
+        """Remember the QP database used with the dataset (e.g. ndb.QP_140_146 rather than ndb.QP)."""
+        if self.dataset is not None:
+            self.dataset['qp'], self.dataset['qpFile'] = self.options.qpDir, name
 
     @Slot(dict)
     def saveQPath(self, state: dict):

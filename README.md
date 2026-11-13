@@ -188,7 +188,16 @@ A dataset is the set of directories with the databases of one calculation:
   - `Q-point` in the Absorption section adds the spectrum of any computed Q-point, on the path or not.
   - The Q-point of the wave function only takes computed ones.
   - The band structure needs Q1 (Γ).
-- **GW** directory: contains `ndb.QP`, for DFT+GW+BSE calculations.
+- **GW** directory: contains the QP database, for DFT+GW+BSE calculations. QP databases are recognised by their content, whatever their names: e.g. `ndb.QP_140_146`, left by a calculation split by bands, or a renamed copy. When there are several, `ndb.QP` is used, otherwise the one with the widest band range, and `QP database` lets you choose another (with its bands and k-points); the choice is kept with the dataset and in sessions.
+
+BSE databases with other names than `ndb.BS_diago_Q<n>` are recognised by their content too, as long as their name gives their Q-point as YamboPy reads it (the number after the first `Q`, e.g. `BSE_Q5`); those that do not, and two databases for the same Q-point, are reported.
+
+**Checks.** The databases of a dataset share no identifier, but they can be checked against each other; the result is shown below the directories (`Details…` lists every check):
+
+- The QP database was computed on the SAVE directory: same lattice constants, same k-points, and its DFT energies are those of the SAVE directory (up to the constant shift Yambo applies). Otherwise: an error.
+- The BSE databases use bands of the SAVE directory, and those of newer Yambo versions, which store their Q-point, are of the Q-point their name gives. A sample of them is read, the first and last included.
+- The bands of the BSE are within those the QP database corrects; a warning otherwise, since Yambo then applied no correction, or an extrapolated one, to the others.
+- The BSE databases agree with each other; different Yambo revisions are mentioned.
 
 These files must be coherent, i.e. correspond to calculations of the same system.
 

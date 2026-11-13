@@ -1,11 +1,10 @@
 from PySide6.QtCore import QObject, Signal, Slot
 from pathlib import PurePath, Path
 from yambopy import IBRAV_REQUIRED_PARAMETERS, get_lattice_data, lattice_data_for_cell, YamboLatticeDB, BrillouinZone
-from glob import glob
-import re
 import numpy as np
 
 from .tasks import databaseAccess
+from .databases import bseFiles, qpDatabases
 
 
 
@@ -33,19 +32,14 @@ VARIANT_IBRAV = {'CUB': [1], 'FCC': [2], 'BCC': [3, -3], 'HEX': [4], 'RHL': [5, 
                  'ORC': [8], 'ORCC': [9, -9], 'ORCF': [10], 'ORCI': [11]}
 
 
-# A BSE file of Yambo: its number is the index (from 1) of its Q-point in the
-# irreducible list of the grid. A calculation may have only some of them
-BSE_FILE = re.compile(r'ndb\.BS_diago_Q(\d+)')
-
-
 def computedQPoints(folder):
-    """Indices (from 0) of the Q-points with a BSE file in `folder`, sorted."""
-    indices = set()
-    for path in glob(str(Path(folder) / 'ndb.BS_diago_Q*')):
-        match = BSE_FILE.fullmatch(Path(path).name)
-        if match and int(match.group(1)) > 0:
-            indices.add(int(match.group(1)) - 1)
-    return sorted(indices)
+    """
+    Indices (from 0) of the Q-points with a BSE file in `folder`, sorted. The
+    number of a BSE file (ndb.BS_diago_Q<n>) is the index (from 1) of its
+    Q-point in the irreducible list of the grid; a calculation may have only
+    some. Files are recognised by their content too (see databases.py).
+    """
+    return list(bseFiles(folder)[0])
 
 
 def qPointNames(indices, limit=12):
@@ -88,6 +82,8 @@ class Options(QObject):
     saveDirChanged = Signal(str, str)
     diagoDirChanged = Signal(str, str)
     qpDirChanged = Signal(str, str)
+    # The QP databases found in the QP directory (see databases.qpDatabases), and the one used
+    qpDatabasesChanged = Signal(list, str)
 
     # Database signals: a new SAVE directory is about to be read; it was read
     datasetAboutToChange = Signal()
@@ -107,6 +103,10 @@ class Options(QObject):
         self.saveDir = ''
         self.diagoDir = ''
         self.qpDir = ''
+        self.qpFile = ''            # the QP database used, in qpDir (e.g. ndb.QP, ndb.QP_140_146)
+        self.qpDatabases = []       # those found in qpDir (dicts of databases.identify)
+        self.bseFiles = {}          # Q-point index (from 0) -> BSE file name in diagoDir
+        self.bseProblems = []       # BSE files not used, and why
         self.parentDir = ''
         self.jobString = ''
         self.nQpoints = 0
@@ -217,21 +217,26 @@ class Options(QObject):
             self.databaseFound.emit(False)
 
     def setDiagoDir(self, dir):
-        self.qPoints = computedQPoints(dir)
+        files, problems = bseFiles(dir)
+        self.qPoints = list(files)
         self.nQpoints = len(self.qPoints)
+        if self.nQpoints > 0:
+            self.bseFiles, self.bseProblems = files, problems
 
         if self.nQpoints > 0 :
             self.diagoDir = dir
             self.parentDir = Path(dir).parent.absolute()
             self.jobString = PurePath(self.diagoDir).name
-            status = f'ndb.BS_diago_Q* found - ({self.qPointCount()})'
+            status = f'BSE databases found - ({self.qPointCount()})'
             if self.qPoints != list(range(self.nQpoints)):
                 status += f': {qPointNames(self.qPoints)}'
+            if problems:
+                status += f'; {len(problems)} file{"s" if len(problems) > 1 else ""} not used (see Check dataset)'
             self.diagoDirChanged.emit(dir, status)
             self.numQPointsChanged.emit(self.nQpoints)
             self.qPointsChanged.emit(list(self.qPoints))
         else:
-            self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* not found!")
+            self.diagoDirChanged.emit(dir, "No BSE databases (ndb.BS_diago_Q*) found!")
 
     def qPointCount(self):
         """E.g. '90 Q-points', or '4 of 90 Q-points' when only some were computed."""
@@ -247,16 +252,41 @@ class Options(QObject):
         """None if Q-point `qIndex` (from 0) was computed, otherwise a message saying it was not."""
         if not self.diagoDir or qIndex in self.qPoints:
             return None
-        return (f'Q-point {qIndex + 1} was not computed: there is no ndb.BS_diago_Q{qIndex + 1} in the BSE directory '
-                f'(computed: {qPointNames(self.qPoints) or "none"}).')
+        return (f'Q-point {qIndex + 1} was not computed: there is no BSE database for it (ndb.BS_diago_Q{qIndex + 1}) '
+                f'in the BSE directory (computed: {qPointNames(self.qPoints) or "none"}).')
 
-    def setQPDir(self, dir):
-        file = Path(dir + '/ndb.QP')
-        if file.is_file():
+    def setQPDir(self, dir, qpFile=None):
+        """The QP directory, and the QP database used there: `qpFile` if given and found, otherwise the default."""
+        databases = qpDatabases(dir)
+        if databases:
             self.qpDir = dir
-            self.qpDirChanged.emit(dir, "ndb.QP found")
+            self.qpDatabases = databases
+            names = [info['name'] for info in databases]
+            self.qpFile = qpFile if qpFile in names else names[0]
+            self.qpDirChanged.emit(dir, self.qpStatus())
+            self.qpDatabasesChanged.emit(databases, self.qpFile)
         else:
-            self.qpDirChanged.emit(dir, "ndb.QP not found!")
+            self.qpDirChanged.emit(dir, "No QP database (ndb.QP) found!")
+
+    def setQPFile(self, name):
+        """Use another of the QP databases found."""
+        if name in [info['name'] for info in self.qpDatabases] and name != self.qpFile:
+            self.qpFile = name
+            self.qpDirChanged.emit(self.qpDir, self.qpStatus())
+            self.qpDatabasesChanged.emit(self.qpDatabases, self.qpFile)
+
+    def qpStatus(self):
+        info = next(info for info in self.qpDatabases if info['name'] == self.qpFile)
+        count = len(self.qpDatabases)
+        found = 'QP database found' if count == 1 else f'{count} QP databases found'
+        return f'{found}: using {self.qpFile} (bands {info["bands"][0]}–{info["bands"][1]})'
+
+    def bseFile(self, qIndex):
+        """The BSE file of Q-point `qIndex` (from 0)."""
+        return self.bseFiles.get(qIndex, f'ndb.BS_diago_Q{qIndex + 1}')
+
+    def hasStandardBseNames(self):
+        return all(name == f'ndb.BS_diago_Q{q + 1}' for q, name in self.bseFiles.items())
 
     def setLatticeParameters(self):
         with databaseAccess():
