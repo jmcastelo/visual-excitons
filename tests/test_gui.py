@@ -792,3 +792,35 @@ def test_path_density_default_and_unit(window):
     from yambopy import BrillouinZone
     cell = 10.26 / 2 * np.array([[-1, 0, 1], [0, 1, 1], [-1, 1, 0]])      # silicon
     assert len(BrillouinZone(cell=cell, density=spin.value()).kpoints_distances()) > 100
+
+
+@pytest.mark.data
+def test_view_centered_on_what_is_shown(window):
+    """When the supercell changes: the middle of the box of the visible elements."""
+    window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    view = window.wavefunction.excitonWfWidget
+    window.wavefunction.parameters3DWidget.setSupercell([3, 1, 1])
+    low, high = view.sceneBounds()
+    np.testing.assert_allclose(np.array(view.opts['center']), (low + high) / 2, atol=1e-6)
+    # Atoms beyond the cell boundaries count: the box is not only the cells'
+    cells = np.array([[p.x(), p.y(), p.z()] for item in view.latticeBoundaryItems
+                      for p in (item.transform().map(__import__('PySide6.QtGui', fromlist=['QVector3D']).QVector3D(*map(float, q)))
+                                for q in item.pos)])
+    assert (low <= cells.min(axis=0) + 1e-9).all() and (high >= cells.max(axis=0) - 1e-9).all()
+    # Moving the view away and changing the supercell again centers it
+    view.setCameraParams(center=__import__('pyqtgraph').Vector(100.0, 0.0, 0.0))
+    window.wavefunction.parameters3DWidget.setSupercell([1, 1, 1])
+    low, high = view.sceneBounds()
+    np.testing.assert_allclose(np.array(view.opts['center']), (low + high) / 2, atol=1e-6)
+
+
+def test_restored_wave_function_keeps_its_view(window):
+    """A wave function restored (e.g. from a session) has its own view: not centered again."""
+    calc = window.calculations
+    fakeWaveFunction(calc, sigma=2.0)
+    calc.restoringResults = True
+    calc.wfComputed.emit()
+    assert not window.wavefunction.centerOnDisplay
+    calc.restoringResults = False
+    calc.wfComputed.emit()
+    assert window.wavefunction.centerOnDisplay

@@ -64,6 +64,8 @@ class ChoiceSpinBox(QSpinBox):
 class Parameters3DWidget(Inspector):
     plotTypeChanged = Signal(int)
     signalReplotLattice = Signal()
+    # The supercell changed (not only redrawn): the view is centered again
+    supercellResized = Signal()
     # Memory of computing the exciton selected in the spectra (text, warning)
     selectedEstimateChanged = Signal(str, bool)
     fixedParticlePosChanged = Signal()
@@ -178,6 +180,7 @@ class Parameters3DWidget(Inspector):
             spinBox.setToolTip('Odd sizes only: the fixed particle is placed in the central cell')
             spinBox.valueChanged.connect(self.supercellChanged)
             supercellLayout.addWidget(spinBox)
+        supercellLayout.addStretch(1)
 
         self.wfCutoffSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10000.0, singleStep=1.0, decimals=1, suffix=' Ry')
         self.wfCutoffSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -972,6 +975,7 @@ class Parameters3DWidget(Inspector):
 
         self.options.setSupercell([self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()])
         self.signalReplotLattice.emit()
+        self.supercellResized.emit()
         # The fixed particle sits in the central cell, which moves with the supercell
         self.fixedParticlePosChanged.emit()
 

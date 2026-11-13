@@ -343,7 +343,7 @@ Note that lattice directions are defined with respect to the cell stored in `ns.
 
 Other view controls in the same section:
 
-- `Center` centers the camera on the plotted cells.
+- `Center` centers the camera on what is shown: the middle of the box holding the visible atoms, bonds, cell boundaries and wave function. The view is also centered by itself when the supercell changes, when a dataset is opened, and when a newly computed wave function is first shown (not one restored from a session, which keeps its view); the zoom and direction are kept.
 - `Orthographic projection` switches between orthographic projection (the default, where parallel lines stay parallel, convenient to inspect crystal structures) and perspective projection.
 
 #### Atoms and bonds

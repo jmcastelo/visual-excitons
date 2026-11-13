@@ -7,6 +7,8 @@ from OpenGL import GL
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
+import itertools
+
 import numpy as np
 
 from PySide6.QtWidgets import QLabel
@@ -492,18 +494,51 @@ class ExcitonWfWidget(gl.GLViewWidget):
             self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
 
     @Slot()
-    def centerView(self):
-        coords = []
+    def sceneBounds(self):
+        """
+        The box (lowest and highest corner) of what is visible: atoms, cell
+        boundaries, bonds, the isosurfaces and the volume; None if nothing is.
+        """
+        boxes = []
+
+        def add(item, low, high):
+            transform = item.transform()
+            for corner in itertools.product(*zip(low, high)):
+                mapped = transform.map(QVector3D(*map(float, corner)))
+                boxes.append((mapped.x(), mapped.y(), mapped.z()))
+
+        meshes = self.latticeItems + [self.bondsItem, self.wfMeshItem, self.wfMeshItemSet]
+        for item in meshes:
+            if item is None or not item.visible():
+                continue
+            vertices = item.opts['meshdata'].vertexes() if item.opts.get('meshdata') is not None else None
+            if vertices is not None and len(vertices):
+                add(item, vertices.min(axis=0), vertices.max(axis=0))
         for item in self.latticeBoundaryItems:
-            for coord in item.pos:
-                local_pos = coord
-                transform = item.transform()
-                transform_matrix = transform.matrix()
-                local_homogeneous = np.append(local_pos, 1)
-                world_coords = transform_matrix @ local_homogeneous
-                coords.append(world_coords[:3])
-        center = pg.Vector(np.mean(coords, axis=0))
-        self.setCameraParams(center=center)
+            if item.visible() and item.pos is not None and len(item.pos):
+                points = np.asarray(item.pos)
+                add(item, points.min(axis=0), points.max(axis=0))
+        if self.wfVolItem is not None and self.wfVolItem.visible():
+            shape = np.asarray(self.wfVolItem.data.shape[:3], dtype=float)
+            add(self.wfVolItem, np.zeros(3), shape)
+        if not boxes:
+            return None
+        points = np.array(boxes)
+        return points.min(axis=0), points.max(axis=0)
+
+    def centerView(self):
+        """Center the view on what is visible (the middle of its box), keeping the zoom and direction."""
+        bounds = self.sceneBounds()
+        if bounds is None:
+            # Nothing visible (e.g. all hidden): the cells, if drawn
+            coords = [item.transform().map(QVector3D(*map(float, point))) for item in self.latticeBoundaryItems
+                      for point in item.pos]
+            if not coords:
+                return
+            bounds = (np.min([[c.x(), c.y(), c.z()] for c in coords], axis=0),
+                      np.max([[c.x(), c.y(), c.z()] for c in coords], axis=0))
+        low, high = bounds
+        self.setCameraParams(center=pg.Vector(*((low + high) / 2)))
 
     def viewRotation(self, lookDir, up=None):
         """

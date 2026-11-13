@@ -9,7 +9,7 @@ of all its forms share one column width so fields line up across sections.
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QPalette, QColor
 from PySide6.QtWidgets import (QWidget, QToolButton, QVBoxLayout, QScrollArea, QFrame, QFormLayout, QLabel,
-                               QSizePolicy, QHBoxLayout, QSlider, QApplication, QPushButton)
+                               QSizePolicy, QHBoxLayout, QSlider, QApplication, QPushButton, QAbstractSpinBox)
 
 from .theme import themeManager
 from .persistence import PersistentState, GLOBAL
@@ -118,6 +118,11 @@ class Inspector(QScrollArea):
         row or a column would otherwise stretch to the full width.
         """
         grow = QSizePolicy.PolicyFlag.GrowFlag.value
+        # Spin boxes too: e.g. the three sizes of the supercell side by side
+        for spinBox in self.body.findChildren(QAbstractSpinBox):
+            policy = spinBox.sizePolicy()
+            if policy.horizontalPolicy().value & grow:
+                spinBox.setSizePolicy(QSizePolicy.Policy.Maximum, policy.verticalPolicy())
         for button in self.body.findChildren(QPushButton):
             policy = button.sizePolicy()
             if policy.horizontalPolicy().value & grow:

@@ -55,6 +55,8 @@ class OptionsWidget(QWidget):
             button.clicked.connect(browse)
             status = QLabel()
             status.setTextFormat(Qt.TextFormat.RichText)
+            # Messages can be long (e.g. the Q-points or QP databases found): wrapped
+            status.setWordWrap(True)
             dirLayout.addWidget(label, 2 * row + 1, 0)
             dirLayout.addWidget(lineEdit, 2 * row + 1, 1)
             dirLayout.addWidget(button, 2 * row + 1, 2)
@@ -73,7 +75,10 @@ class OptionsWidget(QWidget):
         self.qpFileLabel = QLabel('QP database:')
         self.qpFileComboBox = QComboBox()
         self.qpFileComboBox.setToolTip('The QP database used: ndb.QP by default, otherwise the widest band range')
-        self.qpFileComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.qpFileComboBox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # Narrower than its longest entry when the panel is: the entries are elided
+        self.qpFileComboBox.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.qpFileComboBox.setMinimumContentsLength(12)
         self.qpFileComboBox.activated.connect(lambda index: self.options.setQPFile(self.qpFileComboBox.itemData(index)))
         dirLayout.addWidget(self.qpFileLabel, 7, 0)
         dirLayout.addWidget(self.qpFileComboBox, 7, 1)
@@ -207,6 +212,8 @@ class OptionsWidget(QWidget):
         for column in range(1, 4):
             self.hspTable.horizontalHeaderItem(column).setToolTip(f'Fractional coordinate along the reciprocal vector b{column}')
         self.hspTable.setAlternatingRowColors(True)
+        # Below the Q-path, in a panel that scrolls: room for several points at least
+        self.hspTable.setMinimumHeight(8 * self.hspTable.verticalHeader().defaultSectionSize())
 
         self.hspTable.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.hspTable.customContextMenuRequested.connect(self.showContextMenu)
@@ -221,19 +228,16 @@ class OptionsWidget(QWidget):
         hspGroupBox = QGroupBox('High-symmetry points')
         hspGroupBox.setLayout(hspLayout)
 
-        # Main layout: setup on the left, points on the right
+        # Main layout: one column (it may be docked in a narrow panel), the
+        # high-symmetry points below the Q-path they are used in
 
-        leftLayout = QVBoxLayout()
-        leftLayout.addWidget(dirGroupBox)
-        leftLayout.addWidget(bravaisGroup)
-        leftLayout.addWidget(qPathGroupBox)
-        leftLayout.addStretch(1)
-
-        mainLayout = QHBoxLayout()
+        mainLayout = QVBoxLayout()
         mainLayout.setContentsMargins(16, 12, 16, 12)
-        mainLayout.setSpacing(16)
-        mainLayout.addLayout(leftLayout, 3)
-        mainLayout.addWidget(hspGroupBox, 2)
+        mainLayout.setSpacing(12)
+        mainLayout.addWidget(dirGroupBox)
+        mainLayout.addWidget(bravaisGroup)
+        mainLayout.addWidget(qPathGroupBox)
+        mainLayout.addWidget(hspGroupBox, 1)
 
         self.setLayout(mainLayout)
 

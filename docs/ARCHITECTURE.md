@@ -475,6 +475,8 @@ The **2D plot styles** are one `GLOBAL` entry (`appearance/styles`): `appearance
 
 A dataset opened for the first time gets the defaults (`MainWindow.datasetDefaults`), not the previous dataset's values.
 
+Centering: `ExcitonWfWidget.sceneBounds()` is the box of the visible items (mesh vertices, line points and the volume's grid, each through its transform), and `centerView()` puts the camera center in its middle. It runs on `Parameters3DWidget.supercellResized` (not on other redraws of the lattice, such as atom sizes), on a new dataset, and on the first display of a wave function computed (`WavefunctionPanels.centerOnDisplay`), not of one restored (`Calculations.restoringResults`).
+
 The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATASET` value of `WavefunctionPanels`: datasets are opened after the preferences are restored, and opening one centers the view, so a camera restored as a preference would be overridden.
 
 ### Sessions (`core/session.py`, `MainWindow`)

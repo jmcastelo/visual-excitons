@@ -307,6 +307,7 @@ class Calculations(QObject):
         self.excAbsData = []
         # Increased with every change of the results (for "unsaved changes")
         self.resultsVersion = 0
+        self.restoringResults = False
         self.showExcitonLabels = False
 
         self.k = []
@@ -732,6 +733,14 @@ class Calculations(QObject):
         must be open (the lattice is read from it).
         """
         self.markResultsChanged()
+        # Results with their own view: not centered again (see WavefunctionPanels)
+        self.restoringResults = True
+        try:
+            self._restoreResults(meta, arrays)
+        finally:
+            self.restoringResults = False
+
+    def _restoreResults(self, meta, arrays):
         lattice = self.lattice
         if lattice is None:
             with databaseAccess():

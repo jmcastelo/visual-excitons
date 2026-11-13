@@ -57,6 +57,12 @@ class WavefunctionPanels(QObject):
         self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
         self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
         self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
+        # Centered on what is shown when the supercell changes, and when a new
+        # wave function is first shown (not one restored, with its own view)
+        self.parameters3DWidget.supercellResized.connect(self.excitonWfWidget.centerView)
+        self.centerOnDisplay = False
+        self.calculations.wfComputed.connect(
+            lambda: setattr(self, 'centerOnDisplay', not self.calculations.restoringResults))
         self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
         self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
         self.parameters3DWidget.viewDirChanged.connect(self.excitonWfWidget.setViewDirection)
@@ -257,6 +263,9 @@ class WavefunctionPanels(QObject):
                 self.displayCache[(id(density), factor)] = displayed
             self.showGeometry(plotType, geometry, transform)
             self.excitonWfWidget.showItem(self.parameters3DWidget.plotType())
+            if self.centerOnDisplay:
+                self.centerOnDisplay = False
+                self.excitonWfWidget.centerView()
 
         # Upsampling always takes a while: only work on a grid at hand runs inline
         if cached is not None and work * factor ** 3 <= INLINE_DISPLAY_WORK:
