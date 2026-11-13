@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QDoubleValidator, QValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox
 import numpy as np
@@ -15,6 +15,51 @@ from visual_excitons.core.memory import availableMemory, formatBytes
 # Warn when a calculation would use more than this fraction of the available memory
 MEMORY_WARNING_FRACTION = 0.9
 
+
+
+class ChoiceSpinBox(QSpinBox):
+    """
+    A spin box of integers restricted to some values (e.g. the computed
+    Q-points): its arrows step between them, other values typed are not
+    accepted (corrected to the nearest), and setValue takes the nearest.
+    """
+
+    # No choices: any value in the range. A class attribute: Qt calls the
+    # overrides below while the spin box is being constructed
+    choices = None
+
+    def setChoices(self, values):
+        self.choices = sorted(set(int(value) for value in values)) or None
+        if self.choices:
+            self.setRange(self.choices[0], self.choices[-1])
+            if self.value() not in self.choices:
+                super().setValue(self.nearest(self.value()))
+
+    def nearest(self, value):
+        return min(self.choices, key=lambda choice: (abs(choice - value), choice))
+
+    def setValue(self, value):
+        super().setValue(self.nearest(int(value)) if self.choices else int(value))
+
+    def stepBy(self, steps):
+        if not self.choices:
+            return super().stepBy(steps)
+        index = self.choices.index(self.nearest(self.value()))
+        super().setValue(self.choices[max(0, min(len(self.choices) - 1, index + steps))])
+
+    def validate(self, text, position):
+        state, text, position = super().validate(text, position)
+        if self.choices and state == QValidator.State.Acceptable and self.valueFromText(text) not in self.choices:
+            state = QValidator.State.Intermediate
+        return state, text, position
+
+    def fixup(self, text):
+        if self.choices:
+            try:
+                return str(self.nearest(int(text)))
+            except ValueError:
+                return str(self.value())
+        return super().fixup(text)
 
 class Parameters3DWidget(Inspector):
     plotTypeChanged = Signal(int)
@@ -79,9 +124,15 @@ class Parameters3DWidget(Inspector):
     # Sections
 
     def buildExcitonSection(self):
-        self.qPointSpinBox = QSpinBox(minimum=1, maximum=max(1, self.options.nQpoints))
-        self.qPointSpinBox.setToolTip('Q-point of the exciton: the file ndb.BS_diago_Q<n> of the BSE directory')
-        self.options.numQPointsChanged.connect(lambda n: self.qPointSpinBox.setMaximum(max(1, n)))
+        self.qPointSpinBox = ChoiceSpinBox(minimum=1, maximum=max(1, self.options.nQpoints))
+        self.qPointSpinBox.setToolTip('Q-point of the exciton: the file ndb.BS_diago_Q<n> of the BSE directory '
+                                      '(only those computed)')
+        self.options.numQPointsChanged.connect(
+            lambda n: self.qPointSpinBox.choices is None and self.qPointSpinBox.setMaximum(max(1, n)))
+        # Only the Q-points computed, which may be some of them (e.g. Q1, Q5, Q30)
+        self.options.qPointsChanged.connect(lambda qPoints: self.qPointSpinBox.setChoices([q + 1 for q in qPoints]))
+        if self.options.qPoints:
+            self.qPointSpinBox.setChoices([q + 1 for q in self.options.qPoints])
 
         self.excitonIndexSpinBox = QSpinBox(minimum=1, maximum=99999)
         self.excitonIndexSpinBox.setToolTip('Index of the exciton at that Q-point, in increasing energy')

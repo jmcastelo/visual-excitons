@@ -98,6 +98,7 @@ class DispersionWidget(pg.PlotWidget):
 
     @Slot()
     def setSingleQPoint(self, nQPoints):
+        """A dispersion of a single Q-point (e.g. only Γ computed): a line at each exciton energy."""
         self.singleQPoint = nQPoints == 1
 
     @Slot()
@@ -108,11 +109,8 @@ class DispersionWidget(pg.PlotWidget):
 
     @Slot()
     def setXAxis(self, x, labels):
-        if not self.singleQPoint:
-            self.getAxis('bottom').setTicks([list(zip(x, tickLabels(labels)))])
-            self.getAxis('bottom').setGrid(128)
-        else:
-            self.getAxis('bottom').setTicks([[(0.0, 'Γ')]])
+        self.getAxis('bottom').setTicks([list(zip(x, tickLabels(labels)))])
+        self.getAxis('bottom').setGrid(128)
 
     @Slot()
     def setAxesColor(self, color):

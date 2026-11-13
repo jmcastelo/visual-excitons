@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal, Slot, Qt
-from PySide6.QtWidgets import QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QVBoxLayout, QSizePolicy
+from PySide6.QtWidgets import (QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QVBoxLayout, QSizePolicy, QComboBox,
+                               QHBoxLayout, QWidget)
 
 from .inspector import Inspector, formLayout, NoteLabel
 from .persistence import DATASET
@@ -36,6 +37,11 @@ class ParametersWidget(Inspector):
         form.addRow(self.calculateDispersionButton)
         form.addRow(NoteLabel('Click a point of the dispersion to show the absorption spectrum at its Q-point; '
                               'Ctrl-click to keep several spectra.'))
+        # E.g. only some Q-points computed: what the dispersion shows
+        self.dispersionNote = NoteLabel()
+        self.dispersionNote.hide()
+        form.addRow(self.dispersionNote)
+        self.calculations.dispersionNoteChanged.connect(self.setDispersionNote)
         self.addSection('Dispersion', form)
 
         # Absorption
@@ -77,7 +83,26 @@ class ParametersWidget(Inspector):
         self.showLabelsCheckBox = QCheckBox('Label bright excitons')
         self.showLabelsCheckBox.setToolTip('Show (index, intensity) next to each bright exciton')
 
+        # The spectrum at any computed Q-point, on the path or not
+        self.qPointComboBox = QComboBox()
+        self.qPointComboBox.setToolTip('The computed Q-points (the files ndb.BS_diago_Q<n>)')
+        self.qPointComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.addSpectrumButton = QPushButton('Add spectrum')
+        self.addSpectrumButton.setToolTip('Show the absorption spectrum at this Q-point, with those shown')
+        self.addSpectrumButton.clicked.connect(
+            lambda: self.qPointComboBox.count() and self.calculations.showQPointAbsorption(self.qPointComboBox.currentData()))
+        qPointRow = QHBoxLayout()
+        qPointRow.setContentsMargins(0, 0, 0, 0)
+        qPointRow.addWidget(self.qPointComboBox)
+        qPointRow.addWidget(self.addSpectrumButton)
+        qPointRow.addStretch(1)
+        qPointWidget = QWidget()
+        qPointWidget.setLayout(qPointRow)
+        self.options.qPointsChanged.connect(self.setQPoints)
+        self.addSpectrumButton.setEnabled(False)
+
         form = formLayout()
+        form.addRow('Q-point:', qPointWidget)
         form.addRow(self.autoRangeCheckBox)
         form.addRow('From:', self.energyMinSpinBox)
         form.addRow('To:', self.energyMaxSpinBox)
@@ -197,6 +222,22 @@ class ParametersWidget(Inspector):
         self.wfEstimateNote.setText(text)
         self.wfEstimateNote.setWarning(warning)
         self.wfEstimateNote.setVisible(bool(text) and self.calculations.selectedExciton is not None)
+
+    @Slot(str)
+    def setDispersionNote(self, text):
+        self.dispersionNote.setText(text)
+        self.dispersionNote.setVisible(bool(text))
+
+    @Slot(list)
+    def setQPoints(self, qPoints):
+        """The computed Q-points to choose a spectrum from (indices from 0)."""
+        current = self.qPointComboBox.currentData()
+        self.qPointComboBox.clear()
+        for q in qPoints:
+            self.qPointComboBox.addItem(f'Q{q + 1}', q)
+        if current in qPoints:
+            self.qPointComboBox.setCurrentIndex(qPoints.index(current))
+        self.addSpectrumButton.setEnabled(bool(qPoints))
 
     @Slot()
     def onExcitonSelected(self, *args):

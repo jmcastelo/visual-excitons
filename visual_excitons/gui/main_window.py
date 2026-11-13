@@ -567,7 +567,7 @@ class MainWindow(QMainWindow):
         if self.options.variant:
             parts.append(f'ibrav {self.options.ibrav} ({self.options.variant})' if self.options.ibrav != -1 else self.options.variant)
         if self.options.nQpoints:
-            parts.append(f'{self.options.nQpoints} Q-points')
+            parts.append(self.options.qPointCount())
         self.datasetLabel.setText('  ·  '.join(parts))
         # [*]: where Qt shows the unsaved changes mark
         title = [Path(self.sessionPath).stem + '[*]'] if self.sessionPath else []

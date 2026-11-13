@@ -26,7 +26,7 @@ class SpectraPanels(QObject):
 
         dispersionWidget = DispersionWidget(dispersionStyle)
 
-        options.numQPointsChanged.connect(dispersionWidget.setSingleQPoint)
+        calculations.dispersionQPointCountChanged.connect(dispersionWidget.setSingleQPoint)
 
         calculations.qPathReady.connect(dispersionWidget.setXAxis)
         calculations.excitonDispersionRange.connect(dispersionWidget.setXYRange)

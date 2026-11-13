@@ -183,7 +183,11 @@ Opening another dataset or session leaves the current session: `Save session` th
 A dataset is the set of directories with the databases of one calculation:
 
 - **SAVE** directory: contains `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters are detected from it, from the symmetry of the cell: centred lattices (FCC, BCC, body-centred tetragonal...) are recognised whatever primitive vectors the calculation used, and whatever their orientation.
-- **BSE** directory: contains the `ndb.BS_diago_Q*` files, one per Q-point.
+- **BSE** directory: contains the `ndb.BS_diago_Q*` files, one per Q-point: `ndb.BS_diago_Q<n>` is the n-th Q-point of the irreducible list of the grid. Only some may have been computed (e.g. Q1 alone, for the optical spectrum, or Q1, Q2, Q5, Q30): the System panel and the status bar then say so (`4 of 90 Q-points`), and the program uses what there is:
+  - The dispersion shows the computed Q-points that lie on the Q-path, without the interpolated curves (the interpolation needs every Q-point), with a note saying so; with Q1 alone, lines at the exciton energies at Γ.
+  - `Q-point` in the Absorption section adds the spectrum of any computed Q-point, on the path or not.
+  - The Q-point of the wave function only takes computed ones.
+  - The band structure needs Q1 (Γ).
 - **GW** directory: contains `ndb.QP`, for DFT+GW+BSE calculations.
 
 These files must be coherent, i.e. correspond to calculations of the same system.
@@ -206,7 +210,7 @@ Three panels plot the excitonic dispersion, the absorption spectra and the band 
 Spectra controls:
 
 - **Dispersion**: choose the number of excitons and press `Compute dispersion`. Then click a point of the dispersion to plot the absorption spectrum at its Q-point; `Ctrl`-click to keep several spectra together. Clicking a point also selects its exciton (see below).
-- **Absorption**: the energy range and step of the spectra (in eV), and the `Bright threshold`. With `Automatic range` (the default), each spectrum spans the energies of its own excitons, plus a margin of 0.5 eV (five times the broadening of the peaks) on both sides; the range of the spectra plotted is shown below. Untick it to set the range by hand with `From` and `To`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
+- **Absorption**: `Q-point` and `Add spectrum` show the spectrum of a computed Q-point chosen by its number, e.g. one off the Q-path, with those shown. The energy range and step of the spectra (in eV), and the `Bright threshold`. With `Automatic range` (the default), each spectrum spans the energies of its own excitons, plus a margin of 0.5 eV (five times the broadening of the peaks) on both sides; the range of the spectra plotted is shown below. Untick it to set the range by hand with `From` and `To`. Excitons with at least this intensity (relative to the brightest) are marked as bright points on the spectrum; the rest, as dark bars below it. `Label bright excitons` shows the index and intensity of each bright exciton.
 - **Selected exciton**: click an exciton on the dispersion, or a bright exciton on an absorption spectrum, to select it. It is marked with an orange ring on both plots (on the absorption spectrum, when it is bright there). Its index, Q-point and energy are shown here and in the status bar, and the exciton is selected in the Wave function controls too. `Compute its wave function` computes it with the settings of the Wave function controls (fixed particle and position, supercell, cutoff) and brings the Wave function panel to the front. The memory it needs is shown below the button, with the settings used; as for `Compute wave function`, it is shown in orange with ⚠ when it likely does not fit in the memory available, and the program asks before starting it.
 - **Export**: `Export figure…` (also `File › Export 2D figure…`, `Ctrl+Shift+F`) makes publication figures of the plots, drawn with [Matplotlib](https://matplotlib.org) (see below).
 

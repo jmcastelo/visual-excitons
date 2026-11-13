@@ -2,6 +2,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from pathlib import PurePath, Path
 from yambopy import IBRAV_REQUIRED_PARAMETERS, get_lattice_data, lattice_data_for_cell, YamboLatticeDB, BrillouinZone
 from glob import glob
+import re
 import numpy as np
 
 from .tasks import databaseAccess
@@ -30,6 +31,35 @@ def get_cell_params(cell):
 # other orientation of the same lattice, if any)
 VARIANT_IBRAV = {'CUB': [1], 'FCC': [2], 'BCC': [3, -3], 'HEX': [4], 'RHL': [5, -5], 'TET': [6], 'BCT': [7],
                  'ORC': [8], 'ORCC': [9, -9], 'ORCF': [10], 'ORCI': [11]}
+
+
+# A BSE file of Yambo: its number is the index (from 1) of its Q-point in the
+# irreducible list of the grid. A calculation may have only some of them
+BSE_FILE = re.compile(r'ndb\.BS_diago_Q(\d+)')
+
+
+def computedQPoints(folder):
+    """Indices (from 0) of the Q-points with a BSE file in `folder`, sorted."""
+    indices = set()
+    for path in glob(str(Path(folder) / 'ndb.BS_diago_Q*')):
+        match = BSE_FILE.fullmatch(Path(path).name)
+        if match and int(match.group(1)) > 0:
+            indices.add(int(match.group(1)) - 1)
+    return sorted(indices)
+
+
+def qPointNames(indices, limit=12):
+    """Q-points by their file numbers, runs shortened: [0, 1, 2, 4, 29] -> 'Q1–Q3, Q5, Q30'."""
+    runs = []
+    for index in sorted(indices):
+        if runs and index == runs[-1][1] + 1:
+            runs[-1][1] = index
+        else:
+            runs.append([index, index])
+    names = [f'Q{a + 1}' if a == b else f'Q{a + 1}, Q{b + 1}' if b == a + 1 else f'Q{a + 1}–Q{b + 1}' for a, b in runs]
+    if len(names) > limit:
+        names = names[:limit] + ['…']
+    return ', '.join(names)
 
 
 def tickLabels(labels):
@@ -64,6 +94,8 @@ class Options(QObject):
     databaseFound = Signal(bool)
 
     numQPointsChanged = Signal(int)
+    # The Q-points computed (indices from 0, as in ndb.BS_diago_Q<index + 1>)
+    qPointsChanged = Signal(list)
 
     # Calculation type: True for DFT+GW+BSE, False for DFT+BSE
     gwChanged = Signal(bool)
@@ -78,6 +110,8 @@ class Options(QObject):
         self.parentDir = ''
         self.jobString = ''
         self.nQpoints = 0
+        self.qPoints = []           # computed Q-points (see computedQPoints)
+        self.nIbzQpoints = 0        # irreducible Q-points of the grid (from the SAVE directory)
 
         # ibrav
         self.ibrav = -1
@@ -183,17 +217,38 @@ class Options(QObject):
             self.databaseFound.emit(False)
 
     def setDiagoDir(self, dir):
-        files = glob(dir + '/ndb.BS_diago_Q*')
-        self.nQpoints = len(files)
+        self.qPoints = computedQPoints(dir)
+        self.nQpoints = len(self.qPoints)
 
         if self.nQpoints > 0 :
             self.diagoDir = dir
             self.parentDir = Path(dir).parent.absolute()
             self.jobString = PurePath(self.diagoDir).name
-            self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* found - (" + str(self.nQpoints) + " Q-Points)")
+            status = f'ndb.BS_diago_Q* found - ({self.qPointCount()})'
+            if self.qPoints != list(range(self.nQpoints)):
+                status += f': {qPointNames(self.qPoints)}'
+            self.diagoDirChanged.emit(dir, status)
             self.numQPointsChanged.emit(self.nQpoints)
+            self.qPointsChanged.emit(list(self.qPoints))
         else:
             self.diagoDirChanged.emit(dir, "ndb.BS_diago_Q* not found!")
+
+    def qPointCount(self):
+        """E.g. '90 Q-points', or '4 of 90 Q-points' when only some were computed."""
+        if self.nIbzQpoints and self.nQpoints < self.nIbzQpoints:
+            return f'{self.nQpoints} of {self.nIbzQpoints} Q-points'
+        return f'{self.nQpoints} Q-point' + ('' if self.nQpoints == 1 else 's')
+
+    def hasAllQPoints(self):
+        """Whether every Q-point of the grid was computed (as the interpolated dispersion needs)."""
+        return self.nIbzQpoints > 0 and self.qPoints == list(range(self.nIbzQpoints))
+
+    def missingQPoint(self, qIndex):
+        """None if Q-point `qIndex` (from 0) was computed, otherwise a message saying it was not."""
+        if not self.diagoDir or qIndex in self.qPoints:
+            return None
+        return (f'Q-point {qIndex + 1} was not computed: there is no ndb.BS_diago_Q{qIndex + 1} in the BSE directory '
+                f'(computed: {qPointNames(self.qPoints) or "none"}).')
 
     def setQPDir(self, dir):
         file = Path(dir + '/ndb.QP')
@@ -208,6 +263,7 @@ class Options(QObject):
             lattice = YamboLatticeDB.from_db(self.saveDir + '/ns.db1', Expand=False)
         self.cell = lattice.lat
         self.latticeParameters = get_cell_params(self.cell)
+        self.nIbzQpoints = int(lattice.ibz_nkpoints)
         self.detectedIbrav, self.cellLatticeData, self.latticeFromCell = None, None, False
 
     def detectLatticeType(self):

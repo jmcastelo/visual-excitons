@@ -2,7 +2,9 @@ from PySide6.QtCore import QObject, Signal, Slot
 from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra, YamboQPDB
 from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
 import numpy as np
+from pathlib import Path
 
+from .options import qPointNames
 from .tasks import TaskRunner, databaseAccess, DATABASE_LOCK
 from .memory import PlaneWaves, estimateMemory, chooseBlockSize, availableMemory
 from .export import supercellAtoms, writeDensity
@@ -12,30 +14,64 @@ from .atomic_data import BOHR_TO_ANGSTROM
 
 
 class PointData:
-    def __init__(self, i, j):
+    """A plotted exciton: its point i of the Q-path, its index j (from 1), and its Q-point q if not on the path."""
+
+    def __init__(self, i, j, q=None):
         self.i = i
         self.j = j
+        self.q = q
 
 
 # Calculations proper. They run in the worker thread (see tasks.py): they only
 # use their arguments, never the state shared with the GUI.
 
-def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, nQpoints):
+def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, qPoints):
+    """
+    The excitonic dispersion along the Q-path. With every Q-point of the grid
+    computed, through yambopy's ExcitonDispersion, interpolated; with only some
+    (`qPoints`, indices from 0), the computed Q-points on the path, not
+    interpolated (the interpolation needs them all), and a note saying so.
+    """
     context.stage('Loading the lattice')
     lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
-
-    # One exciton database per Q-point (counted by the progress hooks)
-    context.stage('Loading the excitons of each Q-point', nQpoints)
-    excitonDispersion = ExcitonDispersion(lattice, nExcitons, diagoDir)
-
-    context.stage('Interpolating along the Q-path')
     collinearQPoints, qIndices, x = qBZ.find_collinear_grid(lattice)
-    y = excitonDispersion.exc_energies[qIndices]
+    collinearQPoints, qIndices, x = np.asarray(collinearQPoints), np.asarray(qIndices), np.asarray(x)
+    nIbz = int(lattice.ibz_nkpoints)
+    note = ''
 
-    if nQpoints > 1:
-        xInter, yInter = excitonDispersion.interpolate_dispersion(qBZ)
+    if list(qPoints) == list(range(nIbz)):
+        # One exciton database per Q-point (counted by the progress hooks)
+        context.stage('Loading the excitons of each Q-point', nIbz)
+        excitonDispersion = ExcitonDispersion(lattice, nExcitons, diagoDir)
+        y = excitonDispersion.exc_energies[qIndices]
+        context.stage('Interpolating along the Q-path')
+        xInter, yInter = excitonDispersion.interpolate_dispersion(qBZ) if nIbz > 1 else ([], [])
     else:
-        xInter, yInter = [], []
+        computed = set(qPoints)
+        onPath = np.array([q in computed for q in qIndices], dtype=bool)
+        if not onPath.any():
+            raise ValueError(f'None of the computed Q-points ({qPointNames(qPoints)}) is on the Q-path. Choose a path '
+                             'through them, or show their absorption spectra from the Spectra controls.')
+        collinearQPoints, qIndices, x = collinearQPoints[onPath], qIndices[onPath], x[onPath]
+        distinct = sorted(set(int(q) for q in qIndices))
+        context.stage('Loading the excitons of each Q-point', len(distinct))
+        energies = {}
+        for q in distinct:
+            excitonDB = YamboExcitonDB.from_db_file(lattice, filename='ndb.BS_diago_Q%d' % (q + 1), folder=diagoDir,
+                                                    neigs=nExcitons)
+            energies[q] = np.asarray(excitonDB.eigenvalues.real[:nExcitons])
+            context.advance()
+        count = min(len(values) for values in energies.values())
+        y = np.array([energies[int(q)][:count] for q in qIndices])
+        excitonDispersion, xInter, yInter = None, [], []
+        if len(distinct) == len(qPoints):
+            shown = 'it' if len(distinct) == 1 else 'them'
+        else:
+            shown = f'those on the path ({qPointNames(distinct)})'
+        note = (f'Only {qPointNames(qPoints)} computed ({len(qPoints)} of the {nIbz} Q-points of the grid): the '
+                f'dispersion shows {shown}, not interpolated (that needs every Q-point).')
+        if len(distinct) < len(qPoints):
+            note += ' The spectra of the others can be added from the Absorption section.'
 
     return {
         'lattice': lattice,
@@ -46,10 +82,12 @@ def computeDispersion(context, saveDir, diagoDir, nExcitons, qBZ, nQpoints):
         'pointsData': [[PointData(i, j + 1) for i in range(len(x))] for j in range(y.shape[1])],
         'xInter': xInter,
         'yInter': yInter,
-        'xRange': (min(x), max(x)),
+        'xRange': (float(qBZ.kpoints_distances()[0]), float(qBZ.kpoints_distances()[-1])) if note else (min(x), max(x)),
         'yRange': (np.array(y).min(), np.array(y).max()),
         'specialPoints': qBZ.special_kpoints_distances(merge_sections=True),
         'labels': qBZ.path_labels_list(merge_sections=True),
+        'note': note,
+        'qPointCount': len(set(int(q) for q in qIndices)),
     }
 
 
@@ -71,6 +109,8 @@ def automaticAbsorptionRange(excitonEnergies, margin=ABSORPTION_AUTO_MARGIN):
 def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyMin, energyMax, minIntensity,
                       autoRange=False):
     filename = "ndb.BS_diago_Q%d" % (qPointIndex + 1)
+    if not (Path(diagoDir) / filename).is_file():
+        raise ValueError(f'Q-point {qPointIndex + 1} was not computed: there is no {filename} in the BSE directory.')
     excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir)
     if autoRange:
         energyMin, energyMax = automaticAbsorptionRange(excitonDB.eigenvalues.real)
@@ -90,7 +130,7 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
         brightExcitons = allExcitons[(allExcitons[:, 1] >= minIntensity)]
         darkExcitons = allExcitons[(allExcitons[:, 1] < minIntensity)]
         brightExcAbsInterp = np.interp(brightExcitons[:, 0], energyRange, epsilon.imag)
-        pointsData = [PointData(index, int(j)) for j in brightExcitons[:, 2]]
+        pointsData = [PointData(index, int(j), q=qPointIndex) for j in brightExcitons[:, 2]]
 
     return {'q': qPointIndex, 'index': index, 'energy': energyRange, 'absorption': epsilon.imag,
             'brightExcEnergy': brightExcitons[:, 0], 'brightExcAbsorption': brightExcAbsInterp,
@@ -100,6 +140,8 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
 
 def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, excitonIndices):
     context.stage('Loading the databases')
+    if not (Path(diagoDir) / 'ndb.BS_diago_Q1').is_file():
+        raise ValueError('The band structure needs the excitons at Γ, ndb.BS_diago_Q1, which were not computed.')
     excitonDB = YamboExcitonDB.from_db_file(lattice, filename='ndb.BS_diago_Q1', folder=diagoDir)
     if gw:
         energies = YamboQPDB.from_db(folder=qpDir)
@@ -198,6 +240,10 @@ class Calculations(QObject):
     excitonDispersionReady = Signal(list, list, list, list)
     excitonDispersionRange = Signal(tuple, tuple)
     excitonDispersionNumCurvesChanged = Signal(int)
+    # About the dispersion shown, e.g. only some Q-points computed ('' if nothing to say)
+    dispersionNoteChanged = Signal(str)
+    # Distinct Q-points in the dispersion shown (1: e.g. only Γ computed)
+    dispersionQPointCountChanged = Signal(int)
     excitonDispersionInit = Signal()
 
     excitonBandStructureReady = Signal(list, list, list)
@@ -317,6 +363,7 @@ class Calculations(QObject):
         self.excitonAbsorptionClear.emit()
         self.dispPoints, self.dispPointsData, self.dispXInter, self.dispYInter = [], [], [], []
         self.emitExcitonDispersionReady()
+        self.dispersionNoteChanged.emit('')
         self.k, self.bands, self.weights = [], [], []
         self.excitonBandStructureClear.emit()
         # A new dict: a task still running on the old dataset keeps the old one
@@ -337,10 +384,11 @@ class Calculations(QObject):
             self._select(points[0], float(points[0].pos().y()))
 
     def _select(self, point, energy):
-        if self.qIndices is None:
+        if self.qIndices is None and point.data().q is None:
             return
-        qIndex = int(self.qIndices[point.data().i])
-        excIndex = int(point.data().j)
+        data = point.data()
+        qIndex = int(data.q) if data.q is not None else int(self.qIndices[data.i])
+        excIndex = int(data.j)
         self.selectedExciton = (qIndex, excIndex, energy)
         self.excitonSelected.emit(qIndex, excIndex, energy)
 
@@ -377,8 +425,11 @@ class Calculations(QObject):
         if not options.diagoDir:
             return self._reject(message, 'No BSE directory: choose one on the System page first.')
 
+        if not options.qPoints:
+            return self._reject(message, 'The BSE directory has no ndb.BS_diago_Q* files.')
+
         arguments = dict(saveDir=options.saveDir, diagoDir=options.diagoDir, nExcitons=options.nExcitons,
-                         qBZ=options.qBZ, nQpoints=options.nQpoints)
+                         qBZ=options.qBZ, qPoints=list(options.qPoints))
         self.tasks.submit(message, lambda context: computeDispersion(context, **arguments),
                           self._applyDispersion, key='dispersion')
 
@@ -393,13 +444,17 @@ class Calculations(QObject):
         self.dispXInter = result['xInter']
         self.dispYInter = result['yInter']
         self.dispersionAxes = {'xRange': list(result['xRange']), 'yRange': list(result['yRange']),
-                               'specialPoints': list(result['specialPoints']), 'labels': list(result['labels'])}
+                               'specialPoints': list(result['specialPoints']), 'labels': list(result['labels']),
+                               'note': result.get('note', ''), 'qPointCount': int(result.get('qPointCount', 0))}
         # The spectra belonged to the previous dispersion
         self.clearAbsorptionCurves()
 
+        self.dispersionNoteChanged.emit(self.dispersionAxes['note'])
+        self.dispersionQPointCountChanged.emit(self.dispersionAxes['qPointCount'])
         self.qPathReady.emit(result['specialPoints'], result['labels'])
         self.excitonDispersionRange.emit(result['xRange'], result['yRange'])
-        self.excitonDispersionNumCurvesChanged.emit(len(self.dispYInter))
+        # As many curve styles as excitons (the interpolated curves may be missing)
+        self.excitonDispersionNumCurvesChanged.emit(len(self.dispPoints))
         self.excitonDispersionInit.emit()
 
         self.excitonBandStructureClear.emit()
@@ -434,6 +489,24 @@ class Calculations(QObject):
         self.tasks.submit('Computing the absorption spectrum…',
                           lambda context: self.computeAbsorptionSpectrum(index, qPointIndex, parameters),
                           lambda data: self._updateAbsorptionCurves(qPointIndex, toggleCurve, data))
+
+    @Slot(int)
+    def showQPointAbsorption(self, qPointIndex):
+        """Add the absorption spectrum at a Q-point given by its index (e.g. one off the Q-path), kept."""
+        message = 'Computing the absorption spectrum…'
+        missing = self.options.missingQPoint(qPointIndex)
+        if missing:
+            return self._reject(message, missing)
+        curve = self.absorptionCurveIndex(qPointIndex)
+        if curve >= 0:
+            self.excAbsData[curve]['fixed'] = True
+            return
+        if self.lattice is None:
+            with databaseAccess():
+                self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+        parameters = self.absorptionParameters()
+        self.tasks.submit(message, lambda context: self.computeAbsorptionSpectrum(-1, qPointIndex, parameters),
+                          lambda data: self._updateAbsorptionCurves(qPointIndex, True, data))
 
     def _updateAbsorptionCurves(self, qPointIndex, toggleCurve, data):
         """Curves after a click on Q-point `qPointIndex`, with its spectrum `data` if newly computed."""
@@ -517,7 +590,12 @@ class Calculations(QObject):
 
     @Slot()
     def getExcitonBandStructure(self, points, dummy):
-        if not np.all(self.collinear_qpoints[points[0].data().i] == [0.0, 0.0, 0.0]):
+        data = points[0].data()
+        if data.q is not None:
+            gamma = data.q == 0      # Q1 is Γ
+        else:
+            gamma = self.collinear_qpoints is not None and np.all(self.collinear_qpoints[data.i] == [0.0, 0.0, 0.0])
+        if not gamma:
             self._applyBandStructure({'k': [], 'bands': [], 'weights': []})
             return
 
@@ -563,6 +641,9 @@ class Calculations(QObject):
         `exc_index` (1-based) at Q-point `q_index` (0-based, the file
         ndb.BS_diago_Q<q_index + 1>); wfComputed is emitted when it is ready.
         """
+        missing = self.options.missingQPoint(q_index)
+        if missing:
+            return self._reject('Computing the exciton wave function…', missing)
         arguments = dict(lattice=self.lattice, saveDir=self.options.saveDir, diagoDir=self.options.diagoDir,
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
@@ -654,6 +735,8 @@ class Calculations(QObject):
                 'xInter': arrays['dispersion/xInter'], 'yInter': arrays['dispersion/yInter'],
                 'xRange': tuple(axes['xRange']), 'yRange': tuple(axes['yRange']),
                 'specialPoints': axes['specialPoints'], 'labels': axes['labels'],
+                'note': axes.get('note', ''),
+                'qPointCount': axes.get('qPointCount', len(set(np.asarray(arrays['dispersion/qIndices']).tolist()))),
             })
 
         for i, curve in enumerate(meta.get('absorption', [])):
@@ -661,7 +744,7 @@ class Calculations(QObject):
                     ('energy', 'absorption', 'brightExcEnergy', 'brightExcAbsorption', 'brightExcIntensities',
                      'brightExcIndices', 'darkExcEnergy')}
             data.update(q=curve['q'], index=curve['index'], fixed=curve['fixed'], range=tuple(curve['range']),
-                        data=[PointData(curve['index'], int(j)) for j in data['brightExcIndices']])
+                        data=[PointData(curve['index'], int(j), q=int(curve['q'])) for j in data['brightExcIndices']])
             self.excAbsData.append(data)
             self.excitonAbsorptionCurveAppended.emit(curve['q'])
         if meta.get('absorption'):
@@ -695,6 +778,9 @@ class Calculations(QObject):
         """
         if not self.options.saveDir or not self.options.diagoDir:
             return None
+        missing = self.options.missingQPoint(q_index)
+        if missing:
+            raise ValueError(missing)
         if not DATABASE_LOCK.acquire(blocking=False):
             return None
         try:
