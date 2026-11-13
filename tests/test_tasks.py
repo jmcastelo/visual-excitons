@@ -114,14 +114,17 @@ def test_failures_are_reported(qtbot, runner):
 
     with qtbot.waitSignal(runner.failed, timeout=TIMEOUT) as blocker:
         runner.submit('Computing the thing…', compute, lambda result: None)
-    assert blocker.args == ['Computing the thing failed', 'boom']
+    title, message = blocker.args
+    assert title == 'Computing the thing failed'
+    assert message.startswith('ValueError: boom') and 'test_tasks.py' in message and 'in compute.' in message
 
     def badApply(result):
         raise RuntimeError('apply broke')
 
     with qtbot.waitSignal(runner.failed, timeout=TIMEOUT) as blocker:
         runner.submit('Applying…', lambda context: 1, badApply)
-    assert blocker.args == ['Applying failed', 'apply broke']
+    title, message = blocker.args
+    assert title == 'Applying failed' and message.startswith('RuntimeError: apply broke') and 'in badApply.' in message
     qtbot.waitUntil(lambda: not runner.isBusy(), timeout=TIMEOUT)
 
 
@@ -196,3 +199,22 @@ def test_dispersion_hook_counts_databases(monkeypatch):
     finally:
         tasks._local.context = None
     assert hook.from_db_file('lattice') == 'db'  # outside a task: just loads
+
+
+def test_error_messages_say_what_and_where():
+    """A bare KeyError used to show only its key (e.g. "COUPLING")."""
+    from visual_excitons.core.tasks import describeError
+
+    def readDatabase():
+        return {}['COUPLING']
+    try:
+        readDatabase()
+    except KeyError as error:
+        message = describeError(error)
+    assert message.startswith("KeyError: 'COUPLING' — an entry the code expected is missing")
+    assert 'In' in message and 'test_tasks.py, line' in message and 'in readDatabase' in message
+
+    # A clear text of its own needs no hint
+    long = ValueError('Incomplete list of qpoints (4/90): compute the BSE at every Q-point')
+    assert describeError(long) == 'ValueError: ' + str(long)
+    assert describeError(RuntimeError()) == 'RuntimeError'

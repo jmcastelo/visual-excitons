@@ -26,6 +26,7 @@ cancelled tasks stop within a fraction of a second.
 import threading
 import time
 import traceback
+from pathlib import Path
 from collections import deque
 from contextlib import contextmanager
 
@@ -187,6 +188,38 @@ def installProgressHooks():
     _hooksInstalled = True
 
 
+# Error messages
+
+# What some exceptions mean, when their own text is terse (a KeyError is only the key)
+ERROR_HINTS = {
+    KeyError: 'an entry the code expected is missing (e.g. a field of a database written by another version of Yambo)',
+    IndexError: 'an index out of range (e.g. more excitons or bands asked for than a database has)',
+    FileNotFoundError: 'a file is missing',
+}
+
+
+def describeError(error):
+    """
+    A message for an error dialog: the kind of error, its text (with what it
+    means, when terse), and where it happened: the innermost line of its
+    traceback, and whether that is in yambopy.
+    """
+    text = str(error)
+    message = f'{type(error).__name__}: {text}' if text else type(error).__name__
+    hint = next((hint for kind, hint in ERROR_HINTS.items() if isinstance(error, kind)), None)
+    if hint and len(text) < 40:
+        message += f' \u2014 {hint}.'
+    frames = traceback.extract_tb(error.__traceback__) if error.__traceback__ else []
+    if frames:
+        frame = frames[-1]
+        parts = Path(frame.filename).parts
+        package = next((name for name in ('yambopy', 'visual_excitons', 'netCDF4', 'numpy', 'scipy') if name in parts), None)
+        where = '/'.join(parts[len(parts) - 1 - parts[::-1].index(package):]) if package else Path(frame.filename).name
+        origin = {'yambopy': 'In YamboPy', 'visual_excitons': 'In Visual Excitons'}.get(package, 'In')
+        message += f'\n\n{origin}: {where}, line {frame.lineno}, in {frame.name}.'
+    return message
+
+
 # Tasks and their runner
 
 class Task:
@@ -335,13 +368,13 @@ class TaskRunner(QObject):
         if isinstance(error, Cancelled):
             self.cancelled.emit(task.message)
         elif error is not None:
-            self.failed.emit(f'{title} failed', str(error) or type(error).__name__)
+            self.failed.emit(f'{title} failed', describeError(error))
         elif task.generation == self.generation and not task.context.isCancelled():
             try:
                 task.apply(result)
             except Exception as exception:
                 traceback.print_exc()
-                self.failed.emit(f'{title} failed', str(exception) or type(exception).__name__)
+                self.failed.emit(f'{title} failed', describeError(exception))
 
         self.finished.emit()
         if self.pending:

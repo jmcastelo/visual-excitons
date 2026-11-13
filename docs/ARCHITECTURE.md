@@ -186,7 +186,7 @@ Other responsibilities:
 - **Size estimates**: `estimateWaveFunction()` returns the grid and memory of a wave-function calculation (see `core/memory.py`), reading only what it needs; it never blocks on the database lock (returns `None` if busy).
 - **Wave-function geometry**: `wfVoxels()`, `wfFixedCrystal()`, `wfFixedCartesian()`, `wfSupercellAtoms()`, used by analysis and export.
 - **Caches**: `lattice`, `wavefunctionCache` (the loaded `YamboWFDB`, the slowest thing to load, one at a time), `planeWaves`, `excitonSizes`. `resetDataset()` clears them and the results.
-- **Progress/error signals**, forwarded from the `TaskRunner`: `busyStarted(str)`, `busyFinished()`, `busyChanged(bool)`, `progressChanged(done, total, stage)`, `taskCancelled(str)`, `errorOccurred(title, message)`.
+- **Progress/error signals**, forwarded from the `TaskRunner`: `busyStarted(str)`, `busyFinished()`, `busyChanged(bool)`, `progressChanged(done, total, stage)`, `taskCancelled(str)`, `errorOccurred(title, message)`. The message of a failed task comes from `tasks.describeError()`: the kind of error and its text (with what it means when terse, e.g. a `KeyError` is only the key; `ERROR_HINTS`), and where it happened (innermost traceback line, marked as in YamboPy or in Visual Excitons). The full traceback still goes to the console.
 
 Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, with `'fixed'` telling whether the curve was kept (Ctrl-click). Curves and the curve styles in `AbsorptionStyle` are parallel lists: always remove by index, going backwards (see `_updateAbsorptionCurves`).
 
