@@ -15,6 +15,9 @@ DEFAULT_PATH_DENSITY = 300
 class OptionsWidget(QWidget):
     """System panel: data directories, crystal lattice and Brillouin-zone path."""
 
+    # Read every BSE file (run in the background by the main window, see setFullBSEChecks)
+    checkAllBSERequested = Signal()
+
     # A Q-path was set successfully: its state (see qPathState), to be saved
     qPathApplied = Signal(dict)
 
@@ -85,10 +88,22 @@ class OptionsWidget(QWidget):
         self.checksDetailsButton.setToolTip('The checks of the databases, one by one')
         self.checksDetailsButton.clicked.connect(self.showChecks)
         self.checksDetailsButton.setEnabled(False)
+        # Every BSE file read (in the background): catches files renamed with
+        # standard names that are not what their name says
+        self.checkAllBSEButton = QPushButton('Check all BSE')
+        self.checkAllBSEButton.setToolTip('Read every BSE database, not only a sample: each must be one, of the\n'
+                                          'Q-point its name gives (in background; a few seconds for hundreds)')
+        self.checkAllBSEButton.clicked.connect(self.checkAllBSERequested)
+        self.checkAllBSEButton.setEnabled(False)
+        checkButtons = QVBoxLayout()
+        checkButtons.setContentsMargins(0, 0, 0, 0)
+        checkButtons.addWidget(self.checksDetailsButton)
+        checkButtons.addWidget(self.checkAllBSEButton)
         dirLayout.addWidget(QLabel('Checks:'), 9, 0)
         dirLayout.addWidget(self.checksLabel, 9, 1)
-        dirLayout.addWidget(self.checksDetailsButton, 9, 2)
+        dirLayout.addLayout(checkButtons, 9, 2)
         self.findings = []
+        self.fullBSECheck = None    # (BSE files checked, findings) of the last check of all of them
         self.checkTimer = QTimer(self)
         self.checkTimer.setSingleShot(True)
         self.checkTimer.setInterval(300)
@@ -258,6 +273,10 @@ class OptionsWidget(QWidget):
         except Busy:
             self.checkTimer.start(1000)     # a calculation is reading them: later
             return
+        # The check of every BSE file, if done on these files, rather than the sample
+        if self.fullBSECheck is not None and self.fullBSECheck[0] == self.bseKey():
+            self.findings = [f for f in self.findings if f['area'] != 'BSE'] + self.fullBSECheck[1]
+        self.checkAllBSEButton.setEnabled(bool(o.bseFiles))
         level = summary(self.findings)
         problems = [f for f in self.findings if f['level'] in (ERROR, WARNING)]
         if level == OK:
@@ -269,6 +288,15 @@ class OptionsWidget(QWidget):
             text = f'<span style="color:{color}; font-weight:bold">{symbol}</span>&nbsp;{first}{more}'
         self.checksLabel.setText(text)
         self.checksDetailsButton.setEnabled(True)
+
+    def bseKey(self):
+        """What a check of every BSE file was done on."""
+        return self.options.diagoDir, tuple(sorted(self.options.bseFiles.items()))
+
+    def setFullBSEChecks(self, key, findings):
+        """The BSE findings of a check of every BSE file (of `key`, see bseKey), shown from now on."""
+        self.fullBSECheck = (key, [f for f in findings if f['area'] == 'BSE'])
+        self.runChecks()
 
     @Slot()
     def showChecks(self):

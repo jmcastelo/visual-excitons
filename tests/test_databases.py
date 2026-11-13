@@ -113,3 +113,55 @@ def test_system_panel_offers_the_qp_databases_and_shows_the_checks(qtbot, monkey
     monkeypatch.setattr(options_widget.QMessageBox, 'information', lambda *args: shown.append(args[2]))
     system.showChecks()
     assert 'ndb.QP_140_146 (bands 140–146) was computed on this SAVE directory' in shown[-1]
+
+
+def trickedDataset(tmp_path):
+    """BiI3 with BSE files renamed to standard names that are not what they say (as some users do for yambopy)."""
+    source = datasetPath(BII3)
+    folder = tmp_path / 'tricked'
+    (folder / 'diagos').mkdir(parents=True)
+    (folder / 'save').symlink_to(source / 'save')
+    for n in range(1, 13):
+        target = {7: source / 'diagos' / 'ndb.BS_diago_Q30', 9: source / 'qp' / 'ndb.QP'}.get(n, source / 'diagos' / f'ndb.BS_diago_Q{n}')
+        if n == 10:
+            (folder / 'diagos' / 'ndb.BS_diago_Q10').write_text('not a database')
+        else:
+            (folder / 'diagos' / f'ndb.BS_diago_Q{n}').symlink_to(target)
+    return folder
+
+
+@pytest.mark.data
+def test_every_bse_file_checked(tmp_path):
+    folder = trickedDataset(tmp_path)
+    files, problems = bseFiles(folder / 'diagos')
+    assert len(files) == 12                                    # standard names: taken at their word
+    full = checkDataset(str(folder / 'save'), None, str(folder / 'diagos'), files, problems, bseSample=None)
+    errors = ' '.join(f['text'] for f in full if f['level'] == ERROR)
+    assert 'ndb.BS_diago_Q7: its coordinates are those of Q-point 30' in errors
+    assert 'ndb.BS_diago_Q9 is not a BSE database' in errors
+    assert 'ndb.BS_diago_Q10 cannot be read' in errors
+
+
+@pytest.mark.data
+def test_check_all_bse_button(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    import visual_excitons.gui.main_window as main_window
+    QSettings('VisualExcitons', 'VisualExcitons').clear()
+    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
+    window = main_window.MainWindow()
+    qtbot.addWidget(window)
+    window.openDataset(main_window.findDataset(trickedDataset(tmp_path)))
+    system = window.system
+    system.runChecks()
+    assert system.checkAllBSEButton.isEnabled()
+
+    stages = []
+    window.calculations.progressChanged.connect(lambda done, total, stage: stages.append((stage, total)))
+    with qtbot.waitSignal(window.calculations.tasks.finished, timeout=60000):
+        system.checkAllBSEButton.click()
+    assert ('Reading the BSE databases', 12) in stages
+    texts = ' '.join(f['text'] for f in system.findings)
+    assert 'Q-point 30' in texts and 'ndb.BS_diago_Q9 is not a BSE database' in texts and '✗' in system.checksLabel.text()
+    # Kept when the checks run again (e.g. another QP database), until the BSE files change
+    system.runChecks()
+    assert 'ndb.BS_diago_Q9 is not a BSE database' in ' '.join(f['text'] for f in system.findings)

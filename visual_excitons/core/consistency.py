@@ -15,7 +15,10 @@ they hold enough physical data to cross-check:
   extrapolated the corrections, or applied none, outside it).
 - BSE files agree with each other (transition table, bands, coupling).
 
-Only a sample of the BSE files is read (each header takes about 15 ms).
+Only a sample of the BSE files is read (each header takes about 15 ms), unless
+all are asked for (`bseSample=None`, in the background: e.g. 8 s for 540 files),
+which also catches files renamed with standard names that are not what their
+name says.
 """
 
 import numpy as np
@@ -51,21 +54,24 @@ def sampleOf(items, count=BSE_SAMPLE):
     return [items[round(i * (len(items) - 1) / (count - 1))] for i in range(count)]
 
 
-def checkDataset(saveDir, qpPath=None, diagoDir=None, bseFiles=None, bseProblems=()):
+def checkDataset(saveDir, qpPath=None, diagoDir=None, bseFiles=None, bseProblems=(), bseSample=BSE_SAMPLE,
+                 context=None):
     """
     The findings of the checks: dicts with 'level' (OK, INFO, WARNING, ERROR),
-    'area' ('SAVE', 'GW', 'BSE') and 'text'. Raises Busy if a calculation is
-    reading the databases.
+    'area' ('SAVE', 'GW', 'BSE') and 'text'. `bseSample` BSE files are read
+    (None: all of them); `context` (a TaskContext) reports their progress.
+    Raises Busy if a calculation is reading the databases (not in the task
+    doing it: the lock is reentrant).
     """
     if not DATABASE_LOCK.acquire(blocking=False):
         raise Busy()
     try:
-        return _check(saveDir, qpPath, diagoDir, bseFiles or {}, bseProblems)
+        return _check(saveDir, qpPath, diagoDir, bseFiles or {}, bseProblems, bseSample, context)
     finally:
         DATABASE_LOCK.release()
 
 
-def _check(saveDir, qpPath, diagoDir, bseFiles, bseProblems):
+def _check(saveDir, qpPath, diagoDir, bseFiles, bseProblems, bseSample=BSE_SAMPLE, context=None):
     findings = []
     savePath = f'{saveDir}/ns.db1'
     info = identify(savePath)
@@ -82,7 +88,7 @@ def _check(saveDir, qpPath, diagoDir, bseFiles, bseProblems):
         qpInfo = identify(qpPath)
         qpBands = qpInfo['bands'] if qpInfo and qpInfo['kind'] == QP else None
     if diagoDir and bseFiles:
-        findings += _checkBSE(saveDir, diagoDir, bseFiles, nb, qpBands, qpPath)
+        findings += _checkBSE(saveDir, diagoDir, bseFiles, nb, qpBands, qpPath, bseSample, context)
     for problem in bseProblems:
         findings.append(finding(WARNING, 'BSE', problem))
     return findings
@@ -115,12 +121,17 @@ def _checkQP(qpPath, save, eigenvalues):
                               'directory: same lattice, k-points and DFT energies.')]
 
 
-def _checkBSE(saveDir, diagoDir, bseFiles, nb, qpBands, qpPath):
+def _checkBSE(saveDir, diagoDir, bseFiles, nb, qpBands, qpPath, bseSample=BSE_SAMPLE, context=None):
     findings = []
-    sample = sampleOf(sorted(bseFiles.items()))
+    items = sorted(bseFiles.items())
+    sample = items if bseSample is None else sampleOf(items, bseSample)
+    if context is not None:
+        context.stage('Reading the BSE databases', len(sample))
     lattice = None
     tables, revisions, couplings, mismatched = {}, set(), set(), []
     for q, name in sample:
+        if context is not None:
+            context.advance()
         try:
             data = _read(f'{diagoDir}/{name}', 'BS_TABLE', 'Q-point', 'HEAD_REVISION', 'COUPLING')
         except (OSError, RuntimeError):
@@ -156,13 +167,16 @@ def _checkBSE(saveDir, diagoDir, bseFiles, nb, qpBands, qpPath):
     lows = {low for _, low, _ in tables.values()}
     highs = {high for _, _, high in tables.values()}
     low, high = min(lows), max(highs)
-    checked = f'{len(tables)} of the {len(bseFiles)} BSE databases checked'
+    checked = (f'all {len(bseFiles)} BSE databases checked' if len(tables) == len(bseFiles) > BSE_SAMPLE
+               else f'{len(tables)} of the {len(bseFiles)} BSE databases checked')
     if high > nb:
         findings.append(finding(ERROR, 'BSE', f'The BSE databases use bands up to {high}, but the SAVE directory has '
                                               f'{nb}: they belong to another calculation.'))
     if mismatched:
-        findings.append(finding(ERROR, 'BSE', 'Some BSE databases are not of the Q-point their name gives: '
-                                              + '; '.join(mismatched) + '.'))
+        listed = '; '.join(mismatched[:8]) + (f'; and {len(mismatched) - 8} more' if len(mismatched) > 8 else '')
+        findings.append(finding(ERROR, 'BSE', f'{len(mismatched)} BSE database{"s are" if len(mismatched) > 1 else " is"} '
+                                              f'not of the Q-point {"their" if len(mismatched) > 1 else "its"} name gives: '
+                                              f'{listed}.'))
     if len({size for size, _, _ in tables.values()}) > 1 or len(lows) > 1 or len(highs) > 1 or len(couplings) > 1:
         findings.append(finding(WARNING, 'BSE', 'The BSE databases differ in their transitions or bands (from '
                                                 'different runs?): ' + ', '.join(f'{name}: bands {lo}–{hi}'

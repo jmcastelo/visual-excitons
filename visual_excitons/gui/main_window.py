@@ -146,6 +146,7 @@ class MainWindow(QMainWindow):
         self.spectra.inspector.computeWavefunctionRequested.connect(self.computeSelectedWaveFunction)
         self.wavefunction.parameters3DWidget.selectedEstimateChanged.connect(self.spectra.inspector.setWaveFunctionEstimate)
         self.system.qPathApplied.connect(self.saveQPath)
+        self.system.checkAllBSERequested.connect(self.checkAllBSE)
         self.spectra.inspector.exportFigureRequested.connect(self.exportFigure)
         self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
         self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
@@ -551,6 +552,20 @@ class MainWindow(QMainWindow):
             return json.loads(self.settings.value(key, json.dumps(default)))
         except (TypeError, ValueError):
             return default
+
+    @Slot()
+    def checkAllBSE(self):
+        """Read every BSE database in the background, then show the checks of all of them."""
+        from visual_excitons.core.consistency import checkDataset
+        o = self.options
+        if not o.saveDir or not o.bseFiles:
+            return
+        key = self.system.bseKey()
+        arguments = dict(saveDir=o.saveDir, qpPath=f'{o.qpDir}/{o.qpFile}' if o.gw and o.qpDir and o.qpFile else None,
+                         diagoDir=o.diagoDir, bseFiles=dict(o.bseFiles), bseProblems=list(o.bseProblems), bseSample=None)
+        self.calculations.tasks.submit('Checking every BSE database…',
+                                       lambda context: checkDataset(context=context, **arguments),
+                                       lambda findings: self.system.setFullBSEChecks(key, findings), key='check-bse')
 
     @Slot(list, str)
     def onQPDatabaseChosen(self, databases, name):

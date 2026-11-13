@@ -199,6 +199,8 @@ BSE databases with other names than `ndb.BS_diago_Q<n>` are recognised by their 
 - The bands of the BSE are within those the QP database corrects; a warning otherwise, since Yambo then applied no correction, or an extrapolated one, to the others.
 - The BSE databases agree with each other; different Yambo revisions are mentioned.
 
+The BSE databases with standard names are not opened when a dataset is opened (there can be hundreds, and reading each takes about 15 ms), and the checks read a sample of them. `Check all BSE` reads every one of them, in the background (with progress and `Cancel`; about a second for a hundred): each must be a BSE database and, for those of newer Yambo versions, of the Q-point its name gives. It catches files renamed with standard names that are not what their name says. Its result is kept until the BSE files change.
+
 These files must be coherent, i.e. correspond to calculations of the same system.
 
 `File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. The calculation type is set from whether a GW directory was found. `File › Open recent` lists the last datasets.
