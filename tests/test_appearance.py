@@ -177,6 +177,7 @@ def test_apply_to_all_or_one_curve(panel):
     assert not dispersion.applyToAllCurves() and dispersion.currentCurveIndex() == 1
     assert panel.curvesForm.isRowVisible(panel.gradientRow) is False
     panel.patternComboBox.setCurrentIndex(1)
+    panel.patternComboBox.activated.emit(1)                     # as a user choosing it
     assert [pen.style() for pen in dispersion.curveStyle.curvePens] == [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine,
                                                                          Qt.PenStyle.SolidLine]
 
@@ -259,3 +260,139 @@ def test_cancel_restores_legend_and_shared_axes(panel):
     assert absorption.axesStyle.ticksFont.getFont().pointSize() == 31
     panel.fontDialog.reject()
     assert absorption.axesStyle.ticksFont.getFont().pointSize() == font.pointSize()
+
+
+def test_gradient_keeps_its_direction_and_colors(qapp):
+    from visual_excitons.core.style import GRADIENT
+    style = withCurves(DispersionStyle(), 3)
+    style.curveStyle.setGradientColors(QColor('#0000ff'), QColor('#ffff00'))
+    names = lambda: [pen.color().name() for pen in style.curveStyle.curvePens]
+    assert names()[0] == '#0000ff' and names()[-1] == '#ffff00' and style.curveStyle.colorMode == GRADIENT
+    style.curveStyle.setGradientColors(QColor('#ffff00'), QColor('#0000ff'))
+    assert names()[0] == '#ffff00' and names()[-1] == '#0000ff'                  # reversed, not sorted
+    # Saturation and brightness of the colors chosen, not only their hue
+    style.curveStyle.setGradientColors(QColor('#400000'), QColor('#004000'))
+    assert QColor(names()[0]).value() < 80 and QColor(names()[-1]).value() < 80
+    # Kept in the state, and read from the older one (hues only)
+    restored = withCurves(DispersionStyle(), 3)
+    restored.setState(style.state(), curves=True)
+    assert restored.curveStyle.startColor.name() == '#400000' and restored.curveStyle.colorMode == GRADIENT
+    old = style.state()
+    del old['curve']['gradientColors'], old['curve']['colorMode']
+    restored.setState(old)
+    assert restored.curveStyle.startColor.hsvHue() == style.curveStyle.startHue
+
+
+def test_new_spectra_follow_the_colors_chosen(qapp):
+    from visual_excitons.core.style import paletteColor
+    style = AbsorptionStyle()
+    style.appendCurveStyle(4)
+    style.appendCurveStyle(9)
+    colors = lambda: [pen.color().name() for pen in style.curveStyle.curvePens]
+    assert colors() == [paletteColor(4).name(), paletteColor(9).name()]         # a color per Q-point
+    style.curveStyle.setCurveWidth(3)
+    style.curveStyle.setCurveColor(QColor('#008800'))                            # one color for all
+    style.pointStyle.setPointSize(11)
+    style.appendCurveStyle(2)
+    assert colors() == ['#008800'] * 3 and style.curveStyle.curvePens[-1].width() == 3
+    assert style.pointStyle.pointSizes[-1] == 11
+    style.curveStyle.setGradientColors(QColor('#0000ff'), QColor('#ff0000'))
+    style.appendCurveStyle(5)                                                    # the gradient spread again
+    assert colors()[0] == '#0000ff' and colors()[-1] == '#ff0000' and len(set(colors())) == 4
+    style.curveStyle.setPaletteColors()
+    assert colors() == [paletteColor(q).name() for q in (4, 9, 2, 5)]
+    style.removeCurveStyle(1)
+    style.appendCurveStyle(9)
+    assert colors()[-1] == paletteColor(9).name()                                # Q-point 9's color again
+
+
+def test_panel_dialogs_and_points(qtbot):
+    from PySide6.QtWidgets import QColorDialog, QFontDialog
+    from visual_excitons.gui.appearance_panel import AppearancePanel
+    dispersion, absorption, bands = styles()
+    panel = AppearancePanel({'dispersion': dispersion, 'absorption': absorption, 'bands': bands})
+    qtbot.addWidget(panel)
+    # Qt's own dialogs: native ones may not report the color live
+    assert panel.colorDialog.testOption(QColorDialog.ColorDialogOption.DontUseNativeDialog)
+    assert panel.fontDialog.testOption(QFontDialog.FontDialogOption.DontUseNativeDialog)
+    # The value chosen applies on OK even without a live preview
+    withCurves(dispersion, 2)
+    panel.setGraph('dispersion')
+    panel.lineColorButton.click()
+    with blockedSignals(panel.colorDialog):
+        panel.colorDialog.setCurrentColor(QColor('#123456'))
+    panel.colorDialog.accept()
+    assert [pen.color().name() for pen in dispersion.curveStyle.curvePens] == ['#123456'] * 2
+    # The swatch shows the colors in use
+    panel.setGraph('absorption')
+    absorption.appendCurveStyle(0)
+    absorption.appendCurveStyle(1)
+    panel.refresh()
+    assert len(panel.lineColorButton.colors) == 2
+
+
+def blockedSignals(widget):
+    from visual_excitons.gui.appearance_panel import blocked
+    return blocked(widget)
+
+
+def test_points_drawn_in_the_color_of_their_curve(qtbot):
+    import pyqtgraph as pg
+    from visual_excitons.gui.dispersion_widget import DispersionWidget
+    from visual_excitons.core.calculations import PointData
+    style = withCurves(DispersionStyle(), 2)
+    style.curveStyle.setCurveColor(QColor('#aa0000'))
+    plot = DispersionWidget(style)
+    qtbot.addWidget(plot)
+    points = [[[0.0, 2.0], [1.0, 2.1]], [[0.0, 2.3], [1.0, 2.4]]]
+    plot.plotData(points, [[PointData(i, j + 1) for i in range(2)] for j in range(2)], [], [])
+    scatter = [item for item in plot.getPlotItem().items if isinstance(item, pg.ScatterPlotItem) and item.data.size]
+    assert scatter and all(item.opts['brush'].color().name() == '#aa0000' for item in scatter[:2])
+
+
+def test_lines_are_an_option_of_each_plot(panel):
+    from visual_excitons.core.figures import buildFigure
+    dispersion, absorption, bands = panel.styles['dispersion'], panel.styles['absorption'], panel.styles['bands']
+    panel.setGraph('absorption')
+    assert panel.linesCheckBox.isChecked()
+    panel.linesCheckBox.setChecked(False)
+    assert not absorption.showLines and dispersion.showLines and bands.showLines     # this plot only
+    panel.setGraph('dispersion')
+    assert panel.linesCheckBox.isChecked()                                           # each plot its own
+    restored = AbsorptionStyle()
+    restored.setState(absorption.state())
+    assert not restored.showLines                                                    # kept with the style
+
+    # Figures: without lines, the spectra are not drawn, their points carry the legend
+    from test_figures import sampleData, STYLES
+    styles = {**STYLES, 'absorption': {**STYLES['absorption'], 'lines': False}}
+    ax = buildFigure(sampleData(), styles, {'panels': ['absorption'], 'excitonBars': False}).axes[0]
+    assert all(line.get_linestyle() == 'None' for line in ax.lines if line.get_label().startswith('Q-point'))
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ['Q-point 1', 'Q-point 5']
+
+
+def test_same_shape_for_all_again(panel):
+    dispersion = withCurves(panel.styles['dispersion'], 3)
+    panel.setGraph('dispersion')
+    panel.refresh()
+    assert panel.symbolComboBox.currentText() == 'Circle'
+    panel.varySymbolsButton.click()
+    panel.refresh()
+    assert len(set(dispersion.pointStyle.pointSymbols)) == 3
+    assert panel.symbolComboBox.currentIndex() == -1                    # "Different per curve"
+    # Choosing a shape, even the one shown before, gives it to all
+    panel.symbolComboBox.setCurrentIndex(0)
+    panel.symbolComboBox.activated.emit(0)
+    assert dispersion.pointStyle.pointSymbols == ['o'] * 3
+    panel.refresh()
+    assert panel.symbolComboBox.currentText() == 'Circle'
+
+    # Patterns likewise
+    dispersion.setApplyToAllCurves(False)
+    dispersion.setCurrentCurveIndex(1)
+    dispersion.curveStyle.setCurveStyle(1)
+    dispersion.setApplyToAllCurves(True)
+    panel.curveComboBox.activated.emit(0)
+    assert panel.patternComboBox.currentIndex() == -1
+    panel.patternComboBox.activated.emit(0)
+    assert {pen.style() for pen in dispersion.curveStyle.curvePens} == {Qt.PenStyle.SolidLine}

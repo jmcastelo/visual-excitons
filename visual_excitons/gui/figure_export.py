@@ -49,9 +49,9 @@ def figureStyles(dispersionStyle, absorptionStyle, bandStructureStyle):
         sizes = style.pointStyle.pointSizes if points else []
         return [penStyle(pen, symbols[i] if i < len(symbols) else 'o', sizes[i] if i < len(sizes) else 6)
                 for i, pen in enumerate(pens)]
-    return {'dispersion': {'curves': curves(dispersionStyle)},
-            'absorption': {'curves': curves(absorptionStyle)},
-            'bands': {'curves': curves(bandStructureStyle, points=False),
+    return {'dispersion': {'curves': curves(dispersionStyle), 'lines': dispersionStyle.showLines},
+            'absorption': {'curves': curves(absorptionStyle), 'lines': absorptionStyle.showLines},
+            'bands': {'curves': curves(bandStructureStyle, points=False), 'lines': bandStructureStyle.showLines,
                       'fill': bandStructureStyle.brush.color().name()}}
 
 

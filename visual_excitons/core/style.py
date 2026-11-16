@@ -8,6 +8,34 @@ from PySide6.QtCore import QObject, Signal, Slot, Qt
 from PySide6.QtGui import QColor, QFont
 import pyqtgraph as pg
 
+# Color modes of the curves (see CurveStyle.colorMode)
+PALETTE, COMMON, GRADIENT = 'palette', 'common', 'gradient'
+
+# Distinct colors, readable on light and dark backgrounds and in print
+# (Matplotlib's tab10)
+PALETTE_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+                  '#bcbd22', '#17becf']
+
+
+def paletteColor(key):
+    return QColor(PALETTE_COLORS[int(key) % len(PALETTE_COLORS)])
+
+
+def gradientColor(start, end, t):
+    """The color a fraction `t` of the way from `start` to `end`, in HSV (hue the shorter way round)."""
+    h1, s1, v1, a1 = QColor(start).getHsvF()
+    h2, s2, v2, a2 = QColor(end).getHsvF()
+    h1 = h2 if h1 < 0 else h1                # greys have no hue: take the other one
+    h2 = h1 if h2 < 0 else h2
+    h1, h2 = max(h1, 0.0), max(h2, 0.0)
+    dh = h2 - h1
+    if dh > 0.5:
+        dh -= 1.0
+    elif dh < -0.5:
+        dh += 1.0
+    return QColor.fromHsvF((h1 + t * dh) % 1.0, s1 + t * (s2 - s1), v1 + t * (v2 - v1), a1 + t * (a2 - a1))
+
+
 PEN_STYLES = [Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine, Qt.PenStyle.DashDotLine,
               Qt.PenStyle.DashDotDotLine]
 
@@ -60,8 +88,37 @@ class CurveStyle(QObject):
 
         self.commonPen = pg.mkPen(style = Qt.PenStyle.SolidLine, width = 1.0, color = QColor('black'))
 
-        self.startHue = 0
-        self.endHue = 300
+        # How the curves get their colors, also those added later (e.g. a new
+        # absorption spectrum): PALETTE (one of a set each), COMMON (the color
+        # chosen for all), GRADIENT (from startColor to endColor, in order)
+        self.colorMode = COMMON
+        # What identifies each curve for its palette color (e.g. the Q-point of a
+        # spectrum: its color stays as others come and go); None: its position
+        self.paletteKeys = None
+        self.startColor = QColor.fromHsv(0, 255, 255)
+        self.endColor = QColor.fromHsv(300, 255, 255)
+
+    @property
+    def startHue(self):
+        return max(0, self.startColor.hsvHue())
+
+    @property
+    def endHue(self):
+        return max(0, self.endColor.hsvHue())
+
+    def curveColor(self, index, count):
+        """The color of curve `index` of `count` in the current color mode."""
+        if self.colorMode == PALETTE:
+            keys = self.paletteKeys
+            return paletteColor(keys[index] if keys is not None and index < len(keys) else index)
+        if self.colorMode == GRADIENT:
+            return gradientColor(self.startColor, self.endColor, index / (count - 1) if count > 1 else 0.0)
+        return QColor(self.commonPen.color())
+
+    def newCurvePen(self, index, count):
+        """The pen of a curve added: the width and pattern for all, the color of its color mode."""
+        pen = pg.mkPen(style=self.commonPen.style(), width=self.commonPen.widthF(), color=self.curveColor(index, count))
+        return pen
 
     def replaceColor(self, old, new):
         """
@@ -77,33 +134,50 @@ class CurveStyle(QObject):
 
     def state(self):
         return {'pen': penState(self.commonPen), 'curves': [penState(pen) for pen in self.curvePens],
-                'gradient': [self.startHue, self.endHue]}
+                'gradient': [self.startHue, self.endHue], 'colorMode': self.colorMode,
+                'gradientColors': [self.startColor.name(), self.endColor.name()]}
 
     def setState(self, state, curves=False):
         setPen(self.commonPen, state['pen'])
-        self.startHue, self.endHue = (int(hue) for hue in state.get('gradient', [self.startHue, self.endHue]))
+        if 'gradientColors' in state:
+            self.startColor, self.endColor = (QColor(color) for color in state['gradientColors'][:2])
+        elif 'gradient' in state:           # saved before: hues only
+            self.startColor, self.endColor = (QColor.fromHsv(int(hue), 255, 255) for hue in state['gradient'][:2])
+        if state.get('colorMode') in (PALETTE, COMMON, GRADIENT):
+            self.colorMode = state['colorMode']
         if curves and len(state.get('curves', [])) == len(self.curvePens):
             for pen, penState in zip(self.curvePens, state['curves']):
                 setPen(pen, penState)
 
     def setCommonPalette(self):
-        self.curvePens.clear()
-
-        for i in range(self.common.numCurves):
-            pen = pg.mkPen(style = self.commonPen.style(), width = self.commonPen.width(), color = self.commonPen.color())
-            self.curvePens.append(pen)
+        """A pen per curve, in the common width and pattern and the color of the color mode."""
+        count = self.common.numCurves
+        self.curvePens[:] = [self.newCurvePen(i, count) for i in range(count)]
 
     @Slot()
     def setGradientPalette(self):
-        hueMin = min(self.startHue, self.endHue)
-        hueMax = max(self.startHue, self.endHue)
-
-        for i in range(self.common.numCurves):
-            hue = hueMin + int((hueMax - hueMin) * float(i) / (self.common.numCurves - 1))
-            color = QColor.fromHsv(hue, 255, 255)
-            self.curvePens[i].setColor(color)
-
+        """Color the curves from startColor (the first) to endColor (the last)."""
+        self.colorMode = GRADIENT
+        count = len(self.curvePens)
+        for i, pen in enumerate(self.curvePens):
+            pen.setColor(self.curveColor(i, count))
         self.styleChanged.emit()
+
+    @Slot()
+    def setPaletteColors(self):
+        """A color of its own for each curve, from a set of distinct colors."""
+        self.colorMode = PALETTE
+        count = len(self.curvePens)
+        for i, pen in enumerate(self.curvePens):
+            pen.setColor(self.curveColor(i, count))
+        self.styleChanged.emit()
+
+    def setGradientColors(self, start=None, end=None):
+        if start is not None:
+            self.startColor = QColor(start)
+        if end is not None:
+            self.endColor = QColor(end)
+        self.setGradientPalette()
 
     @Slot()
     def setCurveStyle(self, styleIndex):
@@ -119,6 +193,7 @@ class CurveStyle(QObject):
     @Slot()
     def setCurveColor(self, color):
         if self.common.applyToAllCurves:
+            self.colorMode = COMMON
             self.commonPen.setColor(color)
             for curvePen in self.curvePens:
                 curvePen.setColor(color)
@@ -397,7 +472,14 @@ class BaseStyle(QObject):
 
         self.common = StyleCommon()
         self.axesStyle = AxesStyle()
+        # The lines of the curves (dispersion: interpolated, or joining the
+        # points; absorption: the spectra; band structure: the edges of the fill)
+        self.showLines = True
 
+    @Slot(bool)
+    def setShowLines(self, show):
+        self.showLines = bool(show)
+        self.styleChanged.emit()
 
     def currentCurveIndex(self):
         return self.common.currentCurveIndex
@@ -416,7 +498,7 @@ class BaseStyle(QObject):
 
     def state(self):
         """The style as a JSON-able dict, with the style of each curve."""
-        state = {'axes': self.axesStyle.state(), 'curve': self.curveStyle.state()}
+        state = {'axes': self.axesStyle.state(), 'curve': self.curveStyle.state(), 'lines': self.showLines}
         if hasattr(self, 'pointStyle'):
             state['point'] = self.pointStyle.state()
         return state
@@ -427,6 +509,8 @@ class BaseStyle(QObject):
         there are as many curves as when it was saved. Missing or invalid parts
         are left as they are.
         """
+        if isinstance(state.get('lines'), bool):
+            self.showLines = state['lines']
         for key, part in (('axes', self.axesStyle), ('curve', getattr(self, 'curveStyle', None)),
                           ('point', getattr(self, 'pointStyle', None))):
             if part is None or key not in state:
@@ -464,6 +548,9 @@ class AbsorptionStyle(BaseStyle):
 
         self.curveStyle = CurveStyle(self.common)
         self.curveStyle.styleChanged.connect(self.styleChanged)
+        # Each spectrum in a color of its own (that of its Q-point), until a color is chosen for all
+        self.curveStyle.colorMode = PALETTE
+        self.curveStyle.paletteKeys = []
 
         self.pointStyle = PointStyle(self.common)
         self.pointStyle.styleChanged.connect(self.styleChanged)
@@ -483,9 +570,16 @@ class AbsorptionStyle(BaseStyle):
 
     @Slot()
     def appendCurveStyle(self, index):
-        self.curveStyle.curvePens.append(pg.mkPen(index))
-        self.pointStyle.pointSymbols.append('o')
-        self.pointStyle.pointSizes.append(6)
+        """A new spectrum: the style for all, its color from the color mode (a gradient spread again)."""
+        curves = self.curveStyle
+        count = len(curves.curvePens) + 1
+        curves.paletteKeys.append(int(index))      # the Q-point: its palette color
+        curves.curvePens.append(curves.newCurvePen(count - 1, count))
+        if curves.colorMode == GRADIENT:
+            for i, pen in enumerate(curves.curvePens):
+                pen.setColor(curves.curveColor(i, count))
+        self.pointStyle.pointSymbols.append(self.pointStyle.commonPointSymbol)
+        self.pointStyle.pointSizes.append(self.pointStyle.commonPointSize)
 
         self.common.numCurves += 1
 
@@ -494,6 +588,8 @@ class AbsorptionStyle(BaseStyle):
     @Slot()
     def removeCurveStyle(self, index):
         self.curveStyle.curvePens.pop(index)
+        if index < len(self.curveStyle.paletteKeys):
+            self.curveStyle.paletteKeys.pop(index)
         self.pointStyle.pointSymbols.pop(index)
         self.pointStyle.pointSizes.pop(index)
 

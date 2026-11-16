@@ -73,15 +73,21 @@ class AbsorptionWidget(pg.GraphicsLayoutWidget):
             pointSymbols = self.style.pointStyle.pointSymbols
             pointSizes = self.style.pointStyle.pointSizes
 
+            lines = self.style.showLines
             for i, data in enumerate(excAbsData):
-                dataItem = pg.PlotDataItem(data['energy'], data['absorption'], symbol = None, pen = curvePens[i], name = "Q-point %d" % (data['q'] + 1))
-                dataItem.curve.setClickable(True)
-                dataItem.sigClicked.connect(self.curveSelected)
+                name = "Q-point %d" % (data['q'] + 1)
+                if lines:
+                    dataItem = pg.PlotDataItem(data['energy'], data['absorption'], symbol = None, pen = curvePens[i], name = name)
+                    dataItem.curve.setClickable(True)
+                    dataItem.sigClicked.connect(self.curveSelected)
 
-                self.absorption.addItem(dataItem)
-                self.curveItems.append(dataItem.curve)
+                    self.absorption.addItem(dataItem)
+                    self.curveItems.append(dataItem.curve)
 
-                scatterPlotItem = pg.ScatterPlotItem(x = data['brightExcEnergy'], y = data['brightExcAbsorption'], data = data['data'], symbol = pointSymbols[i], size = pointSizes[i])
+                # The bright excitons in the color of their spectrum (as in exported figures)
+                color = curvePens[i].color()
+                # Without lines, the points carry the name of the spectrum in the legend
+                scatterPlotItem = pg.ScatterPlotItem(x = data['brightExcEnergy'], y = data['brightExcAbsorption'], data = data['data'], symbol = pointSymbols[i], size = pointSizes[i], brush = color, pen = color, name = None if lines else name)
                 scatterPlotItem.sigClicked.connect(self.getSelectedExcitons)
                 self.absorption.addItem(scatterPlotItem)
 

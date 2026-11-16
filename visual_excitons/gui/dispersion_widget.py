@@ -63,7 +63,8 @@ class DispersionWidget(pg.PlotWidget):
         pointSymbols = self.style.pointStyle.pointSymbols
         pointSizes = self.style.pointStyle.pointSizes
 
-        for i in range(len(yInter)):
+        lines = self.style.showLines
+        for i in range(len(yInter) if lines else 0):
             dataItem = pg.PlotDataItem(x=xInter, y=yInter[i], pen=curvePens[i], symbol=None)
             dataItem.curve.setClickable(True)
             dataItem.sigClicked.connect(self.curveSelected)
@@ -71,13 +72,30 @@ class DispersionWidget(pg.PlotWidget):
             self.addItem(dataItem)
             self.curveItems.append(dataItem.curve)
 
+        # Not interpolated (only some Q-points computed): the points of each
+        # exciton joined in path order, in the style of its curve
+        if len(yInter) == 0 and lines and not self.singleQPoint:
+            for i in range(len(points)):
+                curve = np.asarray(points[i], dtype=float)
+                if len(curve) < 2:
+                    continue
+                order = np.argsort(curve[:, 0], kind='stable')
+                dataItem = pg.PlotDataItem(x=curve[order, 0], y=curve[order, 1], pen=curvePens[i], symbol=None)
+                dataItem.curve.setClickable(True)
+                dataItem.sigClicked.connect(self.curveSelected)
+                self.addItem(dataItem)
+                self.curveItems.append(dataItem.curve)
+
         if self.singleQPoint and len(points) > 0:
             for i, y in enumerate(np.array(points)[:, 1]):
                 line = pg.InfiniteLine(pos = y, angle = 0, movable = False, pen = plotForeground())
                 self.addItem(line)
 
         for i in range(len(points)):
-            scatterPlotItem = pg.ScatterPlotItem(pos=points[i], data=pointsData[i], symbol=pointSymbols[i], pxMode=True, size=pointSizes[i])
+            # In the color of the exciton's curve (as in exported figures)
+            color = curvePens[i].color() if i < len(curvePens) else None
+            scatterPlotItem = pg.ScatterPlotItem(pos=points[i], data=pointsData[i], symbol=pointSymbols[i], pxMode=True,
+                                                 size=pointSizes[i], brush=color, pen=color)
             scatterPlotItem.sigClicked.connect(self.getSelectedQPoints)
             self.addItem(scatterPlotItem)
 

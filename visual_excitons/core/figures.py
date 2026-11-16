@@ -11,6 +11,8 @@ Data (`data`, a dict; lengths of the Q-path in its own units, energies in eV):
 
 - 'dispersion': {'points': (curves, path points, 2), 'xInter': (n,),
   'yInter': (curves, n), 'ticks': [...], 'labels': [...]}
+  (styles[panel]['lines'], default True: the lines of the curves; without
+  interpolated curves, the dispersion's points joined)
 - 'absorption': [{'q', 'energy', 'absorption', 'brightEnergy', 'brightAbsorption',
   'brightIndices', 'brightIntensities', 'darkEnergy'}, ...]
 - 'bands': {'k': (n,), 'bands': (bands, n), 'weights': (bands, n), 'ticks', 'labels'}
@@ -155,9 +157,15 @@ def drawDispersion(ax, dispersion, styles, selected, options):
     yInter = np.asarray(dispersion.get('yInter', []), dtype=float)
     for i in range(len(points)):
         style = curveStyle(styles, i)
-        if len(xInter) and i < len(yInter):
+        lines = styles.get('lines', True)
+        if lines and len(xInter) and i < len(yInter):
             ax.plot(xInter, yInter[i], color=style['color'], linewidth=style['width'], linestyle=style['dash'],
                     zorder=2)
+        elif lines and not len(xInter) and points.shape[1] > 1:
+            # Not interpolated (only some Q-points computed): the points joined in path order
+            order = np.argsort(points[i, :, 0], kind='stable')
+            ax.plot(points[i, order, 0], points[i, order, 1], color=style['color'], linewidth=style['width'],
+                    linestyle=style['dash'], zorder=2)
         ax.plot(points[i, :, 0], points[i, :, 1], linestyle='none', marker=style['marker'],
                 markersize=style['markerSize'], markerfacecolor=style['color'], markeredgecolor='none', zorder=3)
     if options['highlight'] and selected:
@@ -175,12 +183,16 @@ def drawAbsorption(ax, spectra, styles, selected, options, rotated=False, barsAx
 
     for i, spectrum in enumerate(spectra):
         style = curveStyle(styles, i)
-        ax.plot(*xy(spectrum['energy'], spectrum['absorption']), color=style['color'], linewidth=style['width'],
-                linestyle=style['dash'], label=f"Q-point {int(spectrum['q']) + 1}", zorder=2)
+        label = f"Q-point {int(spectrum['q']) + 1}"
+        lines = styles.get('lines', True)
+        if lines:
+            ax.plot(*xy(spectrum['energy'], spectrum['absorption']), color=style['color'], linewidth=style['width'],
+                    linestyle=style['dash'], label=label, zorder=2)
         if len(spectrum['brightEnergy']):
+            # Without lines, the points carry the label of the spectrum in the legend
             ax.plot(*xy(spectrum['brightEnergy'], spectrum['brightAbsorption']), linestyle='none',
                     marker=style['marker'], markersize=style['markerSize'], markerfacecolor=style['color'],
-                    markeredgecolor='k', markeredgewidth=0.3, zorder=3)
+                    markeredgecolor='k', markeredgewidth=0.3, zorder=3, label=None if lines else label)
         if options['labelExcitons']:
             for energy, value, index in zip(spectrum['brightEnergy'], spectrum['brightAbsorption'],
                                             spectrum['brightIndices']):
@@ -244,7 +256,8 @@ def drawBands(ax, bands, styles, options):
                                            np.asarray(bands['weights'], dtype=float))):
         style = curveStyle(styles, i)
         ax.fill_between(k, band - weight, band + weight, color=fill, alpha=0.6, linewidth=0, zorder=1)
-        ax.plot(k, band, color=style['color'], linewidth=0.6 * style['width'], linestyle=style['dash'], zorder=2)
+        if styles.get('lines', True):
+            ax.plot(k, band, color=style['color'], linewidth=0.6 * style['width'], linestyle=style['dash'], zorder=2)
     pathAxis(ax, bands.get('ticks', []), bands.get('labels', []), options)
     ax.set_ylabel(ENERGY_LABEL)
 

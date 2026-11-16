@@ -174,8 +174,9 @@ def test_absorption_curves_keep_their_styles(calculations):
     def click(i, ctrl=False):
         calculations.computeQPointAbsorptionSpectrum([Point(i)], ctrl)
         curves = [data['q'] for data in calculations.excAbsData]
-        # Each style was created as pg.mkPen(q): its color identifies its curve
-        styles = [next(q for q in range(10) if pen.color() == pg.mkPen(q).color()) for pen in style.curveStyle.curvePens]
+        # Each spectrum's palette color is that of its Q-point: it identifies its curve
+        from visual_excitons.core.style import paletteColor
+        styles = [next(q for q in range(10) if pen.color() == paletteColor(q)) for pen in style.curveStyle.curvePens]
         assert styles == curves and style.common.numCurves == len(curves)
         return curves
 

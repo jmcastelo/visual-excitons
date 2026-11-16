@@ -148,3 +148,35 @@ def test_band_structure_needs_gamma_from_the_q_point():
     assert applied and applied[-1]['k'] == [] and not submitted   # not Γ: cleared
     calc.getExcitonBandStructure([Clicked(0)], None)
     assert submitted                                               # Γ: computed
+
+
+@pytest.mark.data
+def test_points_joined_when_not_interpolated(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    import visual_excitons.gui.main_window as main_window
+    from visual_excitons.gui.figure_export import figureData, figureStyles
+    from visual_excitons.core.figures import buildFigure
+    QSettings('VisualExcitons', 'VisualExcitons').clear()
+    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
+    window = main_window.MainWindow()
+    qtbot.addWidget(window)
+    window.openDataset(main_window.findDataset(partialDataset(tmp_path, (1, 2, 5, 30))))
+    window.system.qPathLineEdit.setText('LGZF')
+    assert window.system.setBrillouinZone()
+    quietly(window.calculations.getExcitonDispersion)
+    qtbot.waitUntil(lambda: len(window.calculations.dispPoints) > 0, timeout=60000)
+    window.showAppearance('dispersion')
+    plot, box = window.spectra.dispersionWidget, window.appearancePanel.linesCheckBox
+    count = len(window.calculations.dispPoints)
+    assert box.isChecked() and len(plot.curveItems) == count       # one line per exciton
+
+    def figureLines():
+        data = figureData(window.calculations)
+        styles = figureStyles(window.dispersionStyle, window.absorptionStyle, window.bandStructureStyle)
+        ax = buildFigure(data, styles, {'panels': ['dispersion']}).axes[0]
+        points = len(window.calculations.dispPoints[0])           # not the vertical lines at special points
+        return [line for line in ax.lines if line.get_linestyle() != 'None' and len(line.get_xdata()) == points]
+    assert len(figureLines()) == count
+
+    box.setChecked(False)
+    assert plot.curveItems == [] and figureLines() == []

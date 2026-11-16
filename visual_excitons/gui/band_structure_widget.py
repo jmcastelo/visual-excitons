@@ -52,13 +52,15 @@ class BandStructureWidget(pg.PlotWidget):
         yMax = []
 
         curvePens = self.style.curveStyle.curvePens
+        # Without lines, the edges are invisible (still there for the fill between them)
+        pen = lambda i: curvePens[i] if self.style.showLines else None
 
         for i in range(len(w)):
-            dataItemHigh = pg.PlotDataItem(x, y[i] + w[i], pen = curvePens[i], symbol = None)
+            dataItemHigh = pg.PlotDataItem(x, y[i] + w[i], pen = pen(i), symbol = None)
             dataItemHigh.curve.setClickable(True)
             dataItemHigh.sigClicked.connect(self.curveSelected)
 
-            dataItemLow = pg.PlotDataItem(x, y[i] - w[i], pen = curvePens[i], symbol = None)
+            dataItemLow = pg.PlotDataItem(x, y[i] - w[i], pen = pen(i), symbol = None)
             dataItemLow.curve.setClickable(True)
             dataItemLow.sigClicked.connect(self.curveSelected)
 

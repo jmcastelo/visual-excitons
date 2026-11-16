@@ -184,7 +184,7 @@ A dataset is the set of directories with the databases of one calculation:
 
 - **SAVE** directory: contains `ns.db1`. The Bravais lattice type (`ibrav` index and variant) and parameters are detected from it, from the symmetry of the cell: centred lattices (FCC, BCC, body-centred tetragonal...) are recognised whatever primitive vectors the calculation used, and whatever their orientation.
 - **BSE** directory: contains the `ndb.BS_diago_Q*` files, one per Q-point: `ndb.BS_diago_Q<n>` is the n-th Q-point of the irreducible list of the grid. Only some may have been computed (e.g. Q1 alone, for the optical spectrum, or Q1, Q2, Q5, Q30): the System panel and the status bar then say so (`4 of 90 Q-points`), and the program uses what there is:
-  - The dispersion shows the computed Q-points that lie on the Q-path, without the interpolated curves (the interpolation needs every Q-point), with a note saying so; with Q1 alone, lines at the exciton energies at Γ.
+  - The dispersion shows the computed Q-points that lie on the Q-path, without the interpolated curves (the interpolation needs every Q-point), with a note saying so. The points of each exciton are joined by straight lines, in the style of its curve (also in exported figures); untick `Draw the lines`, in the `Curves` section of the Appearance panel, to show the points alone. With Q1 alone: lines at the exciton energies at Γ.
   - `Q-point` in the Absorption section adds the spectrum of any computed Q-point, on the path or not.
   - The Q-point of the wave function only takes computed ones.
   - The band structure needs Q1 (Γ).
@@ -229,8 +229,13 @@ Spectra controls:
 
 The Appearance panel sets the style of the 2D plots. Open it on a plot with the palette button in the title bar of the plot's panel, or with `Appearance…` in the plot's right-click menu; the tabs at its top switch between the three plots. Its sections, those of the plot chosen:
 
-- **Curves**: the line pattern, color and width. `Apply to` chooses whether the changes apply to all the curves or to one of them (named after its exciton, Q-point or band); clicking a curve in a plot chooses it there. With all the curves, `Gradient` colors them along a range of hues, from the first color to the last.
-- **Symbols** (dispersion and absorption): the shape and size of the points; `Different shape per curve` gives each curve a shape of its own.
+- **Curves**: the line pattern, color and width; the points of a curve (excitons of the dispersion, bright excitons of a spectrum) are drawn in its color. `Apply to` chooses whether the changes apply to all the curves or to one of them (named after its exciton, Q-point or band); clicking a curve in a plot chooses it there. With all the curves, their colors can be:
+  - one color for all (`Color`; with several colors in use, its swatch shows them as stripes);
+  - a gradient (`Gradient`) from the first color (first curve) to the second (last curve), in that order, with their brightness and saturation;
+  - a different color per curve (`Different color per curve`), from a set of distinct colors readable on light and dark backgrounds; this is the default for the absorption spectra, where each Q-point keeps its color as spectra are added and removed.
+
+  Spectra added later take the width, pattern and symbols chosen for all, and the colors as chosen (the same color, their place in the gradient, or their Q-point's color). `Draw the lines` (on by default, for each plot) draws the lines of its curves: for the dispersion, the interpolated curves, or the points of each exciton joined when it is not interpolated; for the absorption, the spectra; for the band structure, the edges of the fill. Untick it for the points alone (in exported figures too).
+- **Symbols** (dispersion and absorption): the shape and size of the points; `Different shape per curve` gives each curve a shape of its own, and `Shape` then reads `Different per curve`: choosing a shape gives it to all of them again. `Pattern` works the same way when the curves have different line patterns.
 - **Axes**: the color and font of the title, axis labels and tick labels, the color and width of the axes, and the background. With `Same axes style for all plots`, the changes apply to the three plots.
 - **Legend** (absorption): its text color and size, background (`None` for a transparent one), border and position.
 - **Fill** (band structure): the color of the excitonic weights around the bands, and their scale (`Weight factor`).

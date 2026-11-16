@@ -43,7 +43,7 @@ def blocked(*widgets):
     return stack
 
 
-def openReverting(dialog, styles, refresh=None):
+def openReverting(dialog, styles, refresh=None, accepted=None):
     """
     Show a color or font dialog that previews its value on the plots; Cancel
     (or closing it) restores `styles` as they were when it opened, the style of
@@ -54,6 +54,8 @@ def openReverting(dialog, styles, refresh=None):
 
     def finished(result):
         dialog.finished.disconnect(finished)
+        if result == QDialog.DialogCode.Accepted and accepted is not None:
+            accepted()        # the value chosen, also when the dialog does not preview it
         if result == QDialog.DialogCode.Rejected:
             for style, state in snapshots:
                 style.setState(state, curves=True)
@@ -93,7 +95,20 @@ class ColorButton(QPushButton):
         self.color = None
         self.setFixedWidth(52)
 
+    def setColors(self, colors):
+        """Several colors at once (e.g. curves in colors of their own), shown as stripes."""
+        colors = [QColor(color) for color in colors]
+        distinct = list(dict.fromkeys(color.name() for color in colors))
+        if len(distinct) <= 1:
+            self.setColor(colors[0] if colors else None)
+            return
+        self.color = QColor(colors[0])
+        self.colors = [QColor(name) for name in distinct[:8]]
+        self.setToolTip(f'{self.baseToolTip}: {len(distinct)} colors (one per curve); choose one for all of them')
+        self.update()
+
     def setColor(self, color):
+        self.colors = None
         self.color = None if color is None else QColor(color)
         self.setToolTip(f'{self.baseToolTip}: {self.color.name() if self.color is not None else "none"}'
                         if self.baseToolTip else '')
@@ -104,7 +119,13 @@ class ColorButton(QPushButton):
         painter = QPainter(self)
         rect = self.rect().adjusted(8, 6, -8, -6)
         painter.setPen(QPen(self.palette().color(self.foregroundRole()), 1))
-        if self.color is None:
+        if getattr(self, 'colors', None):
+            width = rect.width() / len(self.colors)
+            for i, color in enumerate(self.colors):
+                painter.fillRect(QRectF(rect.left() + i * width, rect.top(), width, rect.height()), color)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect)
+        elif self.color is None:
             painter.drawRect(rect)
             painter.drawLine(rect.bottomLeft(), rect.topRight())
         else:
@@ -133,8 +154,12 @@ class AppearancePanel(Inspector):
         self.curveNames = curveNames or (lambda key, count: [f'Curve {i + 1}' for i in range(count)])
         self.graph = 'dispersion'
         self.colorDialog = QColorDialog(self)
+        # Qt's own dialogs: native ones (e.g. through the desktop portal) do not
+        # report the color as it changes, so nothing would be previewed
+        self.colorDialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
         self.colorDialog.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel, False)
         self.fontDialog = QFontDialog(self)
+        self.fontDialog.setOption(QFontDialog.FontDialogOption.DontUseNativeDialog, True)
         self.colorSlot = self.fontSlot = None   # what each dialog applies, while open
 
         self.refreshTimer = QTimer(self)
@@ -190,7 +215,9 @@ class AppearancePanel(Inspector):
 
         self.patternComboBox = QComboBox()
         self.patternComboBox.addItems(PATTERNS)
-        self.patternComboBox.currentIndexChanged.connect(lambda index: self.curveStyle().setCurveStyle(index))
+        # Shown when the curves differ; any choice (even the one shown) applies
+        self.patternComboBox.setPlaceholderText('Different per curve')
+        self.patternComboBox.activated.connect(lambda index: self.curveStyle().setCurveStyle(index))
 
         self.lineColorButton = ColorButton('Line color')
         self.lineColorButton.clicked.connect(lambda: self.editColor(
@@ -203,12 +230,12 @@ class AppearancePanel(Inspector):
 
         self.startHueButton = ColorButton('First curve')
         self.startHueButton.clicked.connect(lambda: self.editColor(
-            'First color of the gradient', QColor.fromHsv(self.curveStyle().startHue, 255, 255),
-            lambda color: self.setGradientHue('startHue', color)))
+            'First color of the gradient', self.curveStyle().startColor,
+            lambda color: self.curveStyle().setGradientColors(start=color)))
         self.endHueButton = ColorButton('Last curve')
         self.endHueButton.clicked.connect(lambda: self.editColor(
-            'Last color of the gradient', QColor.fromHsv(self.curveStyle().endHue, 255, 255),
-            lambda color: self.setGradientHue('endHue', color)))
+            'Last color of the gradient', self.curveStyle().endColor,
+            lambda color: self.curveStyle().setGradientColors(end=color)))
         gradient = QHBoxLayout()
         gradient.addWidget(self.startHueButton)
         gradient.addWidget(QLabel('to'))
@@ -217,7 +244,18 @@ class AppearancePanel(Inspector):
         self.gradientRow = QWidget()
         self.gradientRow.setLayout(gradient)
         gradient.setContentsMargins(0, 0, 0, 0)
-        self.gradientRow.setToolTip('Color the curves along a range of hues, from the first to the last')
+        self.gradientRow.setToolTip('Color the curves from the first color (first curve) to the second (last curve)')
+
+        self.paletteButton = QPushButton('Different color per curve')
+        self.paletteButton.setToolTip('Give each curve a color of its own, from a set of distinct colors')
+        self.paletteButton.clicked.connect(lambda: self.curveStyle().setPaletteColors())
+
+        # The lines of the plot's curves, or only their points (part of its style)
+        self.linesCheckBox = QCheckBox('Draw the lines')
+        self.linesCheckBox.setToolTip('The lines of the curves: for the dispersion, the interpolated curves (or the\n'
+                                      'points joined when not interpolated); for the absorption, the spectra; for\n'
+                                      'the band structure, the edges of the fill. Untick for the points alone')
+        self.linesCheckBox.toggled.connect(lambda show: self.style().setShowLines(show))
 
         form = formLayout()
         form.addRow('Apply to:', self.curveComboBox)
@@ -225,13 +263,18 @@ class AppearancePanel(Inspector):
         form.addRow('Color:', self.lineColorButton)
         form.addRow('Width:', self.lineWidthSpinBox)
         form.addRow('Gradient:', self.gradientRow)
+        form.addRow(self.paletteButton)
+        form.addRow(self.linesCheckBox)
         self.curvesForm = form
         self.curvesSection = self.addSection('Curves', form)
 
     def buildSymbolsSection(self):
         self.symbolComboBox = QComboBox()
         self.symbolComboBox.addItems(list(SYMBOLS.values()))
-        self.symbolComboBox.currentIndexChanged.connect(lambda index: self.pointStyle().setPointSymbol(index))
+        # "Different per curve" after Different shape per curve: choosing a shape, even the one
+        # shown before, gives it to all the curves again
+        self.symbolComboBox.setPlaceholderText('Different per curve')
+        self.symbolComboBox.activated.connect(lambda index: self.pointStyle().setPointSymbol(index))
 
         self.symbolSizeSpinBox = QSpinBox()
         self.symbolSizeSpinBox.setRange(0, 500)
@@ -435,7 +478,8 @@ class AppearancePanel(Inspector):
             dialog.setCurrentColor(QColor(current) if current is not None else QColor('white'))
         self.colorSlot = apply
         dialog.currentColorChanged.connect(apply)
-        openReverting(dialog, styles or list(self.styles.values()), self.refresh)
+        openReverting(dialog, styles or list(self.styles.values()), self.refresh,
+                      accepted=lambda: apply(dialog.currentColor()))
 
     def editAxesColor(self, name, label):
         current = getattr(self.style().axesStyle, name).getColor()
@@ -451,7 +495,8 @@ class AppearancePanel(Inspector):
             dialog.setCurrentFont(getattr(self.style().axesStyle, name).getFont())
         self.fontSlot = lambda font: [getattr(style.axesStyle, name).setFont(font) for style in self.axesTargets()]
         dialog.currentFontChanged.connect(self.fontSlot)
-        openReverting(dialog, list(self.styles.values()), self.refresh)
+        slot = self.fontSlot
+        openReverting(dialog, list(self.styles.values()), self.refresh, accepted=lambda: slot(dialog.currentFont()))
 
     def axesTargets(self):
         return list(self.styles.values()) if self.sameAxesCheckBox.isChecked() else [self.style()]
@@ -460,14 +505,6 @@ class AppearancePanel(Inspector):
     def setAxesWidth(self, width):
         for style in self.axesTargets():
             style.axesStyle.setAxesWidth(width)
-
-    def setGradientHue(self, attribute, color):
-        curves = self.curveStyle()
-        setattr(curves, attribute, color.hue() if color.hue() >= 0 else 0)
-        if curves.common.numCurves > 1:
-            curves.setGradientPalette()
-        else:
-            self.scheduleRefresh()
 
     # Showing the values
 
@@ -499,14 +536,24 @@ class AppearancePanel(Inspector):
             style.setApplyToAllCurves(True)   # the curve chosen is gone
 
         pen = self.currentPen()
+        pens = style.curveStyle.curvePens
+        mixed = not single and len({curvePen.style() for curvePen in pens}) > 1
         with blocked(self.patternComboBox, self.lineWidthSpinBox):
-            if pen.style() in PEN_STYLES:
+            if mixed:
+                self.patternComboBox.setCurrentIndex(-1)       # "Different per curve"
+            elif pen.style() in PEN_STYLES:
                 self.patternComboBox.setCurrentIndex(PEN_STYLES.index(pen.style()))
             self.lineWidthSpinBox.setValue(max(1, pen.width()))
-        self.lineColorButton.setColor(pen.color())
+        if single or not style.curveStyle.curvePens:
+            self.lineColorButton.setColor(pen.color())
+        else:   # all curves: the colors they have (one, or several in a palette or gradient)
+            self.lineColorButton.setColors([curvePen.color() for curvePen in style.curveStyle.curvePens])
         curves = style.curveStyle
-        self.startHueButton.setColor(QColor.fromHsv(curves.startHue, 255, 255))
-        self.endHueButton.setColor(QColor.fromHsv(curves.endHue, 255, 255))
+        self.startHueButton.setColor(curves.startColor)
+        self.endHueButton.setColor(curves.endColor)
+        self.curvesForm.setRowVisible(self.paletteButton, not single)
+        with blocked(self.linesCheckBox):
+            self.linesCheckBox.setChecked(style.showLines)
         self.curvesForm.setRowVisible(self.gradientRow, not single)
 
     def refreshSymbols(self, style):
@@ -515,8 +562,11 @@ class AppearancePanel(Inspector):
         single = not style.applyToAllCurves() and 0 <= index < len(points.pointSymbols)
         symbol = points.pointSymbols[index] if single else points.commonPointSymbol
         size = points.pointSizes[index] if single else points.commonPointSize
+        mixed = not single and len(set(points.pointSymbols)) > 1
         with blocked(self.symbolComboBox, self.symbolSizeSpinBox):
-            if symbol in points.symbols:
+            if mixed:
+                self.symbolComboBox.setCurrentIndex(-1)        # "Different per curve"
+            elif symbol in points.symbols:
                 self.symbolComboBox.setCurrentIndex(points.symbols.index(symbol))
             self.symbolSizeSpinBox.setValue(size)
         self.symbolsForm.setRowVisible(self.varySymbolsButton, not single)
