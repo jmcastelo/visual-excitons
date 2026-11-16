@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
         self.startPage.openSessionRequested.connect(self.chooseSession)
         self.startPage.datasetChosen.connect(self.openDataset)
         self.startPage.sessionChosen.connect(self.openSession)
+        self.startPage.shownChanged.connect(self.wavefunction.excitonWfWidget.setGizmoSuppressed)
 
     def createMenus(self):
         # File

@@ -15,6 +15,9 @@ class StartPage(QScrollArea):
     openSessionRequested = Signal()
     datasetChosen = Signal(dict)
     sessionChosen = Signal(str)
+    # Shown or hidden: widgets drawn over everything (WA_AlwaysStackOnTop, e.g.
+    # the axes gizmo of the 3D view) must be hidden while it is shown
+    shownChanged = Signal(bool)
 
     def __init__(self, window):
         """Over the central widget (the panels) of main window `window`, following its geometry."""
@@ -96,6 +99,8 @@ class StartPage(QScrollArea):
         self.sessionLinks, self.datasetLinks = [], []
         window.installEventFilter(self)
         self.place()
+        # Hidden until shown (see shownChanged)
+        self.hide()
 
     def eventFilter(self, watched, event):
         if watched is self.mainWindow and event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest, QEvent.Type.Show):
@@ -108,6 +113,12 @@ class StartPage(QScrollArea):
         if central is not None:
             self.setGeometry(central.geometry())
         self.raise_()
+
+    def setVisible(self, visible):
+        changed = visible == self.isHidden()
+        super().setVisible(visible)
+        if changed:
+            self.shownChanged.emit(visible)
 
     def showEvent(self, event):
         self.place()

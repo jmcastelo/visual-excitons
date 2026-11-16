@@ -352,6 +352,7 @@ def test_starts_empty_with_the_start_page(newWindow, tmp_path):
     w = newWindow()
     page = w.startPage
     assert w.dataset is None and w.options.saveDir == '' and not page.isHidden()
+    assert w.wavefunction.excitonWfWidget.gizmo.isHidden()      # drawn over everything otherwise
     assert w.windowTitle() == 'Visual Excitons'
     # The recent ones, those missing disabled
     assert [(link.text(), link.isEnabled()) for link in page.sessionLinks] == [('kept', True), ('gone', False)]
@@ -371,6 +372,8 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     w = newWindow()
     w.openDataset(main_window.findDataset(folder))
     assert w.startPage.isHidden() and shownTitle(w) == 'Untitled — BiI3_Bulk_8x8x8 — Visual Excitons'
+    gizmo = w.wavefunction.excitonWfWidget.gizmo
+    assert not gizmo.isHidden()
     w.system.qPathLineEdit.setText('LGZF')
     assert w.system.setBrillouinZone()
     p3 = w.wavefunction.parameters3DWidget
@@ -404,7 +407,7 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     assert w.system.qPathLineEdit.text() == '' and not w.system.setPathButton.isEnabled()
     view = w.wavefunction.excitonWfWidget
     assert not view.latticeItems and not view.latticeBoundaryItems and view.cellLattice is None
-    assert p3.colormapComboBox.currentText() == 'Magma'
+    assert p3.colormapComboBox.currentText() == 'Magma' and gizmo.isHidden()
     # Nothing to lose now: no question
     answers.clear()
     w.newSession()
@@ -413,7 +416,7 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     # Opened again: its parameters and Q-path are back
     w.startPage.datasetLinks[0].click()
     assert w.options.nExcitons == 10 and w.options.getPathString() == 'LGZF'
-    assert w.startPage.isHidden()
+    assert w.startPage.isHidden() and not gizmo.isHidden()
 
 
 @pytest.mark.data

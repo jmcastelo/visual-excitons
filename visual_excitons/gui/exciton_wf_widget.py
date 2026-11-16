@@ -96,6 +96,11 @@ class ExcitonWfWidget(gl.GLViewWidget):
         gizmo.show()
         gizmo.raise_()
 
+    def setGizmoSuppressed(self, suppressed: bool):
+        """Hide the gizmo (e.g. under the start page: it is drawn over everything in the window)."""
+        if self.gizmo is not None:
+            self.gizmo.setVisible(not suppressed)
+
     def _reposition_gizmo(self):
         if self.gizmo is None:
             return
