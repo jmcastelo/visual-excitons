@@ -38,9 +38,11 @@ def scrollableTab(plot, *labels):
     layout = QVBoxLayout(content)
     layout.setContentsMargins(4, 4, 4, 4)
     plot.setMinimumHeight(MIN_PLOT_HEIGHT)
-    # Room above the plot: the axes would otherwise run into the top of the
-    # panel, looking cut
-    plot.getPlotItem().layout.setContentsMargins(0, 12, 0, 0)
+    # A closed frame: the axes not shown otherwise, with ticks but no values
+    for name in ('top', 'right'):
+        if not plot.getPlotItem().getAxis(name).isVisible():
+            plot.showAxis(name)
+            plot.getAxis(name).setStyle(showValues=False)
     layout.addWidget(plot, 1)
     for label in labels:
         layout.addWidget(label)
@@ -219,7 +221,7 @@ class AnalysisWidget(QTabWidget):
         foreground, background = colors['foreground'], colors['background']
         for plot in self.plots:
             plot.setBackground(background)
-            for name in ('left', 'bottom', 'right'):
+            for name in ('left', 'bottom', 'right', 'top'):
                 axis = plot.getAxis(name)
                 axis.setPen(foreground)
                 axis.setTextPen(foreground)
