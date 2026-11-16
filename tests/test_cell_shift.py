@@ -68,7 +68,6 @@ def test_wse2_layer_centred_in_the_window(qtbot, monkeypatch, tmp_path):
     from PySide6.QtCore import QSettings
     import visual_excitons.gui.main_window as main_window
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath('WSe2')))
@@ -96,6 +95,7 @@ def test_wse2_layer_centred_in_the_window(qtbot, monkeypatch, tmp_path):
     window.close()
     again = main_window.MainWindow()
     qtbot.addWidget(again)
+    again.openDataset(again.recentDatasets()[0])
     assert again.wavefunction.parameters3DWidget.cellShift() == pytest.approx([0.5, 0.5, 0.5])
 
 
@@ -123,7 +123,6 @@ def window_with_wave_function(qtbot, monkeypatch, tmp_path):
     import visual_excitons.gui.main_window as main_window
     from test_gui import fakeWaveFunction
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     fakeWaveFunction(window.calculations, sigma=2.0)
@@ -135,7 +134,6 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
     from PySide6.QtCore import QSettings
     import visual_excitons.gui.main_window as main_window
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath('WSe2')))

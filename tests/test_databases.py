@@ -91,7 +91,6 @@ def test_system_panel_offers_the_qp_databases_and_shows_the_checks(qtbot, monkey
     from PySide6.QtCore import QSettings
     import visual_excitons.gui.main_window as main_window
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath(BII3)))
@@ -147,7 +146,6 @@ def test_check_all_bse_button(qtbot, monkeypatch, tmp_path):
     from PySide6.QtCore import QSettings
     import visual_excitons.gui.main_window as main_window
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(trickedDataset(tmp_path)))

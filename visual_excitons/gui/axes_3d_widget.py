@@ -165,7 +165,7 @@ class AxisGizmo(gl.GLViewWidget):
 
     def setLatticeVectors(self, lattice):
         """Lattice vectors as rows (Cartesian components, any length unit)."""
-        self.lattice = np.asarray(lattice, dtype=float)
+        self.lattice = None if lattice is None else np.asarray(lattice, dtype=float)
         self.rebuild()
 
     def setShowCartesian(self, show: bool):

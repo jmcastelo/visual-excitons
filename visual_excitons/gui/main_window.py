@@ -17,6 +17,7 @@ from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
 from .options_widget import OptionsWidget
+from .start_page import StartPage
 from .spectra_panels import SpectraPanels
 from .wavefunction_panels import WavefunctionPanels
 from .docking import Panels, PRESETS, DEFAULT_PRESET, scrollable
@@ -33,7 +34,6 @@ from visual_excitons.core.session import (readSession, writeSession, datasetFing
 
 
 # Opened on the first run, when there is no recent dataset (relative to the repository)
-DEFAULT_DATASET_FOLDER = Path(__file__).resolve().parents[2] / 'data' / 'BiI3_Bulk_8x8x8'
 
 MAX_RECENT_DATASETS = 8
 
@@ -104,7 +104,8 @@ class MainWindow(QMainWindow):
         if not self.restoreGeometry(self.settings.value('geometry', b'')):
             self.resize(1600, 1000)
         self.restoreLayout()
-        self.openInitialDataset()
+        # No dataset yet: the start page, to open one or a session
+        self.startPage.setVisible(self.dataset is None)
 
         # Unsaved changes of the session: what a session file would hold is
         # compared with what was saved, shortly after each input and change of
@@ -191,9 +192,23 @@ class MainWindow(QMainWindow):
         self.analysisCheckBox.toggled.connect(lambda shown: self.panels.setShown('analysis', shown))
         self.panels.panelToggled.connect(self.onPanelToggled)
 
+        # Over the panels while no dataset is open
+        self.startPage = StartPage(self)
+        self.startPage.openDatasetRequested.connect(self.chooseDataset)
+        self.startPage.openSessionRequested.connect(self.chooseSession)
+        self.startPage.datasetChosen.connect(self.openDataset)
+        self.startPage.sessionChosen.connect(self.openSession)
+
     def createMenus(self):
         # File
         fileMenu = self.menuBar().addMenu('&File')
+
+        newSessionAction = QAction('&New session', self)
+        newSessionAction.setShortcut(QKeySequence.StandardKey.New)
+        newSessionAction.setStatusTip('Close the dataset and its results, and start again from the start page')
+        newSessionAction.triggered.connect(self.newSession)
+        fileMenu.addAction(newSessionAction)
+        fileMenu.addSeparator()
 
         openAction = QAction('&Open dataset…', self)
         openAction.setShortcut(QKeySequence.StandardKey.Open)
@@ -478,16 +493,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, dataset=dataset: self.maybeSaveSession('opening another dataset') and self.openDataset(dataset))
             self.recentMenu.addAction(action)
         self.recentMenu.setEnabled(bool(recent))
-
-    def openInitialDataset(self):
-        for dataset in self.recentDatasets():
-            if datasetExists(dataset):
-                self.openDataset(dataset)
-                return
-        if DEFAULT_DATASET_FOLDER.is_dir():
-            dataset = findDataset(DEFAULT_DATASET_FOLDER)
-            if datasetExists(dataset):
-                self.openDataset(dataset)
+        self.startPage.setRecentDatasets([(datasetName(dataset), str(Path(dataset.get('save') or '').parent),
+                                           datasetExists(dataset), dataset) for dataset in recent])
 
     @Slot()
     def chooseDataset(self):
@@ -538,6 +545,23 @@ class MainWindow(QMainWindow):
         self.state.restore(DATASET, dataset.get('state') or self.datasetDefaults)
         self.addRecentDataset(self.dataset)
         self.updateDatasetLabel()
+        self.startPage.hide()
+
+    @Slot()
+    def newSession(self):
+        """Close the dataset and its results (preferences stay), back to the start page."""
+        if not self.maybeSaveSession('starting a new session'):
+            return
+        self.calculations.cancel()
+        # Its parameters stay with it, for when it is opened again
+        self.storeDatasetState()
+        self.dataset = None
+        self.sessionPath = None
+        self.options.closeDataset()
+        self.spectra.clearQPath()
+        self.markSessionSaved()
+        self.updateDatasetLabel()
+        self.startPage.show()
 
     def storeDatasetState(self):
         """Save the parameters of the current dataset with it, in the recent datasets."""
@@ -546,6 +570,8 @@ class MainWindow(QMainWindow):
         self.dataset['state'] = self.state.values(DATASET)
         recent = [dict(self.dataset) if d.get('save') == self.dataset.get('save') else d for d in self.recentDatasets()]
         self.settings.setValue('recentDatasets', json.dumps(recent))
+        # The menu and start page open the datasets with what they hold: up to date
+        self.updateRecentMenu()
 
     def loadJson(self, key, default):
         try:
@@ -592,11 +618,15 @@ class MainWindow(QMainWindow):
             parts.append(self.options.qPointCount())
         self.datasetLabel.setText('  ·  '.join(parts))
         # [*]: where Qt shows the unsaved changes mark
-        title = [Path(self.sessionPath).stem + '[*]'] if self.sessionPath else []
+        title = [self.sessionName() + '[*]'] if self.dataset is not None else []
         title += [name] if name else []
         self.setWindowTitle(' — '.join(title + ['Visual Excitons']))
 
     # Sessions
+
+    def sessionName(self):
+        """The name of the current session: of its file, or Untitled before it is saved."""
+        return Path(self.sessionPath).stem if self.sessionPath else 'Untitled'
 
     def recentSessions(self):
         return [path for path in self.loadJson('recentSessions', []) if isinstance(path, str)]
@@ -617,6 +647,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, path=path: self.maybeSaveSession('opening another session') and self.openSession(path))
             self.recentSessionsMenu.addAction(action)
         self.recentSessionsMenu.setEnabled(bool(recent))
+        self.startPage.setRecentSessions([(Path(path).stem, str(Path(path).parent), Path(path).is_file(), path)
+                                          for path in recent])
 
     def sessionFolder(self):
         return self.settings.value('sessionDir', str(Path.cwd()))
@@ -752,13 +784,18 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def updateModified(self):
-        modified = self.sessionPath is not None and self.sessionSignature() != self.savedSignature
+        if self.sessionPath is not None:
+            modified = self.sessionSignature() != self.savedSignature
+        else:
+            # Not saved yet: only results would be lost (the parameters stay with the dataset)
+            modified = (self.dataset is not None and self.sessionResultsAction.isChecked()
+                        and self.calculations.hasResults())
         if modified != self.isWindowModified():
             self.setWindowModified(modified)
 
     def eventFilter(self, watched, event):
         if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.KeyRelease, QEvent.Type.Wheel):
-            if self.sessionPath is not None:
+            if self.dataset is not None:
                 self.modifiedTimer.start()
         return False
 
@@ -770,14 +807,20 @@ class MainWindow(QMainWindow):
         self.updateModified()
         if not self.isWindowModified():
             return True
-        name = Path(self.sessionPath).stem
+        if self.sessionPath:
+            text = f'The session {self.sessionName()} has changes that are not saved.\n\nSave them before {action}?'
+        else:
+            text = f'The results of this session are not saved.\n\nSave the session before {action}?'
         answer = QMessageBox.warning(
-            self, 'Unsaved changes', f'The session {name} has changes that are not saved.\n\n'
-            f'Save them before {action}?',
+            self, 'Unsaved changes', text,
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save)
         if answer == QMessageBox.StandardButton.Save:
-            self.writeSessionFile(self.sessionPath)
+            if self.sessionPath:
+                self.writeSessionFile(self.sessionPath)
+            else:
+                self.saveSessionAs()
+            self.updateModified()
             return not self.isWindowModified()
         return answer == QMessageBox.StandardButton.Discard
 

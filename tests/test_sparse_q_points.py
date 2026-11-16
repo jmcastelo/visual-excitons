@@ -157,7 +157,6 @@ def test_points_joined_when_not_interpolated(qtbot, monkeypatch, tmp_path):
     from visual_excitons.gui.figure_export import figureData, figureStyles
     from visual_excitons.core.figures import buildFigure
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(partialDataset(tmp_path, (1, 2, 5, 30))))

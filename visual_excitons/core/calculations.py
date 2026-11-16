@@ -358,6 +358,10 @@ class Calculations(QObject):
         self.resultsVersion += 1
         self.resultsChanged.emit()
 
+    def hasResults(self):
+        """Whether anything was computed: dispersion, absorption spectra, band structure or wave function."""
+        return bool(len(self.dispPoints) or self.excAbsData or len(self.k) or self.waveFunction is not None)
+
     @Slot()
     def resetDataset(self):
         """Forget everything computed from the previous dataset."""

@@ -168,7 +168,6 @@ def injectResults(window, wfShape=(54, 54, 18), supercell=(3, 3, 1)):
 def newWindow(qtbot, monkeypatch, tmp_path):
     import visual_excitons.gui.main_window as main_window
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
 
     def make():
         w = main_window.MainWindow()
@@ -338,3 +337,96 @@ def test_discard_closes_without_saving(newWindow, monkeypatch, tmp_path):
     w2.openSession(str(path))
     w2.updateModified()
     assert not w2.isWindowModified() and w2.close()
+
+
+# New sessions and the start page
+
+def test_starts_empty_with_the_start_page(newWindow, tmp_path):
+    from PySide6.QtCore import QSettings
+    import json
+    settings = QSettings('VisualExcitons', 'VisualExcitons')
+    session = tmp_path / 'kept.vxsession'
+    session.touch()
+    settings.setValue('recentSessions', json.dumps([str(session), str(tmp_path / 'gone.vxsession')]))
+    settings.setValue('recentDatasets', json.dumps([{'save': str(tmp_path / 'gone' / 'save')}]))
+    w = newWindow()
+    page = w.startPage
+    assert w.dataset is None and w.options.saveDir == '' and not page.isHidden()
+    assert w.windowTitle() == 'Visual Excitons'
+    # The recent ones, those missing disabled
+    assert [(link.text(), link.isEnabled()) for link in page.sessionLinks] == [('kept', True), ('gone', False)]
+    assert [link.isEnabled() for link in page.datasetLinks] == [False]
+    assert page.sessionsEmpty.isHidden() and page.datasetsEmpty.isHidden()
+    opened = []
+    w.openSession = opened.append
+    page.sessionLinks[0].click()
+    assert opened == [str(session)]
+
+
+@pytest.mark.data
+def test_new_session(newWindow, monkeypatch, tmp_path):
+    import visual_excitons.gui.main_window as main_window
+    from PySide6.QtWidgets import QMessageBox
+    folder = datasetPath('BiI3_Bulk_8x8x8')
+    w = newWindow()
+    w.openDataset(main_window.findDataset(folder))
+    assert w.startPage.isHidden() and shownTitle(w) == 'Untitled — BiI3_Bulk_8x8x8 — Visual Excitons'
+    w.system.qPathLineEdit.setText('LGZF')
+    assert w.system.setBrillouinZone()
+    p3 = w.wavefunction.parameters3DWidget
+    p3.colormapComboBox.setCurrentText('Magma')            # a preference: kept
+    w.updateModified()
+    assert not w.isWindowModified()                        # parameters alone: nothing to lose
+
+    # Results not saved in a session: marked, and New session asks; Cancel keeps everything
+    injectResults(w)
+    w.spectra.inspector.nExcitonsSpinBox.setValue(10)      # a parameter of the dataset
+    w.updateModified()
+    assert w.isWindowModified() and shownTitle(w).startswith('Untitled* — ')
+    answers = []
+    def answer(button):
+        def ask(parent, title, text, buttons, default):
+            answers.append(text)
+            return button
+        return ask
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Cancel))
+    w.newSession()
+    assert 'results of this session are not saved' in answers[-1] and 'starting a new session' in answers[-1]
+    assert w.dataset is not None and w.calculations.hasResults()
+
+    # Discard: the dataset closed, as before any was opened
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Discard))
+    w.newSession()
+    assert w.dataset is None and w.options.saveDir == '' and w.options.qBZ is None and not w.options.qPoints
+    assert not w.calculations.hasResults() and w.calculations.waveFunction is None
+    assert not w.startPage.isHidden() and shownTitle(w) == 'Visual Excitons' and w.datasetLabel.text() == 'No dataset'
+    assert w.system.saveDirEdit.text() == '' and w.system.hspTable.rowCount() == 0
+    assert w.system.qPathLineEdit.text() == '' and not w.system.setPathButton.isEnabled()
+    view = w.wavefunction.excitonWfWidget
+    assert not view.latticeItems and not view.latticeBoundaryItems and view.cellLattice is None
+    assert p3.colormapComboBox.currentText() == 'Magma'
+    # Nothing to lose now: no question
+    answers.clear()
+    w.newSession()
+    assert answers == []
+
+    # Opened again: its parameters and Q-path are back
+    w.startPage.datasetLinks[0].click()
+    assert w.options.nExcitons == 10 and w.options.getPathString() == 'LGZF'
+    assert w.startPage.isHidden()
+
+
+@pytest.mark.data
+def test_saving_an_untitled_session_when_asked(newWindow, monkeypatch, tmp_path):
+    import visual_excitons.gui.main_window as main_window
+    from PySide6.QtWidgets import QMessageBox
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    injectResults(w)
+    path = tmp_path / 'asked.vxsession'
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Save)
+    # Save asks for a file: cancelled, nothing closes
+    monkeypatch.setattr(main_window.QFileDialog, 'getSaveFileName', lambda *args, **kwargs: ('', ''))
+    assert not w.close()
+    monkeypatch.setattr(main_window.QFileDialog, 'getSaveFileName', lambda *args, **kwargs: (str(path), ''))
+    assert w.close() and path.is_file()

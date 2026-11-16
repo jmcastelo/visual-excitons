@@ -237,7 +237,8 @@ class ExcitonWfWidget(gl.GLViewWidget):
 
     def plotBaseLatticeVectors(self, baseVectors):
         # Cartesian axes and lattice vectors are only shown in the axes gizmo
-        self.cellLattice = np.asarray(baseVectors, dtype=float)
+        # (None: no cell, e.g. no dataset)
+        self.cellLattice = None if baseVectors is None else np.asarray(baseVectors, dtype=float)
         if self.gizmo is not None:
             self.gizmo.setLatticeVectors(self.cellLattice)
         self.updateCellInfo()

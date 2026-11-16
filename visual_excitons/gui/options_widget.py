@@ -270,6 +270,7 @@ class OptionsWidget(QWidget):
             self.findings = []
             self.checksLabel.setText('')
             self.checksDetailsButton.setEnabled(False)
+            self.checkAllBSEButton.setEnabled(False)
             return
         qpPath = f'{o.qpDir}/{o.qpFile}' if o.gw and o.qpDir and o.qpFile else None
         try:
@@ -380,7 +381,12 @@ class OptionsWidget(QWidget):
         if found:
             ibrav = self.options.detectLatticeType()
             if ibrav:
-                self.ibravComboBox.setCurrentText(str(ibrav))
+                # The lattice data of this dataset, also when the type is the
+                # one already chosen (no change of text: not set otherwise)
+                if self.ibravComboBox.currentText() == str(ibrav):
+                    self.getLatticeData(str(ibrav))
+                else:
+                    self.ibravComboBox.setCurrentText(str(ibrav))
             else:
                 msgBox = QMessageBox()
                 msgBox.setText('Warning')
@@ -432,6 +438,8 @@ class OptionsWidget(QWidget):
         else:
             self.variantLabel.clear()
             self.qPathLineEdit.clear()
+            self.setPathButton.setEnabled(False)
+            self.populateHSPTable({})
 
             for param, label in self.parameterLabels.items():
                 label.clear()

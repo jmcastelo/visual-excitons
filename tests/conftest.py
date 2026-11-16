@@ -7,6 +7,7 @@ the tests never touch the user's own. Tests using the datasets in data/ (not
 in the repository) are skipped when these are missing.
 """
 
+import sys
 import os
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -98,6 +99,21 @@ def isolatedSettings(tmp_path_factory):
     for fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
         QSettings.setPath(fmt, QSettings.Scope.UserScope, str(directory))
     yield directory
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """
+    Main windows a test leaves close without asking to save their results
+    (pytest-qt closes them next, when the dialogs are no longer replaced).
+    """
+    module = sys.modules.get('visual_excitons.gui.main_window')
+    app = QCoreApplication.instance()
+    if module is not None and app is not None:
+        for widget in app.topLevelWidgets():
+            if isinstance(widget, module.MainWindow):
+                widget.maybeSaveSession = lambda action: True
+    yield
 
 
 @pytest.fixture(autouse=True)

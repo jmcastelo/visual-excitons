@@ -27,7 +27,7 @@ These files must be coherent, i.e. correspond to calculations of the same system
 
 `File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. The calculation type is set from whether a GW directory was found. `File › Open recent` lists the last datasets.
 
-On start, the most recent dataset is opened again, with its Q-path. On the first run, the `BiI3` test dataset in `data/BiI3_Bulk_8x8x8` is opened if present (it is not included in the repository). Its Q-path must be set to `LGZF` instead of the default one, once: it is remembered from then on.
+The start page lists the recent datasets too, and opening one again restores its Q-path. The Q-path of the `BiI3` test dataset (`data/BiI3_Bulk_8x8x8`, not included in the repository) must be set to `LGZF` instead of the default one, once: it is remembered from then on.
 ## The System panel
 
 - **Data**: the calculation type and the three directories, which can also be chosen one by one with `Browse…` or typed in. A green tick or a red cross below each shows whether its databases were found.

@@ -216,6 +216,30 @@ class Options(QObject):
             self.saveDirChanged.emit(dir, "ns.db1 not found!")
             self.databaseFound.emit(False)
 
+    def closeDataset(self):
+        """
+        Forget the dataset: its directories, lattice and Q-path, as before any
+        was opened (the parameters, e.g. the number of excitons, stay).
+        """
+        self.datasetAboutToChange.emit()
+        self.saveDir = self.diagoDir = self.qpDir = self.qpFile = ''
+        self.qpDatabases, self.bseFiles, self.bseProblems = [], {}, []
+        self.parentDir = self.jobString = ''
+        self.nQpoints, self.qPoints, self.nIbzQpoints = 0, [], 0
+        self.ibrav = -1
+        self.cell, self.latticeParameters, self.variant = [], {}, ''
+        self.detectedIbrav, self.cellLatticeData, self.latticeFromCell = None, None, False
+        self.highSymmetryPoints, self.extraHighSymmetryPoints, self.availableHighSymmetryPoints = {}, {}, []
+        self.defaultPath = ''
+        self.qBZ = None
+        self.saveDirChanged.emit('', 'ns.db1 not found!')
+        self.diagoDirChanged.emit('', 'No BSE databases (ndb.BS_diago_Q*) found!')
+        self.qpDirChanged.emit('', 'No QP database (ndb.QP) found!')
+        self.qpDatabasesChanged.emit([], '')
+        self.numQPointsChanged.emit(0)
+        self.qPointsChanged.emit([])
+        self.databaseFound.emit(False)
+
     def setDiagoDir(self, dir):
         files, problems = bseFiles(dir)
         self.qPoints = list(files)

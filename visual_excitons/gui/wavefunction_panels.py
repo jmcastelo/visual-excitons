@@ -186,6 +186,8 @@ class WavefunctionPanels(QObject):
                                                          self.calculations.kGrid()))
             self.plotLattice()
             self.excitonWfWidget.centerView()
+        else:
+            self.plotLattice()      # clears the structure
 
     # The origin of the cell shown
 
@@ -393,8 +395,9 @@ class WavefunctionPanels(QObject):
         self.excitonWfWidget.clearAtomNamesItems()
         self.excitonWfWidget.clearLatticeBoundaryItems()
 
-        # Nothing to draw before a SAVE database is loaded
+        # Nothing to draw before a SAVE database is loaded, or once it is closed
         if not self.options.hasCell():
+            self.excitonWfWidget.plotBaseLatticeVectors(None)
             return
 
         ucell = dict(self.calculations.unitCell())

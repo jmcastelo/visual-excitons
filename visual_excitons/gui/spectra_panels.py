@@ -89,6 +89,11 @@ class SpectraPanels(QObject):
         self.dispersionWidget.setHighlight(positions['dispersion'])
         self.absorptionWidget.setHighlight(positions['absorption'])
 
+    def clearQPath(self):
+        """No Q-path on the axes (no dataset)."""
+        for widget in (self.dispersionWidget, self.bandStructureWidget):
+            widget.getAxis('bottom').setTicks(None)
+
     @Slot(bool)
     def setDarkTheme(self, dark: bool):
         """Plot colors for a dark or light theme (they can still be changed under Appearance)."""

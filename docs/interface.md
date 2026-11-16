@@ -30,10 +30,10 @@ The status bar shows the dataset loaded (name, Bravais lattice and number of Q-p
 
 **Themes.** `View › Theme` switches between the `System` look, a `Light` theme and a `Dark` theme. The plots and the 3D view follow the theme: dark plots on the dark theme, light ones on the light theme. Curves that keep their default color follow it too; colors chosen in the Appearance panel are kept.
 
-**Resuming where you left off.** When the program is opened again, it resumes where it was left:
+**Resuming where you left off.** The program opens with no dataset, on a start page with the recent sessions and datasets (see [Sessions](sessions.md)). What it keeps from the last time:
 
 - The window: its size, the arrangement of the panels (and your saved layouts), the theme, and which sections of the control panels are open.
 - Preferences: how the wave function is displayed (plot type, iso level, number of levels, style, opacities, volume settings), the view (basis, preset, direction and up vectors, side, projection), the structure (atoms, names, bonds and boundaries shown, atom and bond sizes, bond colors), the axes gizmo and cell parameters shown, whether bright excitons are labelled, and the `Appearance` of the 2D plots (lines, symbols, axes colors and fonts, legend, band structure fill and weight factor). Colors that were the theme's defaults follow the theme, so a style made on the dark theme still suits the light one.
-- The last dataset, with its own parameters: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff, and the view of the 3D scene (rotation, zoom and pan).
+- The parameters of each dataset, restored when it is opened again: its Q-path, the number of excitons of the dispersion, the absorption range, step and bright threshold, the exciton chosen (Q-point and index), the fixed particle with the positions of the hole and the electron, the supercell and the cutoff, and the view of the 3D scene (rotation, zoom and pan).
 
 Each dataset keeps its own parameters: switching to another one and back, or opening it again later from `Open recent` or `Open dataset`, brings them back; a dataset opened for the first time starts from the defaults. Results (dispersion, spectra, wave function) are not kept this way: compute them again, with the parameters already set, or save a [session](sessions.md).

@@ -93,7 +93,6 @@ def test_registry_prefixes():
 def newWindow(qtbot, monkeypatch, tmp_path):
     """Factory of main windows sharing the same settings (one per 'session')."""
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     windows = []
 
     def make():
@@ -182,8 +181,10 @@ def test_dataset_parameters_are_resumed_per_dataset(newWindow):
     assert p3.particleTypeComboBox.currentText() == 'Electron' and w.options.holePos == [0.5, 0.25, 0.0]
     w.close()
 
-    # Next session: the last dataset, BiI3, with its parameters
+    # Next session: empty; BiI3, the last dataset, opened again with its parameters
     w2 = newWindow()
+    assert w2.options.saveDir == '' and w2.recentDatasets()[0]['save'] == bii3['save']
+    w2.openDataset(w2.recentDatasets()[0])
     assert w2.options.saveDir == bii3['save'] and w2.options.supercell() == [3, 1, 3]
     assert w2.wavefunction.parameters3DWidget.particleTypeComboBox.currentText() == 'Electron'
     assert w2.options.particleType() == 'e' and w2.options.holePos == [0.5, 0.25, 0.0]

@@ -19,7 +19,6 @@ from conftest import datasetPath
 def window(qtbot, monkeypatch, tmp_path):
     """Main window with no dataset and fresh settings."""
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     w = MainWindow()
     qtbot.addWidget(w)
     yield w
@@ -198,7 +197,6 @@ def test_invalid_saved_layout_falls_back_to_the_default(qtbot, monkeypatch, tmp_
     settings = QSettings('VisualExcitons', 'VisualExcitons')
     settings.clear()
     settings.setValue('panels', b'not a layout')
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
     w = MainWindow()
     qtbot.addWidget(w)
     assert openPanels(w) == {key for key, where, relativeTo in PRESETS[DEFAULT_PRESET]['steps']} - {'analysis'}
@@ -396,7 +394,7 @@ def test_inspector_aligns_labels(qtbot):
 def test_open_dataset(window):
     folder = datasetPath('BiI3_Bulk_8x8x8')
     window.openDataset(main_window.findDataset(folder))
-    assert window.windowTitle() == 'BiI3_Bulk_8x8x8 — Visual Excitons'
+    assert window.windowTitle() == 'Untitled[*] — BiI3_Bulk_8x8x8 — Visual Excitons'
     assert 'RHL1' in window.datasetLabel.text() and '90 Q-points' in window.datasetLabel.text()
     assert window.options.gw and window.system.calcTypeComboBox.currentText() == 'DFT+GW+BSE'
     assert window.system.parameterLabels['a'].text() == '8.15801 Å'
@@ -488,9 +486,12 @@ def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
     assert system.setBrillouinZone()
     window.close()
 
-    # Next session: a new window opens the same dataset (the most recent one)
+    # Next session: the dataset opened again, from the start page
     restored = MainWindow()
     qtbot.addWidget(restored)
+    assert restored.options.saveDir == '' and not restored.startPage.isHidden()
+    restored.startPage.datasetLinks[0].click()
+    assert restored.startPage.isHidden()
     assert restored.options.saveDir == str(folder / 'save')
     assert restored.options.getPathString() == 'LGZFM'
     assert restored.system.interpolationComboBox.currentIndex() == 1
@@ -763,6 +764,7 @@ def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
 
     restarted = MainWindow()
     qtbot.addWidget(restarted)
+    restarted.openDataset(restarted.recentDatasets()[0])
     view = restarted.wavefunction.excitonWfWidget
     assert view.latticeBoundaryItems and not any(item.visible() for item in view.latticeBoundaryItems)
     box = next(b for b in restarted.wavefunction.parameters3DWidget.findChildren(QCheckBox)

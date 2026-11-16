@@ -103,7 +103,6 @@ def test_theme_colors_follow_the_theme(qapp):
 @pytest.fixture
 def newWindow(qtbot, monkeypatch, tmp_path):
     QSettings('VisualExcitons', 'VisualExcitons').clear()
-    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
 
     def make():
         w = main_window.MainWindow()
