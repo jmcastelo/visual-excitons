@@ -1,6 +1,6 @@
 # Visual Excitons: architecture and developer guide
 
-This document explains how Visual Excitons is built: where things live, how data flows from the Yambo databases to the plots, and the conventions and pitfalls you need to know before changing it. The user documentation is the [README](../README.md); this is for developers.
+This document explains how Visual Excitons is built: where things live, how data flows from the Yambo databases to the plots, and the conventions and pitfalls you need to know before changing it. The user documentation is listed in the [README](../README.md#documentation); this is for developers, with [development.md](development.md) for setting up and testing.
 
 Contents:
 
@@ -37,7 +37,7 @@ Stack:
 
 The fork's `ase-bz` branch provides the `BrillouinZone` class and the `lattice_data_for_cell` / `get_lattice_data` / `IBRAV_REQUIRED_PARAMETERS` helpers used for Bravais lattices and Q-paths, and a patch to `ExcitonDispersion` (marked "Commented by JMC") needed by this app.
 
-It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__init__.py`): `pip install -e ".[test]"` for development, then run `visual-excitons`, `python -m visual_excitons` or `python visual_excitons/main.py` (the last one puts the repository root on `sys.path` itself). Tests: `pytest` (see [Testing](#11-testing)). See the README for installation, including working on the YamboPy fork alongside.
+It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__init__.py`): `pip install -e ".[test]"` for development, then run `visual-excitons`, `python -m visual_excitons` or `python visual_excitons/main.py` (the last one puts the repository root on `sys.path` itself). Tests: `pytest` (see [Testing](#11-testing)). See [development.md](development.md) for setting up, including working on the YamboPy fork alongside.
 
 ---
 
@@ -94,7 +94,7 @@ visual_excitons/
 │   ├── image_export.py     Image export of the 3D view
 │   └── figure_export.py    Publication figures of the 2D plots: data and styles, dialog with preview
 tests/                      pytest suite (see Testing)
-docs/                       This document
+docs/                       User and developer documentation (this document: architecture.md)
 data/                       Test datasets (not in the repository)
 ```
 

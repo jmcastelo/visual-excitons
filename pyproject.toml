@@ -50,7 +50,7 @@ visual-excitons = "visual_excitons.main:main"
 
 [project.urls]
 Homepage = "https://github.com/jmcastelo/visual-excitons"
-Documentation = "https://github.com/jmcastelo/visual-excitons/blob/main/docs/ARCHITECTURE.md"
+Documentation = "https://github.com/jmcastelo/visual-excitons#documentation"
 
 [tool.setuptools.dynamic]
 version = { attr = "visual_excitons.__version__" }
