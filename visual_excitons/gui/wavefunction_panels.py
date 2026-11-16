@@ -66,6 +66,9 @@ class WavefunctionPanels(QObject):
         # The origin of the cell shown (core/cellshift.py): everything moves together
         self.shiftCache = (None, None)
         self.parameters3DWidget.cellShiftChanged.connect(self.onCellShiftChanged)
+        # The position as shown in the controls uses the same shift as the drawing
+        self.parameters3DWidget.shiftProvider = self.shownShift
+        self.calculations.wfComputed.connect(self.parameters3DWidget.updateShownPosition)
         self.calculations.wfComputed.connect(self.updateCellOriginNote)
         self.centerOnDisplay = False
         self.calculations.wfComputed.connect(

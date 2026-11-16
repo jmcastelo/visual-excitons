@@ -174,6 +174,25 @@ class Parameters3DWidget(Inspector):
         particleLayout = QHBoxLayout()
         for lineEdit in (self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit):
             particleLayout.addWidget(lineEdit)
+        self.particleComputedWidget = QWidget()
+        self.particleComputedWidget.setLayout(particleLayout)
+        particleLayout.setContentsMargins(0, 0, 0, 0)
+
+        # The same position as shown, with the cell origin (and layer centring)
+        # applied: only while there is a shift; linked to the one computed
+        self.shownParticleLineEdits = [self.newCoordinateLineEdit() for _ in range(3)]
+        shownLayout = QHBoxLayout()
+        shownLayout.setContentsMargins(0, 0, 0, 0)
+        for lineEdit in self.shownParticleLineEdits:
+            lineEdit.setValidator(QDoubleValidator(0.0, 1.0, 4))
+            lineEdit.setToolTip('Where the particle is drawn: crystal coordinates with the cell origin applied.\n'
+                                'Editing them sets the position computed (below) accordingly')
+            lineEdit.editingFinished.connect(self.shownPositionEdited)
+            shownLayout.addWidget(lineEdit)
+        self.particleShownWidget = QWidget()
+        self.particleShownWidget.setLayout(shownLayout)
+        # The shift of what is shown (WavefunctionPanels sets it: snapped to the wave function's grid)
+        self.shiftProvider = self.cellShift
 
         # Supercell: odd sizes only
         self.xSupercellSpinBox, self.ySupercellSpinBox, self.zSupercellSpinBox = (QSpinBox(minimum=1, maximum=999, singleStep=2) for _ in range(3))
@@ -228,7 +247,9 @@ class Parameters3DWidget(Inspector):
 
         form = formLayout()
         form.addRow('Fixed particle:', self.particleTypeComboBox)
-        form.addRow('Position (a, b, c):', particleLayout)
+        form.addRow('Position as shown:', self.particleShownWidget)
+        form.addRow('Position (a, b, c):', self.particleComputedWidget)
+        self.calculationForm = form
         # Spanning both columns, so the wrapped text has the full width of the form
         form.addRow(self.particleGridLabel)
         form.addRow('Supercell:', supercellLayout)
@@ -246,6 +267,9 @@ class Parameters3DWidget(Inspector):
         self.remember('supercell', scope=DATASET, get=self.supercell, set=self.setSupercell)
         self.remember('cutoff', self.wfCutoffSpinBox, DATASET)
         self.remember('fullCutoff', self.fullCutoffCheckBox, DATASET)
+        self.cellShiftChanged.connect(self.updateShownPosition)
+        self.fixedParticlePosChanged.connect(self.updateShownPosition)
+        self.updateShownPosition()
 
     def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
@@ -828,9 +852,9 @@ class Parameters3DWidget(Inspector):
 
         position = self.options.particlePosition()
 
-        self.xParticlePosLineEdit.setText(f"{position[0]}")
-        self.yParticlePosLineEdit.setText(f"{position[1]}")
-        self.zParticlePosLineEdit.setText(f"{position[2]}")
+        for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit),
+                                   position):
+            lineEdit.setText(f'{float(value) + 0.0:.4f}')   # as the row shown, and after snapping
 
         self.particlePositionChanged()
 
@@ -839,6 +863,47 @@ class Parameters3DWidget(Inspector):
         position = [float(self.xParticlePosLineEdit.text()), float(self.yParticlePosLineEdit.text()), float(self.zParticlePosLineEdit.text())]
         self.options.setParticlePosition(position)
         self.fixedParticlePosChanged.emit()
+
+    def particleShift(self):
+        if not hasattr(self, 'originSpinBoxes'):        # the Structure section is built after this one
+            return [0.0, 0.0, 0.0]
+        shift = self.shiftProvider() if self.shiftProvider is not None else [0.0, 0.0, 0.0]
+        return [float(value) for value in shift]
+
+    @Slot()
+    def updateShownPosition(self, *args):
+        """The position as shown: its row only while there is a shift (the two would agree otherwise)."""
+        if not hasattr(self, 'calculationForm'):
+            return
+        shift = self.particleShift()
+        shifted = any(abs(value) > 1e-9 for value in shift)
+        form = self.calculationForm
+        form.setRowVisible(self.particleShownWidget, shifted)
+        form.labelForField(self.particleComputedWidget).setText('Position as computed:' if shifted
+                                                                else 'Position (a, b, c):')
+        if not shifted:
+            return
+        computed = np.asarray(self.options.particlePosition(), dtype=float)
+        shown = (computed + np.asarray(shift)) % 1.0
+        shown[np.isclose(shown, 1.0, atol=1e-6)] = 0.0
+        for lineEdit, value in zip(self.shownParticleLineEdits, shown):
+            if not lineEdit.hasFocus():
+                lineEdit.setText(f'{value + 0.0:.4f}')
+
+    @Slot()
+    def shownPositionEdited(self):
+        """A position typed as shown: the position computed is that minus the shift."""
+        try:
+            shown = np.array([float(lineEdit.text()) for lineEdit in self.shownParticleLineEdits])
+        except ValueError:
+            self.updateShownPosition()
+            return
+        computed = (shown - np.asarray(self.particleShift())) % 1.0
+        computed[np.isclose(computed, 1.0, atol=1e-6)] = 0.0
+        for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit),
+                                   computed):
+            lineEdit.setText(f'{value + 0.0:.4f}')
+        self.particlePositionChanged()
 
     @Slot()
     def onWfComputed(self):

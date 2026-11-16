@@ -128,3 +128,42 @@ def window_with_wave_function(qtbot, monkeypatch, tmp_path):
     qtbot.addWidget(window)
     fakeWaveFunction(window.calculations, sigma=2.0)
     return window, window.calculations
+
+
+@pytest.mark.data
+def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    import visual_excitons.gui.main_window as main_window
+    QSettings('VisualExcitons', 'VisualExcitons').clear()
+    monkeypatch.setattr(main_window, 'DEFAULT_DATASET_FOLDER', tmp_path / 'missing')
+    window = main_window.MainWindow()
+    qtbot.addWidget(window)
+    window.openDataset(main_window.findDataset(datasetPath('WSe2')))
+    p3, options = window.wavefunction.parameters3DWidget, window.options
+    form = p3.calculationForm
+    shown = lambda: [float(edit.text()) for edit in p3.shownParticleLineEdits]
+
+    # Layer centred: both rows, linked; the hole on W at (0, 0, 0) is drawn at c = 0.5
+    assert form.isRowVisible(p3.particleShownWidget)
+    assert form.labelForField(p3.particleComputedWidget).text() == 'Position as computed:'
+    assert shown() == pytest.approx([0, 0, 0.5])
+
+    # Typing c = 0.5 as shown (the layer) gives c = 0 as computed, not the middle of the vacuum
+    for edit, text in zip(p3.shownParticleLineEdits, ('0.3333', '0.6667', '0.5')):
+        edit.setText(text)
+    p3.shownPositionEdited()
+    assert options.particlePosition() == pytest.approx([0.3333, 0.6667, 0.0], abs=1e-4)
+    assert p3.zParticlePosLineEdit.text() == '0.0000'
+
+    # Editing the position computed updates the one shown
+    p3.zParticlePosLineEdit.setText('0.1')
+    p3.particlePositionChanged()
+    assert shown()[2] == pytest.approx(0.6)
+
+    # No shift: a single row, the two would agree
+    p3.centreLayerCheckBox.setChecked(False)
+    assert not form.isRowVisible(p3.particleShownWidget)
+    assert form.labelForField(p3.particleComputedWidget).text() == 'Position (a, b, c):'
+    # A shift by hand brings it back
+    p3.setCellOrigin([0.25, 0, 0])
+    assert form.isRowVisible(p3.particleShownWidget) and shown()[0] == pytest.approx(0.5833, abs=1e-4)
