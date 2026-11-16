@@ -5,8 +5,8 @@ distribution of distances from the fixed particle. Lengths shown in angstrom.
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel
+from PySide6.QtCore import Qt, QRectF, QSize
+from PySide6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM, chemical_symbols, jmol_colors, covalent_radii
 from .theme import PLOT_COLORS
@@ -15,6 +15,41 @@ from .inspector import NoteLabel
 # Above this density on the faces of the supercell (relative to the maximum),
 # the supercell cuts the exciton noticeably
 TRUNCATION_WARNING = 0.02
+
+
+# Smallest height of the plots: below it, the tab scrolls rather than squeeze them
+MIN_PLOT_HEIGHT = 180
+
+
+class AnalysisPlot(pg.PlotWidget):
+    """
+    A plot that prefers its smallest height: the wrapped labels below it make
+    the scroll area size the tab by height for width, from the preferred
+    heights, which would otherwise ask for pyqtgraph's 480 pixels and scroll.
+    """
+
+    def sizeHint(self):
+        return QSize(super().sizeHint().width(), MIN_PLOT_HEIGHT)
+
+
+def scrollableTab(plot, *labels):
+    """A tab with `plot` above `labels`, scrolled vertically when the panel is too short for both."""
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(4, 4, 4, 4)
+    plot.setMinimumHeight(MIN_PLOT_HEIGHT)
+    # Room above the plot: the axes would otherwise run into the top of the
+    # panel, looking cut
+    plot.getPlotItem().layout.setContentsMargins(0, 12, 0, 0)
+    layout.addWidget(plot, 1)
+    for label in labels:
+        layout.addWidget(label)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setWidget(content)
+    return scroll
 
 
 class AnalysisWidget(QTabWidget):
@@ -26,13 +61,13 @@ class AnalysisWidget(QTabWidget):
 
         # Plane cut
 
-        self.cutPlot = pg.PlotWidget()
+        self.cutPlot = AnalysisPlot()
         self.cutPlot.setAspectLocked(True)
         self.cutPlot.setLabel('bottom', 'along u', units='Å')
         self.cutPlot.setLabel('left', 'along v', units='Å')
         self.image = pg.ImageItem(axisOrder='row-major')
         self.cutPlot.addItem(self.image)
-        self.colorBar = pg.ColorBarItem(values=(0, 1), interactive=False, label='Density (relative to its maximum in the supercell)')
+        self.colorBar = pg.ColorBarItem(values=(0, 1), interactive=False, label='Relative density')
         self.colorBar.setImageItem(self.image, insert_in=self.cutPlot.getPlotItem())
         self.atomsItem = pg.ScatterPlotItem(pxMode=False)
         self.cutPlot.addItem(self.atomsItem)
@@ -43,20 +78,18 @@ class AnalysisWidget(QTabWidget):
         self.cutNote = NoteLabel()
         self.plots.append(self.cutPlot)
 
-        cutTab = QWidget()
-        layout = QVBoxLayout(cutTab)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(self.cutPlot, 1)
-        layout.addWidget(self.cutNote)
-        self.addTab(cutTab, 'Plane cut')
+        self.addTab(scrollableTab(self.cutPlot, self.cutNote), 'Plane cut')
 
         # Distance from the fixed particle
 
-        self.radialPlot = pg.PlotWidget()
+        self.radialPlot = AnalysisPlot()
         self.radialPlot.setLabel('bottom', 'Distance from the fixed particle', units='Å')
-        self.radialPlot.setLabel('left', 'Probability per Å')
+        # Axis titles are not wrapped: short, explained in the text below the plot
+        self.radialPlot.setLabel('left', 'Probability (Å⁻¹)')
         self.radialPlot.showAxis('right')
-        self.radialPlot.setLabel('right', 'Probability within the distance')
+        self.radialPlot.setLabel('right', 'Cumulative')
+        for name in ('left', 'right'):
+            self.radialPlot.getAxis(name).enableAutoSIPrefix(False)   # no '(x0.01)' after the title
         self.radialCurve = self.radialPlot.plot()
         # Cumulative probability on the right axis, in its own view box
         self.cumulativeView = pg.ViewBox()
@@ -68,8 +101,9 @@ class AnalysisWidget(QTabWidget):
         self.cumulativeCurve = pg.PlotCurveItem()
         self.cumulativeView.addItem(self.cumulativeCurve)
         self.radialPlot.getPlotItem().vb.sigResized.connect(self._syncCumulativeView)
+        # Labels at different heights: they would overlap when the lines are close
         self.meanLine = pg.InfiniteLine(angle=90, movable=False, label='mean', labelOpts={'position': 0.92})
-        self.r90Line = pg.InfiniteLine(angle=90, movable=False, label='90%', labelOpts={'position': 0.92})
+        self.r90Line = pg.InfiniteLine(angle=90, movable=False, label='90%', labelOpts={'position': 0.78})
         for line in (self.meanLine, self.r90Line):
             self.radialPlot.addItem(line)
         self.plots.append(self.radialPlot)
@@ -82,13 +116,7 @@ class AnalysisWidget(QTabWidget):
         self.warning.setStyleSheet('color: #d9822b')
         self.warning.hide()
 
-        radialTab = QWidget()
-        layout = QVBoxLayout(radialTab)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(self.radialPlot, 1)
-        layout.addWidget(self.statistics)
-        layout.addWidget(self.warning)
-        self.addTab(radialTab, 'Distance distribution')
+        self.addTab(scrollableTab(self.radialPlot, self.statistics, self.warning), 'Distance distribution')
 
         self.setDarkTheme(False)
         self.clear()
@@ -154,7 +182,8 @@ class AnalysisWidget(QTabWidget):
             self.particleItem.clear()
         self.cutNote.setText(f'Plane through the {particleLabel}' + (f', shifted {offset * BOHR_TO_ANGSTROM:+.2f} Å '
                              'along its normal' if abs(offset) > 1e-9 else ' (★)') +
-                             '. Atoms within the chosen distance of the plane are shown, fainter the farther they are.')
+                             '. Density relative to its maximum in the supercell. Atoms within the chosen distance of '
+                             'the plane are shown, fainter the farther they are.')
         # Continuous: also right when the panel is shown or resized later
         self.cutPlot.getPlotItem().enableAutoRange()
 
@@ -172,7 +201,8 @@ class AnalysisWidget(QTabWidget):
         self.statistics.setText(
             f'Distance of the {other} from the {particleLabel}: mean <b>{result["mean"] * a:.2f} Å</b>, '
             f'root mean square {result["rms"] * a:.2f} Å, median {result["median"] * a:.2f} Å; '
-            f'90% of the probability within {result["r90"] * a:.2f} Å.')
+            f'90% of the probability within {result["r90"] * a:.2f} Å. Dashed: the probability within each '
+            'distance (cumulative, right axis).')
         if result['boundary'] > TRUNCATION_WARNING:
             self.warning.setText(f'The density is still {100 * result["boundary"]:.0f}% of its maximum at the edge of '
                                  'the supercell: the exciton does not fit in it, so these distances are '

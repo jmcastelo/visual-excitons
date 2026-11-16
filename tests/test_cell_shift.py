@@ -165,3 +165,25 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
     # A shift by hand brings it back
     p3.setCellOrigin([0.25, 0, 0])
     assert form.isRowVisible(p3.particleShownWidget) and shown()[0] == pytest.approx(0.5833, abs=1e-4)
+
+
+def test_analysis_does_not_wrap_where_it_would_show_a_seam(window_with_wave_function, qtbot):
+    """Shifted along axes not spanning whole k-grid periods, the analysis keeps the density as computed."""
+    window, calc = window_with_wave_function
+    panels, p3 = window.wavefunction, window.wavefunction.parameters3DWidget
+    p3.showAnalysisCheckBox.setChecked(True)
+    calc.wfComputed.emit()
+    cut = panels.analysisWidget.image.image.copy()
+    mean = panels.radialResult['mean']
+
+    # No k-point grid known (the fake lattice): no axis is exact, nothing is wrapped for the analysis
+    p3.setCellOrigin([0.4, 0.3, 0.2])
+    assert panels.analysisShift() == [0.0, 0.0, 0.0] and any(panels.shownShift())
+    np.testing.assert_array_equal(panels.analysisWidget.image.image, cut)
+    assert panels.radialResult['mean'] == pytest.approx(mean)
+    # The view is shifted all the same
+    assert panels.shownDensity() is not calc.probabilityDensity()
+
+    # Along axes spanning whole periods (a 3 x 3 x 3 supercell of a 3 x 3 x 3 grid), it follows the view
+    calc.kGrid = lambda: [3, 3, 3]
+    assert panels.analysisShift() == panels.shownShift()

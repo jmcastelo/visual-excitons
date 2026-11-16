@@ -110,3 +110,26 @@ def test_plane_supercell_polygon():
     np.testing.assert_allclose(np.linalg.norm(hexagon - 0.5, axis=1), np.sqrt(0.5))
     # Missing the supercell
     assert len(planeSupercellPolygon(np.eye(3), [0, 0, 5], [0, 0, 1])) == 0
+
+
+def test_analysis_panel_fits_its_plots(qtbot):
+    """The plots fill the panel without scrolling when it is tall enough, and keep a usable height when not."""
+    from visual_excitons.gui.analysis_widget import AnalysisWidget, MIN_PLOT_HEIGHT
+    panel = AnalysisWidget()
+    qtbot.addWidget(panel)
+    panel.resize(450, 500)
+    panel.show()
+    qtbot.waitExposed(panel)
+    for index, plot in enumerate((panel.cutPlot, panel.radialPlot)):
+        panel.setCurrentIndex(index)
+        scroll = panel.widget(index)
+        qtbot.waitUntil(lambda: scroll.widget().height() == scroll.viewport().height())
+        assert plot.height() > MIN_PLOT_HEIGHT                     # the room left to the plot
+    panel.resize(300, 200)
+    for index, plot in enumerate((panel.cutPlot, panel.radialPlot)):
+        panel.setCurrentIndex(index)
+        scroll = panel.widget(index)
+        qtbot.waitUntil(lambda: scroll.widget().height() > scroll.viewport().height())   # scrolled
+        assert plot.height() >= MIN_PLOT_HEIGHT
+    # Axis titles are not wrapped: short enough for the smallest plot
+    assert panel.radialPlot.getAxis('left').labelText == 'Probability (Å⁻¹)'

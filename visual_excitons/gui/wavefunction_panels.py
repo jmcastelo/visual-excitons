@@ -64,7 +64,7 @@ class WavefunctionPanels(QObject):
         # wave function is first shown (not one restored, with its own view)
         self.parameters3DWidget.supercellResized.connect(self.excitonWfWidget.centerView)
         # The origin of the cell shown (core/cellshift.py): everything moves together
-        self.shiftCache = (None, None)
+        self.shiftCache = {}
         self.parameters3DWidget.cellShiftChanged.connect(self.onCellShiftChanged)
         # The position as shown in the controls uses the same shift as the drawing
         self.parameters3DWidget.shiftProvider = self.shownShift
@@ -147,16 +147,18 @@ class WavefunctionPanels(QObject):
             return
         parameters.showPlaneStatus('')
 
-        density = self.shownDensity()
+        # In the frame of the analysis (see analysisShift): no seams, distances right
+        shift = self.analysisShift()
+        density = self.shiftedDensity(shift)
         voxels = calc.wfVoxels()
-        particle = self.shownFixedCartesian()
+        particle = self.shownFixedCartesian(shift)
         particleLabel = 'hole' if calc.wfFixedParticle == 'h' else 'electron'
         lattice = np.asarray(calc.lattice.lat, dtype=float)
 
         normal = plane['normal'] / np.linalg.norm(plane['normal'])
         point = particle + plane['offset'] * normal
         cut = planeCut(density, voxels, point, normal, inPlane=plane['up'], latticeVectors=lattice)
-        numbers, positions = self.shownSupercellAtoms()
+        numbers, positions = self.shownSupercellAtoms(shift)
         atoms = atomsNearPlane(positions, numbers, point, (cut['u'], cut['v'], cut['n']), plane['atoms'])
         self.analysisWidget.setColormap(parameters.colormap())
         self.analysisWidget.showCut(cut, atoms, particleLabel, plane['offset'])
@@ -167,8 +169,10 @@ class WavefunctionPanels(QObject):
                                                    periodic=periodicAxes(calc.wfSupercell, calc.kGrid()))
         self.analysisWidget.showRadial(self.radialResult, particleLabel)
 
+        # The plane in the 3D view: through the particle as shown there
         supercellVectors = lattice * np.asarray(calc.wfSupercell)[:, None]
-        polygon = planeSupercellPolygon(supercellVectors, point, normal) if plane['show3D'] else None
+        shownPoint = self.shownFixedCartesian() + plane['offset'] * normal
+        polygon = planeSupercellPolygon(supercellVectors, shownPoint, normal) if plane['show3D'] else None
         self.excitonWfWidget.setCutPlane(polygon)
 
     @Slot(bool)
@@ -179,7 +183,7 @@ class WavefunctionPanels(QObject):
         self.radialResult = None
         self.displayCache.clear()
         self.analysisWidget.clear()
-        self.shiftCache = (None, None)
+        self.shiftCache = {}
         if found:
             ucell = self.calculations.unitCell()
             self.parameters3DWidget.setLayer(detectLayer(ucell['base_lattice_vectors'], ucell['atomic_positions'],
@@ -199,29 +203,50 @@ class WavefunctionPanels(QObject):
             shift = snapShift(shift, calc.wfGrid)
         return [float(value) for value in shift]
 
+    def analysisShift(self):
+        """
+        The shift of the analysis: that shown along the axes where wrapping the
+        density is exact (its box spans whole periods of the k-point grid, e.g.
+        the vacuum axis of a monolayer), none along the others. There, wrapping
+        joins faces whose densities do not match: a seam in the plane cut, and
+        distances measured to the wrong side of the box.
+        """
+        calc = self.calculations
+        periodic = periodicAxes(calc.wfSupercell, calc.kGrid())
+        return [s if exact else 0.0 for s, exact in zip(self.shownShift(), periodic)]
+
     def shownDensity(self):
         """The density as shown: shifted with the cell origin (the same array while nothing changes)."""
+        return self.shiftedDensity(self.shownShift())
+
+    def shiftedDensity(self, shift):
+        """The density shifted by `shift` (the same array while neither changes)."""
         calc = self.calculations
         density = calc.probabilityDensity()
         if density is None or not calc.wfGrid:
             return density
-        shift = self.shownShift()
         key = (id(density), tuple(round(s * g) for s, g in zip(shift, calc.wfGrid)))
-        if self.shiftCache[0] != key:
-            self.shiftCache = (key, rollDensity(density, shift, calc.wfGrid))
-        return self.shiftCache[1]
+        if key not in self.shiftCache:
+            # Those of the view and of the analysis (see analysisShift), kept together
+            self.shiftCache = {k: v for k, v in self.shiftCache.items() if k[0] == key[0]}
+            if len(self.shiftCache) >= 2:
+                self.shiftCache.pop(next(iter(self.shiftCache)))
+            self.shiftCache[key] = rollDensity(density, shift, calc.wfGrid)
+        return self.shiftCache[key]
 
-    def shownFixedCartesian(self):
+    def shownFixedCartesian(self, shift=None):
+        """The fixed particle, shifted with the cell origin (or by `shift`)."""
         calc = self.calculations
-        crystal = shiftCrystal(calc.wfFixedCrystal(), self.shownShift(), calc.wfSupercell)
+        crystal = shiftCrystal(calc.wfFixedCrystal(), self.shownShift() if shift is None else shift, calc.wfSupercell)
         return np.asarray(calc.lattice.lat, dtype=float).T @ crystal
 
-    def shownSupercellAtoms(self):
+    def shownSupercellAtoms(self, shift=None):
+        """The atoms of the supercell, shifted with the cell origin (or by `shift`)."""
         calc = self.calculations
         cell = calc.unitCell()
         positions = np.asarray(cell['atomic_positions'], dtype=float)[:len(cell['atomic_numbers'])]
-        return supercellAtoms(cell['base_lattice_vectors'], shiftAtoms(cell['base_lattice_vectors'], positions,
-                                                                       self.shownShift()),
+        shift = self.shownShift() if shift is None else shift
+        return supercellAtoms(cell['base_lattice_vectors'], shiftAtoms(cell['base_lattice_vectors'], positions, shift),
                               cell['atomic_numbers'], calc.wfSupercell)
 
     @Slot()
