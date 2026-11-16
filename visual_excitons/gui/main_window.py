@@ -926,7 +926,9 @@ class MainWindow(QMainWindow):
         if Path(filename).suffix.lower() not in ('.cube', '.xsf'):
             filename += '.xsf' if 'xsf' in chosenFilter else '.cube'
         self.rememberExportFolder(filename)
-        self.calculations.exportDensity(filename)
+        # As shown (with the cell origin), or as computed
+        shifted = self.wavefunction.parameters3DWidget.exportShiftedCheckBox.isChecked()
+        self.calculations.exportDensity(filename, self.wavefunction.shownShift() if shifted else None)
 
     # Misc
 

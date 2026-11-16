@@ -22,6 +22,9 @@ from .persistence import PersistentState, DATASET
 from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.bonds import findBonds, halfBonds
+from visual_excitons.core.cellshift import (detectLayer, shiftAtoms, shiftCrystal, snapShift, rollDensity,
+                                            periodicAxes, seamAxes)
+from visual_excitons.core.export import supercellAtoms
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 
 # Color of the bonds in uniform coloring mode
@@ -60,6 +63,10 @@ class WavefunctionPanels(QObject):
         # Centered on what is shown when the supercell changes, and when a new
         # wave function is first shown (not one restored, with its own view)
         self.parameters3DWidget.supercellResized.connect(self.excitonWfWidget.centerView)
+        # The origin of the cell shown (core/cellshift.py): everything moves together
+        self.shiftCache = (None, None)
+        self.parameters3DWidget.cellShiftChanged.connect(self.onCellShiftChanged)
+        self.calculations.wfComputed.connect(self.updateCellOriginNote)
         self.centerOnDisplay = False
         self.calculations.wfComputed.connect(
             lambda: setattr(self, 'centerOnDisplay', not self.calculations.restoringResults))
@@ -137,22 +144,24 @@ class WavefunctionPanels(QObject):
             return
         parameters.showPlaneStatus('')
 
-        density = calc.probabilityDensity()
+        density = self.shownDensity()
         voxels = calc.wfVoxels()
-        particle = calc.wfFixedCartesian()
+        particle = self.shownFixedCartesian()
         particleLabel = 'hole' if calc.wfFixedParticle == 'h' else 'electron'
         lattice = np.asarray(calc.lattice.lat, dtype=float)
 
         normal = plane['normal'] / np.linalg.norm(plane['normal'])
         point = particle + plane['offset'] * normal
         cut = planeCut(density, voxels, point, normal, inPlane=plane['up'], latticeVectors=lattice)
-        numbers, positions = calc.wfSupercellAtoms()
+        numbers, positions = self.shownSupercellAtoms()
         atoms = atomsNearPlane(positions, numbers, point, (cut['u'], cut['v'], cut['n']), plane['atoms'])
         self.analysisWidget.setColormap(parameters.colormap())
         self.analysisWidget.showCut(cut, atoms, particleLabel, plane['offset'])
 
         if self.radialResult is None:
-            self.radialResult = radialDistribution(density, voxels, particle)
+            # Distances to the nearest image along the axes where the density repeats with its box
+            self.radialResult = radialDistribution(density, voxels, particle,
+                                                   periodic=periodicAxes(calc.wfSupercell, calc.kGrid()))
         self.analysisWidget.showRadial(self.radialResult, particleLabel)
 
         supercellVectors = lattice * np.asarray(calc.wfSupercell)[:, None]
@@ -167,15 +176,81 @@ class WavefunctionPanels(QObject):
         self.radialResult = None
         self.displayCache.clear()
         self.analysisWidget.clear()
+        self.shiftCache = (None, None)
         if found:
+            ucell = self.calculations.unitCell()
+            self.parameters3DWidget.setLayer(detectLayer(ucell['base_lattice_vectors'], ucell['atomic_positions'],
+                                                         self.calculations.kGrid()))
             self.plotLattice()
             self.excitonWfWidget.centerView()
+
+    # The origin of the cell shown
+
+    def shownShift(self):
+        """The shift of what is shown (fractions of a, b, c), on the grid of the wave function if there is one."""
+        shift = self.parameters3DWidget.cellShift()
+        calc = self.calculations
+        if calc.waveFunction is not None and calc.wfGrid:
+            shift = snapShift(shift, calc.wfGrid)
+        return [float(value) for value in shift]
+
+    def shownDensity(self):
+        """The density as shown: shifted with the cell origin (the same array while nothing changes)."""
+        calc = self.calculations
+        density = calc.probabilityDensity()
+        if density is None or not calc.wfGrid:
+            return density
+        shift = self.shownShift()
+        key = (id(density), tuple(round(s * g) for s, g in zip(shift, calc.wfGrid)))
+        if self.shiftCache[0] != key:
+            self.shiftCache = (key, rollDensity(density, shift, calc.wfGrid))
+        return self.shiftCache[1]
+
+    def shownFixedCartesian(self):
+        calc = self.calculations
+        crystal = shiftCrystal(calc.wfFixedCrystal(), self.shownShift(), calc.wfSupercell)
+        return np.asarray(calc.lattice.lat, dtype=float).T @ crystal
+
+    def shownSupercellAtoms(self):
+        calc = self.calculations
+        cell = calc.unitCell()
+        positions = np.asarray(cell['atomic_positions'], dtype=float)[:len(cell['atomic_numbers'])]
+        return supercellAtoms(cell['base_lattice_vectors'], shiftAtoms(cell['base_lattice_vectors'], positions,
+                                                                       self.shownShift()),
+                              cell['atomic_numbers'], calc.wfSupercell)
+
+    @Slot()
+    def onCellShiftChanged(self):
+        if not self.options.hasCell():
+            return
+        self.plotLattice()
+        self.translateFixedParticle()
+        self.radialResult = None
+        if self.calculations.probabilityDensity() is not None:
+            self.displayCache.clear()
+            self.plotWf()
+            self.updateAnalysis()
+        self.updateCellOriginNote()
+        self.excitonWfWidget.centerView()
+
+    @Slot()
+    def updateCellOriginNote(self):
+        """Where the wave function, wrapped, shows a seam (cut by its supercell along a shifted axis)."""
+        calc = self.calculations
+        text = ''
+        if calc.probabilityDensity() is not None and calc.wfSupercell:
+            seams = seamAxes(calc.probabilityDensity(), self.shownShift(), calc.wfSupercell, calc.kGrid())
+            if seams:
+                axes = ', '.join('abc'[axis] for axis in seams)
+                text = (f'Along {axes}, the wave function is cut by its supercell, and wrapping it with the shift '
+                        f'shows a seam: a larger supercell along {axes} avoids it.')
+        self.parameters3DWidget.showCellOriginNote(text)
 
     # Display resolution
 
     def displayDensity(self):
         """The density as displayed (upsampled if smoothing is on), and its grid-to-space transform."""
-        density = self.calculations.probabilityDensity()
+        density = self.shownDensity()
         transform = np.array(self.calculations.tr4x4, dtype=float)
         if self.smoothing == 1:
             return density, transform.tolist()
@@ -235,7 +310,7 @@ class WavefunctionPanels(QObject):
         show method; inline if `work` (grid points times surfaces) is small.
         """
         calc = self.calculations
-        density = calc.probabilityDensity()
+        density = self.shownDensity()
         if density is None:
             return
         factor = self.smoothing
@@ -256,7 +331,7 @@ class WavefunctionPanels(QObject):
 
         def apply(result):
             displayed, geometry = result
-            if self.displayRequest is not request or calc.probabilityDensity() is not density:
+            if self.displayRequest is not request or self.shownDensity() is not density:
                 return   # outdated: a newer request, or a newer wave function
             if factor > 1:
                 self.displayCache.clear()   # one copy at a time
@@ -284,7 +359,7 @@ class WavefunctionPanels(QObject):
             view.showVolume(geometry, self.options.sliceDensity(), transform)
 
     def gridPoints(self):
-        density = self.calculations.probabilityDensity()
+        density = self.shownDensity()
         return 0 if density is None else density.size
 
     @Slot()
@@ -319,7 +394,11 @@ class WavefunctionPanels(QObject):
         if not self.options.hasCell():
             return
 
-        ucell = self.calculations.unitCell()
+        ucell = dict(self.calculations.unitCell())
+        shift = self.shownShift()
+        if any(shift):
+            positions = np.asarray(ucell['atomic_positions'], dtype=float)[:len(ucell['atomic_numbers'])]
+            ucell['atomic_positions'] = shiftAtoms(ucell['base_lattice_vectors'], positions, shift)
 
         self.excitonWfWidget.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
 
@@ -350,4 +429,7 @@ class WavefunctionPanels(QObject):
     def translateFixedParticle(self):
         if not self.options.hasCell():
             return
-        self.excitonWfWidget.translateFixedParticle(self.options.particlePositionCartesian())
+        supercell = self.options.supercell()
+        crystal = np.asarray(self.options.particlePosition(), dtype=float) + np.asarray(supercell) // 2
+        crystal = shiftCrystal(crystal, self.shownShift(), supercell)
+        self.excitonWfWidget.translateFixedParticle(np.asarray(self.options.cell, dtype=float).T @ crystal)

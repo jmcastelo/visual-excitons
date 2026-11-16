@@ -346,6 +346,16 @@ Other view controls in the same section:
 - `Center` centers the camera on what is shown: the middle of the box holding the visible atoms, bonds, cell boundaries and wave function. The view is also centered by itself when the supercell changes, when a dataset is opened, and when a newly computed wave function is first shown (not one restored from a session, which keeps its view); the zoom and direction are kept.
 - `Orthographic projection` switches between orthographic projection (the default, where parallel lines stay parallel, convenient to inspect crystal structures) and perspective projection.
 
+#### Layers and the cell origin
+
+The 3D view shows one periodic box of the crystal; which part of the crystal falls in it can be changed, without changing anything computed.
+
+**Layers.** Monolayers are computed in a cell with a wide vacuum along one direction, and the layer often sits on a face of the cell (e.g. WSe2: W at c = 0, Se at c = ±0.07): the layer and its exciton are then drawn in two halves, at the bottom and the top of the cell. When the cell has such a vacuum (a gap between the atoms of at least 40% of the cell and 10 Å thick, or 5 Å along a direction with a single k-point, as in 2D calculations), `Centre the layer in the cell`, in the `Structure` section, puts the vacuum on the faces of the cell and the layer in the middle. It is on by default; untick it to see the cell of the calculation.
+
+**Cell origin.** `Cell origin` shifts what is shown along a, b and c (in fractions of them): the atoms, bonds, wave function, fixed particle and analysis move together, wrapped in the cell. It is useful when what matters sits on the edges of the cell: a molecule or defect drawn in pieces, or an exciton whose fixed particle is near a face. `Centre on the fixed particle` puts the fixed particle in the middle; `Reset` goes back to the cell of the calculation (with the layer still centred, if ticked). The positions typed in the controls stay those of the calculation. The shift is rounded to whole points of the wave function's grid, and kept with the dataset and in sessions.
+
+Wrapping the wave function is exact along directions where its supercell spans whole periods of the k-point grid (such as the vacuum direction of a monolayer: one cell, one k-point). Along others, the supercell is a window on a longer period: if the density has not decayed at its faces, the wrapped wave function shows a seam, and a note under the controls says so (a larger supercell along that direction avoids it).
+
 #### Atoms and bonds
 
 The `Structure` section of the Wave function controls shows the crystal structure in ball-and-stick style. Its checkboxes toggle the atoms, their names, the bonds and the cell boundaries.
@@ -401,7 +411,7 @@ The `Analysis` section of the Wave function controls shows two analyses of the l
 
 **Distance distribution.** The distribution of the distance between the free particle and the fixed one: with the hole fixed, of the electron-hole distance. It shows the probability per unit distance P(r) and, on the right axis, the probability within each distance, with the mean and the distance within which 90% of the probability lies; their values, with the root mean square and the median, are given below. They measure the size (radius) of the exciton.
 
-These distances only cover the part of the exciton inside the supercell. When the density is still significant at its edges (above 2% of its maximum), the exciton does not fit in it: the distances are underestimated, and a warning suggests computing it with a larger supercell. Increase the supercell until the warning disappears and the distances stop changing.
+Along directions where the wave function repeats with its supercell (e.g. the vacuum direction of a monolayer, computed on one cell with one k-point), distances are measured to the nearest periodic image: otherwise, with the fixed particle on a face of the cell, the part of the exciton across that face would count as far away. These distances only cover the part of the exciton inside the supercell. When the density is still significant at its edges (above 2% of its maximum), the exciton does not fit in it: the distances are underestimated, and a warning suggests computing it with a larger supercell. Increase the supercell until the warning disappears and the distances stop changing.
 
 The analysis settings are remembered between sessions.
 
@@ -410,7 +420,7 @@ The analysis settings are remembered between sessions.
 The `Export` section of the Wave function controls, or the `File` menu, saves what is in the Wave function panel:
 
 - **Image…** (`Ctrl+E`): the 3D view as a PNG, JPEG or TIFF image, at 1 to 4 times the size of the view on screen or at a custom width (the height keeps the proportions of the view). It shows exactly what the view shows, rendered again at the chosen size: surfaces, atoms and labels are sharp, and lines are widened in proportion. The axes gizmo and the cell parameters can be included. With `Transparent background` (PNG and TIFF), only the scene is drawn, ready to be placed on slides or figures.
-- **Density…** (`Ctrl+Shift+E`): the probability density of the last wave function computed, on its real-space grid, with the atoms of the supercell, as:
+- **Density…** (`Ctrl+Shift+E`): the probability density of the last wave function computed, on its real-space grid, with the atoms of the supercell (as shown, with the cell origin and the layer centring applied, or, unticking `Density as shown`, in the cell of the calculation), as:
   - a Gaussian cube file (`.cube`, lengths in Bohr), or
   - an XCrySDen XSF file (`.xsf`, lengths in Å),
 

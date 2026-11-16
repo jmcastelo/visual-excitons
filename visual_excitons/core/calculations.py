@@ -858,32 +858,54 @@ class Calculations(QObject):
     def wfFixedCartesian(self):
         return np.asarray(self.lattice.lat, dtype=float).T @ self.wfFixedCrystal()
 
+    def kGrid(self):
+        """The full k-point grid of the dataset (cached with its lattice)."""
+        if self.lattice is None:
+            self.unitCell()
+        if getattr(self, '_kGrid', (None, None))[0] is not self.lattice:
+            from .cellshift import kGrid
+            self._kGrid = (self.lattice, kGrid(self.lattice))
+        return self._kGrid[1]
+
     def wfSupercellAtoms(self):
         """Atomic numbers and Cartesian positions of the atoms of the supercell."""
         cell = self.unitCell()
         return supercellAtoms(cell['base_lattice_vectors'], cell['atomic_positions'], cell['atomic_numbers'],
                               self.wfSupercell)
 
-    def exportDensity(self, filename):
+    def exportDensity(self, filename, shift=None):
         """
         Save the probability density with the atoms of the supercell (format
-        from the extension: .cube or .xsf), in the background.
+        from the extension: .cube or .xsf), in the background; with `shift`
+        (fractions of a, b, c; see cellshift.py), as shown with that cell origin.
         """
         message = 'Saving the probability density…'
         if self.waveFunction is None:
             return self._reject(message, 'No wave function: compute one first.')
 
-        numbers, positions = self.wfSupercellAtoms()
+        from .cellshift import snapShift, rollDensity, shiftAtoms, shiftCrystal
         lattice = np.asarray(self.lattice.lat, dtype=float)
-        fixedCrystal = self.wfFixedCrystal()
-        fixedAngstrom = self.wfFixedCartesian() * BOHR_TO_ANGSTROM
+        density, fixedCrystal = self.waveFunction, self.wfFixedCrystal()
+        shift = snapShift(shift, self.wfGrid) if shift is not None and any(shift) else None
+        if shift is not None:
+            cell = self.unitCell()
+            count = len(cell['atomic_numbers'])
+            shifted = shiftAtoms(lattice, np.asarray(cell['atomic_positions'], dtype=float)[:count], shift)
+            numbers, positions = supercellAtoms(lattice, shifted, cell['atomic_numbers'], self.wfSupercell)
+            density = rollDensity(density, shift, self.wfGrid)
+            fixedCrystal = shiftCrystal(fixedCrystal, shift, self.wfSupercell)
+        else:
+            numbers, positions = self.wfSupercellAtoms()
+        fixedAngstrom = lattice.T @ fixedCrystal * BOHR_TO_ANGSTROM
         particle = 'hole' if self.wfFixedParticle == 'h' else 'electron'
         qIndex, excIndex = self.wfExciton
         comment = (f'Exciton {excIndex} at Q-point {qIndex + 1}, {particle} fixed at crystal coordinates '
                    f'{" ".join(f"{x:.4f}" for x in fixedCrystal)} of the supercell '
                    f'({" ".join(f"{x:.4f}" for x in fixedAngstrom)} A); '
                    f'supercell {"x".join(map(str, self.wfSupercell))}; values relative to the maximum')
-        arguments = dict(density=self.waveFunction, lattice=lattice, supercell=list(self.wfSupercell),
+        if shift is not None:
+            comment += f'; cell origin shifted by {" ".join(f"{s:.4f}" for s in shift)} (fractions of a, b, c)'
+        arguments = dict(density=density, lattice=lattice, supercell=list(self.wfSupercell),
                          atomicNumbers=numbers, atomPositions=positions, comment=comment)
 
         def compute(context):

@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer
 from PySide6.QtGui import QDoubleValidator, QValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox, QWidget, QVBoxLayout
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
@@ -9,6 +9,7 @@ from visual_excitons.core.options import Options
 from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 from .persistence import DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
+from visual_excitons.core.cellshift import wrapShift
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 from visual_excitons.core.memory import availableMemory, formatBytes
 
@@ -66,6 +67,8 @@ class Parameters3DWidget(Inspector):
     signalReplotLattice = Signal()
     # The supercell changed (not only redrawn): the view is centered again
     supercellResized = Signal()
+    # The origin of the cell shown changed (see cellShift)
+    cellShiftChanged = Signal()
     # Memory of computing the exciton selected in the spectra (text, warning)
     selectedEstimateChanged = Signal(str, bool)
     fixedParticlePosChanged = Signal()
@@ -517,10 +520,127 @@ class Parameters3DWidget(Inspector):
         form.addRow('Bond tolerance:', bondToleranceSpinBox)
         form.addRow('Bond radius:', bondRadiusSpinBox)
         form.addRow('Bond color:', bondColorComboBox)
+        self.buildCellOriginRows(form)
         self.addSection('Structure', form, expanded=False)
         for key, widget in (('atomRadiusScale', atomScaleSpinBox), ('bondTolerance', bondToleranceSpinBox),
                             ('bondRadius', bondRadiusSpinBox), ('bondColor', bondColorComboBox)):
             self.remember(key, widget)
+        # With each dataset: its layer centred or not, and its origin (the layer first: it fixes one axis)
+        self.remember('centreLayer', self.centreLayerCheckBox, scope=DATASET)
+        self.remember('cellOrigin', scope=DATASET, get=self.cellOrigin, set=self.setCellOrigin)
+
+    def buildCellOriginRows(self, form):
+        """
+        Which part of the periodic crystal is shown: the origin of the cell, in
+        fractions of a, b, c (core/cellshift.py), and the centring of a layer.
+        """
+        self.layer = None              # (axis, shift) of the vacuum of a layered cell, if any
+        self.centreLayerCheckBox = QCheckBox('Centre the layer in the cell')
+        self.centreLayerCheckBox.setChecked(True)
+        self.centreLayerCheckBox.setToolTip('A layer computed with vacuum around it may sit on a face of the cell,\n'
+                                            'and be drawn in two halves: put the vacuum on the faces instead')
+        self.centreLayerCheckBox.toggled.connect(self.updateLayerCentring)
+        self.centreLayerCheckBox.setEnabled(False)
+
+        self.originSpinBoxes = []
+        originRow = QHBoxLayout()
+        originRow.setContentsMargins(0, 0, 0, 0)
+        for axis in 'abc':
+            spinBox = QDoubleSpinBox(minimum=-0.5, maximum=0.5, singleStep=0.05, decimals=3)
+            spinBox.setPrefix(f'{axis} ')
+            spinBox.setKeyboardTracking(False)
+            spinBox.setToolTip('Shift of what is shown along this lattice vector, in fractions of it: the atoms and the\n'
+                               'wave function move together, wrapped in the cell (positions in the controls are\n'
+                               'still those of the calculation)')
+            spinBox.valueChanged.connect(self.cellShiftChanged)
+            originRow.addWidget(spinBox)
+            self.originSpinBoxes.append(spinBox)
+        originRow.addStretch(1)
+        originWidget = QWidget()
+        originWidget.setLayout(originRow)
+
+        centreParticleButton = QPushButton('Centre on the fixed particle')
+        centreParticleButton.setToolTip('Shift so that the fixed particle is in the middle of what is shown')
+        centreParticleButton.clicked.connect(self.centreOnFixedParticle)
+        resetButton = QPushButton('Reset')
+        resetButton.setToolTip('The cell of the calculation (the layer still centred, if ticked)')
+        resetButton.clicked.connect(lambda: self.setCellOrigin([0.0, 0.0, 0.0]))
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(centreParticleButton)
+        buttons.addWidget(resetButton)
+        buttons.addStretch(1)
+        buttonsWidget = QWidget()
+        buttonsWidget.setLayout(buttons)
+
+        self.cellOriginNote = NoteLabel()
+        self.cellOriginNote.hide()
+        form.addRow(self.centreLayerCheckBox)
+        form.addRow('Cell origin:', originWidget)
+        form.addRow(buttonsWidget)
+        form.addRow(self.cellOriginNote)
+
+    def cellOrigin(self):
+        return [spinBox.value() for spinBox in self.originSpinBoxes]
+
+    def setCellOrigin(self, values):
+        """Set the origin (fractions of a, b, c) at once; the axis of a centred layer keeps its centring."""
+        locked = self.lockedAxis()
+        changed = False
+        for axis, (spinBox, value) in enumerate(zip(self.originSpinBoxes, values)):
+            if axis == locked:
+                continue
+            value = wrapShift(float(value))
+            if abs(spinBox.value() - value) > 1e-9:
+                spinBox.blockSignals(True)
+                spinBox.setValue(value)
+                spinBox.blockSignals(False)
+                changed = True
+        if changed:
+            self.cellShiftChanged.emit()
+
+    def cellShift(self):
+        """The shift of what is shown (fractions of a, b, c)."""
+        return self.cellOrigin()
+
+    def lockedAxis(self):
+        """The axis whose origin the layer centring sets, or None."""
+        return self.layer[0] if self.layer is not None and self.centreLayerCheckBox.isChecked() else None
+
+    def setLayer(self, layer):
+        """The vacuum found in the cell of the dataset ((axis, shift), or None): centred if ticked."""
+        self.layer = layer
+        self.centreLayerCheckBox.setEnabled(layer is not None)
+        if layer is None:
+            self.centreLayerCheckBox.setToolTip('No vacuum found in the cell: it is not a layer')
+        else:
+            self.centreLayerCheckBox.setToolTip(f'Vacuum along {"abc"[layer[0]]}: put on the faces of the cell, the '
+                                                'layer in the middle')
+        self.updateLayerCentring()
+
+    @Slot()
+    def updateLayerCentring(self):
+        locked = self.lockedAxis()
+        for axis, spinBox in enumerate(self.originSpinBoxes):
+            spinBox.setEnabled(axis != locked)
+        if self.layer is not None:
+            axis, shift = self.layer
+            value = shift if locked is not None else 0.0
+            spinBox = self.originSpinBoxes[axis]
+            if abs(spinBox.value() - value) > 1e-9:
+                spinBox.blockSignals(True)
+                spinBox.setValue(value)
+                spinBox.blockSignals(False)
+        self.cellShiftChanged.emit()
+
+    @Slot()
+    def centreOnFixedParticle(self):
+        position = np.asarray(self.options.particlePosition(), dtype=float)
+        self.setCellOrigin([0.5 - p for p in position])
+
+    def showCellOriginNote(self, text):
+        self.cellOriginNote.setText(text)
+        self.cellOriginNote.setVisible(bool(text))
 
     def buildAxesSection(self):
         layout = QGridLayout()
@@ -665,7 +785,15 @@ class Parameters3DWidget(Inspector):
         layout.addWidget(imageButton)
         layout.addWidget(self.exportDensityButton)
         layout.addStretch(1)
-        self.addSection('Export', layout, expanded=False)
+        # The density files with the cell origin shown, or that of the calculation
+        self.exportShiftedCheckBox = QCheckBox('Density as shown (cell origin applied)')
+        self.exportShiftedCheckBox.setChecked(True)
+        self.exportShiftedCheckBox.setToolTip('Untick for the cell of the calculation, unshifted')
+        self.remember('exportShifted', self.exportShiftedCheckBox)
+        column = QVBoxLayout()
+        column.addLayout(layout)
+        column.addWidget(self.exportShiftedCheckBox)
+        self.addSection('Export', column, expanded=False)
 
     def newCoordinateLineEdit(self):
         lineEdit = QLineEdit()

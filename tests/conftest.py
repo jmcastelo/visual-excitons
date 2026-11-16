@@ -87,7 +87,7 @@ def pytest_xdist_auto_num_workers(config):
 def datasetPath(name: str) -> Path:
     """Folder of a dataset in data/, or skip the test if it is not there."""
     path = DATA_DIR / name
-    if not (path / 'save' / 'ns.db1').is_file():
+    if not any((path / save / 'ns.db1').is_file() for save in ('save', 'SAVE')):
         pytest.skip(f'dataset data/{name} not available')
     return path
 

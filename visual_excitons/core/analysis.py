@@ -40,7 +40,7 @@ def upsampleDensity(density, factor):
 
 # Distribution of distances from the fixed particle
 
-def radialDistribution(density, voxels, center, binWidth=None):
+def radialDistribution(density, voxels, center, binWidth=None, periodic=(False, False, False)):
     """
     Distribution of the distance r between the free particle and the fixed
     one, at `center`: with the hole fixed, of the electron-hole distance.
@@ -56,6 +56,10 @@ def radialDistribution(density, voxels, center, binWidth=None):
     - 'boundary': largest density on the faces of the supercell relative to the
       maximum; when it is not small, the supercell cuts the exciton and the
       distances are underestimated.
+
+    Along `periodic` axes the density repeats with the box (e.g. the vacuum
+    axis of a monolayer computed on one cell, with one k-point along it):
+    distances are measured to the nearest image, and those faces are not cuts.
     """
     density = np.clip(np.asarray(density, dtype=float), 0.0, None)
     voxels = np.asarray(voxels, dtype=float)
@@ -63,7 +67,14 @@ def radialDistribution(density, voxels, center, binWidth=None):
     if total <= 0.0:
         raise ValueError('The density is zero everywhere')
 
-    distances = np.linalg.norm(gridPositions(density.shape, voxels) - np.asarray(center, dtype=float), axis=-1).ravel()
+    offsets = gridPositions(density.shape, voxels) - np.asarray(center, dtype=float)
+    periodic = np.asarray(periodic, dtype=bool)
+    if periodic.any():
+        box = voxels * np.asarray(density.shape, dtype=float)[:, None]       # rows: the box vectors
+        fractions = offsets @ np.linalg.inv(box)
+        fractions[..., periodic] -= np.round(fractions[..., periodic])
+        offsets = fractions @ box
+    distances = np.linalg.norm(offsets, axis=-1).ravel()
     weights = density.ravel() / total
 
     if binWidth is None:
@@ -75,7 +86,8 @@ def radialDistribution(density, voxels, center, binWidth=None):
     def quantile(q):
         return float(np.interp(q, np.concatenate([[0.0], cumulative]), edges))
 
-    faces = [density[0], density[-1], density[:, 0], density[:, -1], density[:, :, 0], density[:, :, -1]]
+    faces = [face for axis in range(3) if not periodic[axis]
+             for face in (np.take(density, 0, axis=axis), np.take(density, -1, axis=axis))] or [np.zeros(1)]
     return {
         'r': 0.5 * (edges[:-1] + edges[1:]),
         'probability': counts / binWidth,
