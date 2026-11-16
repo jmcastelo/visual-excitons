@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
             self.resize(1600, 1000)
         self.restoreLayout()
         # No dataset yet: the start page, to open one or a session
-        self.startPage.setVisible(self.dataset is None)
+        self.setStartPageShown(self.dataset is None)
 
         # Unsaved changes of the session: what a session file would hold is
         # compared with what was saved, shortly after each input and change of
@@ -198,7 +198,6 @@ class MainWindow(QMainWindow):
         self.startPage.openSessionRequested.connect(self.chooseSession)
         self.startPage.datasetChosen.connect(self.openDataset)
         self.startPage.sessionChosen.connect(self.openSession)
-        self.startPage.shownChanged.connect(self.wavefunction.excitonWfWidget.setGizmoSuppressed)
 
     def createMenus(self):
         # File
@@ -546,7 +545,12 @@ class MainWindow(QMainWindow):
         self.state.restore(DATASET, dataset.get('state') or self.datasetDefaults)
         self.addRecentDataset(self.dataset)
         self.updateDatasetLabel()
-        self.startPage.hide()
+        self.setStartPageShown(False)
+
+    def setStartPageShown(self, shown):
+        self.startPage.setVisible(shown)
+        # Drawn over every widget of the window (WA_AlwaysStackOnTop): hidden under the start page
+        self.wavefunction.excitonWfWidget.setGizmoSuppressed(shown)
 
     @Slot()
     def newSession(self):
@@ -562,7 +566,7 @@ class MainWindow(QMainWindow):
         self.spectra.clearQPath()
         self.markSessionSaved()
         self.updateDatasetLabel()
-        self.startPage.show()
+        self.setStartPageShown(True)
 
     def storeDatasetState(self):
         """Save the parameters of the current dataset with it, in the recent datasets."""

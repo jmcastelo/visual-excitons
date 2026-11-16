@@ -15,9 +15,6 @@ class StartPage(QScrollArea):
     openSessionRequested = Signal()
     datasetChosen = Signal(dict)
     sessionChosen = Signal(str)
-    # Shown or hidden: widgets drawn over everything (WA_AlwaysStackOnTop, e.g.
-    # the axes gizmo of the 3D view) must be hidden while it is shown
-    shownChanged = Signal(bool)
 
     def __init__(self, window):
         """Over the central widget (the panels) of main window `window`, following its geometry."""
@@ -40,9 +37,11 @@ class StartPage(QScrollArea):
         font.setPointSizeF(font.pointSizeF() * 2.2)
         font.setBold(True)
         title.setFont(font)
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         subtitle = QLabel('Explore the excitons computed with Yambo: open a dataset (the folder of a calculation) '
                           'or a session saved before.')
         subtitle.setWordWrap(True)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         self.openDatasetButton = QPushButton('Open dataset…')
         self.openDatasetButton.setToolTip('Open the folder of a calculation; its SAVE, BSE and GW directories are '
@@ -52,6 +51,7 @@ class StartPage(QScrollArea):
         self.openSessionButton.setToolTip('Open a session file: its dataset, parameters, view and results')
         self.openSessionButton.clicked.connect(self.openSessionRequested)
         buttons = QHBoxLayout()
+        buttons.addStretch(1)
         for button in (self.openDatasetButton, self.openSessionButton):
             button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
             buttons.addWidget(button)
@@ -71,13 +71,14 @@ class StartPage(QScrollArea):
             heading.setFont(headingFont)
             empty.setEnabled(False)
             layout.setSpacing(0)
-            layout.addWidget(empty)
-            recent.addWidget(heading, 0, column)
+            layout.addWidget(empty, 0, Qt.AlignmentFlag.AlignHCenter)
+            recent.addWidget(heading, 0, column, Qt.AlignmentFlag.AlignHCenter)
             recent.addLayout(layout, 1, column, Qt.AlignmentFlag.AlignTop)
             recent.setColumnStretch(column, 1)
 
         column = QVBoxLayout()
         column.setSpacing(12)
+        column.addStretch(1)
         column.addWidget(title)
         column.addWidget(subtitle)
         column.addLayout(buttons)
@@ -90,7 +91,7 @@ class StartPage(QScrollArea):
         frame.setMaximumWidth(900)
         frame.setLayout(column)
         outer = QHBoxLayout(content)
-        outer.setContentsMargins(24, 48, 24, 24)
+        outer.setContentsMargins(24, 24, 24, 24)
         outer.addStretch(1)
         outer.addWidget(frame, 8)
         outer.addStretch(1)
@@ -99,8 +100,6 @@ class StartPage(QScrollArea):
         self.sessionLinks, self.datasetLinks = [], []
         window.installEventFilter(self)
         self.place()
-        # Hidden until shown (see shownChanged)
-        self.hide()
 
     def eventFilter(self, watched, event):
         if watched is self.mainWindow and event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest, QEvent.Type.Show):
@@ -113,12 +112,6 @@ class StartPage(QScrollArea):
         if central is not None:
             self.setGeometry(central.geometry())
         self.raise_()
-
-    def setVisible(self, visible):
-        changed = visible == self.isHidden()
-        super().setVisible(visible)
-        if changed:
-            self.shownChanged.emit(visible)
 
     def showEvent(self, event):
         self.place()
