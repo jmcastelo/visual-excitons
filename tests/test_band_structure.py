@@ -154,3 +154,37 @@ def test_title_and_wave_function_note(window, qtbot):
     assert 'with the degenerate states 2–3' in p3.wfStatesNote.text() and 'again' not in p3.wfStatesNote.text()
     window.spectra.inspector.sumDegenerateCheckBox.setChecked(False)
     assert not p3.sumDegenerateCheckBox.isChecked() and 'compute it again' in p3.wfStatesNote.text()
+
+
+@pytest.mark.data
+def test_energies_where_skw_fails_are_smooth_and_exact():
+    """WSe2 72x72x1: the SKW fit misses its own data by over 1 eV (oscillating); the spline on the grid is used."""
+    from yambopy import YamboElectronsDB
+    folder = datasetPath('WSe2_72x72x1')
+    options = Options()
+    options.setSaveDir(str(folder / 'save'))
+    options.setDiagoDir(str(folder / 'diagos_sel'))
+    options.setGW(False)
+    options.identifyLattice()
+    options.setBrillouinZone(path='MGKM', npoints=300)
+    calc = compute(options, 0, [1])
+    assert calc.bandStructureInfo['energyInterpolation'] == 'spline'
+    energies = np.transpose(calc.bands)                                # (path, bands)
+    assert np.abs(np.diff(energies, 2, axis=0)).max() < 0.1            # no oscillations (they were ~1 eV)
+    # At the path points on the grid: the DFT energies
+    lattice = calc.lattice
+    first, last = calc.bandStructureInfo['bands']
+    dft = quietly(YamboElectronsDB.from_db_file, folder=options.saveDir).eigenvalues_ibz[0][:, first - 1:last]
+    full = dft[np.asarray(lattice.kpoints_indexes)]
+    index = {tuple(np.round((k[:2] % 1) * 72).astype(int) % 72): i for i, k in enumerate(lattice.red_kpoints)}
+    path = options.qBZ.kpoints('red')
+    on = [(p, index[tuple(np.round((r[:2] % 1) * 72).astype(int) % 72)]) for p, r in enumerate(path)
+          if np.allclose(r[:2] * 72, np.round(r[:2] * 72), atol=1e-6)]
+    assert on and all(np.allclose(energies[p], full[i], atol=1e-6) for p, i in on)
+
+
+@pytest.mark.data
+def test_skw_is_kept_where_it_fits(bii3):
+    bii3.setGW(False)
+    calc = compute(bii3, 0, [1])
+    assert calc.bandStructureInfo['energyInterpolation'] == 'SKW'

@@ -107,6 +107,9 @@ class SpectraPanels(QObject):
         if not gamma:
             lines.append('At finite Q the hole is at k−Q: on the valence bands, the weight of the hole at k\n'
                          '(transitions to the electron at k+Q); on the conduction bands, that of the electron at k.')
+        if info.get('energyInterpolation') == 'spline':
+            lines.append('Energies interpolated with a spline on the full k-point grid (the SKW fit with\n'
+                         'symmetries did not reproduce them for this grid).')
         if info.get('estimatedBands'):
             bands = info['estimatedBands']
             lines.append(f'QP energies of band{"s" if len(bands) > 1 else ""} ' + ', '.join(map(str, bands))

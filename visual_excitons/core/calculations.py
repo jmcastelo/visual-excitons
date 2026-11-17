@@ -173,7 +173,10 @@ def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, e
     if missing:
         raise ValueError(f'Exciton {missing[0]} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
     electrons = YamboElectronsDB.from_db_file(folder=saveDir)
-    qp = qp_energies(str(Path(qpDir) / (qpFile or 'ndb.QP'))) if gw else None
+    # QP energies with GW and a QP database; DFT otherwise
+    qpPath = Path(qpDir) / (qpFile or 'ndb.QP') if gw and qpDir else None
+    gw = qpPath is not None and qpPath.is_file()
+    qp = qp_energies(str(qpPath)) if gw else None
     first, last = int(excitonDB.start_band) + 1, int(excitonDB.mband)
     energies, estimated = band_energies_ibz(electrons.eigenvalues_ibz[0], first, last, qp)
 
@@ -184,7 +187,8 @@ def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, e
             'weights': np.transpose(result['weights']),
             'info': {'qIndex': int(qIndex), 'states': result['states'], 'clicked': [int(i) for i in excitonIndices],
                      'degenerate': bool(degenerate), 'redQPoint': [float(x) for x in result['red_qpoint']],
-                     'bands': list(result['bands']), 'estimatedBands': estimated, 'gw': bool(gw)}}
+                     'bands': list(result['bands']), 'estimatedBands': estimated, 'gw': bool(gw),
+                     'energyInterpolation': result['energy_interpolation']}}
 
 
 def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None):

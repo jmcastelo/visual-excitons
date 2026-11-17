@@ -27,16 +27,31 @@ def test_weights_on_the_bands_of_their_particle():
 def test_periodic_linear_interpolation():
     values = np.array([[1.0], [3.0], [5.0], [7.0]])
     # Exact at the grid points, whatever their copy
-    assert np.allclose(interpolate_on_grid(RED, values, RED + 1), values)
+    assert np.allclose(interpolate_on_grid(RED, values, RED + 1, order=1), values)
     # Half-way: the mean of the neighbours, across the zone boundary too
     points = np.array([[0.25, 0, 0], [0.75, 0, 0], [0.25, 0.25, 0]])
-    assert np.allclose(interpolate_on_grid(RED, values, points)[:, 0], [2.0, 2.0, 4.0])
+    assert np.allclose(interpolate_on_grid(RED, values, points, order=1)[:, 0], [2.0, 2.0, 4.0])
     # Never outside the range of the values
     random = np.random.default_rng(1).random((50, 3))
-    result = interpolate_on_grid(RED, values, random)
+    result = interpolate_on_grid(RED, values, random, order=1)
     assert result.min() >= 1.0 and result.max() <= 7.0
     with pytest.raises(ValueError):
         interpolate_on_grid(RED[:3], values[:3], points)          # not a full grid
+
+
+def test_periodic_cubic_interpolation():
+    """Exact at the grid points, periodic, and smooth: no kinks at the grid points, unlike the linear one."""
+    n = 12
+    red = np.array([[i / n, j / n, 0] for i in range(n) for j in range(n)])
+    values = np.cos(2 * np.pi * red[:, 0])[:, None] + 0.5 * np.sin(2 * np.pi * red[:, 1])[:, None]
+    assert np.allclose(interpolate_on_grid(red, values, red), values)
+    assert np.allclose(interpolate_on_grid(red, values, red + [1, -2, 0]), values)
+    line = np.column_stack([np.linspace(0, 1, 241), np.zeros(241), np.zeros(241)])
+    exact = np.cos(2 * np.pi * line[:, 0])
+    cubic = interpolate_on_grid(red, values, line)[:, 0]
+    linear = interpolate_on_grid(red, values, line, order=1)[:, 0]
+    assert np.abs(cubic - exact).max() < 0.2 * np.abs(linear - exact).max()
+    assert np.abs(np.diff(cubic, 2)).max() < 0.5 * np.abs(np.diff(linear, 2)).max()     # no kinks
 
 
 def write_qp(path, bands, offset=0.0):

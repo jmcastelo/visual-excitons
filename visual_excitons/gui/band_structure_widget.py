@@ -23,6 +23,8 @@ class BandStructureWidget(pg.PlotWidget):
 
         self.setLabel('bottom', text = self.xLabel, units = self.xUnits)
         self.setLabel('left', text = self.yLabel, units = self.yUnits)
+        # The path is labelled by its special points: no '(x0.001)' scale after its title
+        self.getAxis('bottom').enableAutoSIPrefix(False)
 
         self.style = style
         # x range of the Q-path, until one is set (see setXAxis)

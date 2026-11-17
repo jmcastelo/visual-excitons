@@ -15,15 +15,19 @@ How each part is interpolated along the path (the reasons are in the notes
 of each function):
 
 * energies: SKW (``yambopy.tools.skw``) on the irreducible k-points, with
-  the crystal's symmetries (energies have them all), as YamboPy does;
-* weights: linearly on the full k-point grid, periodic, with no symmetry.
-  At a finite Q the weights only have the symmetry of the little group of Q
-  (and a single state of a degenerate group not even that): folding them
-  into the irreducible wedge, as ``YamboExcitonDB.interpolate`` does, is
-  wrong. SKW without symmetries on the full grid is right but costly (it
-  takes minutes for a 72x72 grid) and, being a Fourier fit of peaked data,
-  rings into small negative weights; linear interpolation is exact at the
-  grid points, never negative and costs nothing.
+  the crystal's symmetries (energies have them all), as YamboPy does, when
+  its fit reproduces the energies it is given; otherwise (it does not, by
+  over 1 eV, for the 72x72x1 grid of a WSe2 layer: an ill-conditioned fit)
+  a periodic cubic spline of the energies on the full grid;
+* weights: a periodic cubic spline on the full k-point grid, with no
+  symmetry. At a finite Q the weights only have the symmetry of the little
+  group of Q (and a single state of a degenerate group not even that):
+  folding them into the irreducible wedge, as ``YamboExcitonDB.interpolate``
+  does, is wrong. SKW without symmetries on the full grid is right but
+  costly (minutes for a 72x72 grid); linear interpolation is cheap but draws
+  cusps at the grid points and curved segments between them on coarse
+  grids. The spline is exact at the grid points, smooth and cheap; it can
+  undershoot zero by a tiny amount next to sharp peaks (clipped).
 
 * :func:`band_kpoint_weights` — the weight on each band at each k-point;
 * :func:`interpolate_on_grid` — periodic multilinear interpolation of
@@ -43,6 +47,7 @@ Bands and states 1-based, as in yambo; energies in eV.
 import itertools
 
 import numpy as np
+from scipy.ndimage import map_coordinates
 
 from yambopy.lattice import car_red
 from yambopy.tools.skw import SkwInterpolator
@@ -80,12 +85,16 @@ def band_kpoint_weights(table, weights, nkpoints, first_band, last_band, hole_in
     return result
 
 
-def interpolate_on_grid(red_kpoints, values, red_points, grid=None):
+def interpolate_on_grid(red_kpoints, values, red_points, grid=None, order=3):
     """
-    Values given on a regular grid of the Brillouin zone, at other points:
-    multilinear interpolation, periodic (points in reduced coordinates, any
-    cell). Exact at the grid points; between them, a weighted average of the
-    corners of the grid cell, so never outside the range of the values.
+    Values given on a regular grid of the Brillouin zone, at other points,
+    periodic (points in reduced coordinates, any cell).
+
+    *order* 3 (default): a cubic B-spline through the values (exact at the
+    grid points, smooth; it can overshoot the range of the values a little
+    next to sharp features). *order* 1: multilinear, the weighted average of
+    the corners of the grid cell (never outside the range of the values, but
+    with kinks at the grid points).
 
     Parameters
     ----------
@@ -109,6 +118,11 @@ def interpolate_on_grid(red_kpoints, values, red_points, grid=None):
         raise ValueError('The k-points do not fill a regular grid.')
 
     scaled = (np.asarray(red_points, dtype=float) % 1.0) * grid
+    if order != 1:
+        flat = table.reshape(tuple(grid) + (-1,))
+        result = np.stack([map_coordinates(flat[..., i], scaled.T, order=order, mode='grid-wrap')
+                           for i in range(flat.shape[-1])], axis=-1)
+        return result.reshape((len(scaled),) + values.shape[1:])
     base = np.floor(scaled).astype(int)
     frac = scaled - base
     result = np.zeros((len(scaled),) + values.shape[1:])
@@ -164,20 +178,40 @@ def band_energies_ibz(dft_ibz, first_band, last_band, qp=None):
     return energies, estimated
 
 
-def interpolate_energies(lattice, energies_ibz, red_points, lpratio=5):
+def interpolate_energies(lattice, energies_ibz, red_points, lpratio=5, tolerance=1e-3):
     """
-    SKW interpolation of energies on the irreducible k-points of *lattice*
-    (a ``YamboLatticeDB``), with the crystal's symmetries, at *red_points*
-    (reduced coordinates): ndarray (np, nb). As ``YamboExcitonDB.interpolate``
-    does for the energies.
+    Energies on the irreducible k-points of *lattice* (a ``YamboLatticeDB``
+    with its expanded k-points) at *red_points* (reduced coordinates).
+
+    SKW with the crystal's symmetries, as ``YamboExcitonDB.interpolate``, if
+    its fit reproduces the energies given (within *tolerance*, eV); else (an
+    ill-conditioned fit: it misses them by over 1 eV for the 72x72x1 grid of
+    a WSe2 layer, oscillating between them) a periodic cubic spline of the
+    energies expanded to the full grid (``lattice.kpoints_indexes``).
+
+    Returns
+    -------
+    energies : ndarray (np, nb)
+    method : 'SKW' or 'spline'
     """
+    energies_ibz = np.asarray(energies_ibz, dtype=float)
     kpoints = car_red(np.array([k / lattice.alat for k in lattice.ibz_kpoints]), lattice.rlat)
     # skw wants the symmetries of the direct lattice: those of the reciprocal one, without time reversal
     symrel = [sym for sym, trev in zip(lattice.sym_rec_red, lattice.time_rev_list) if not trev]
     cell = (lattice.lat, lattice.red_atomic_positions, lattice.atomic_numbers)
-    skw = SkwInterpolator(lpratio, kpoints, np.asarray(energies_ibz, dtype=float)[None], 0, 0, cell, symrel,
-                          bool(lattice.time_rev), verbose=0)
-    return skw.interp_kpts(np.asarray(red_points, dtype=float)).eigens[0]
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            # An ill-conditioned fit (checked below) also warns from scipy.linalg.solve
+            warnings.simplefilter('ignore')
+            skw = SkwInterpolator(lpratio, kpoints, energies_ibz[None], 0, 0, cell, symrel, bool(lattice.time_rev),
+                                  verbose=0)
+            if np.abs(skw.interp_kpts(kpoints).eigens[0] - energies_ibz).max() <= tolerance:
+                return skw.interp_kpts(np.asarray(red_points, dtype=float)).eigens[0], 'SKW'
+    except (RuntimeError, ValueError, np.linalg.LinAlgError):     # e.g. "Interpolation went bananas"
+        pass
+    full = energies_ibz[np.asarray(lattice.kpoints_indexes)]
+    return interpolate_on_grid(lattice.red_kpoints, full, red_points, order=3), 'spline'
 
 
 def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=True, degen_eps=1e-2,
@@ -199,6 +233,7 @@ def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=
     -------
     dict with
         ``energies``, ``weights`` : ndarray (np, nb), along the path
+        ``energy_interpolation`` : 'SKW' or 'spline' (see :func:`interpolate_energies`)
         ``bands`` : (first, last), the bands (1-based)
         ``states`` : the states summed
         ``red_qpoint`` : Q, reduced
@@ -221,7 +256,9 @@ def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=
 
     weights = band_kpoint_weights(excdb.table, state_weights(excdb.eigenvectors, states), len(red_kpoints),
                                   first, last, holes)
-    return {'energies': interpolate_energies(lattice, energies_ibz, red_path, lpratio),
-            'weights': interpolate_on_grid(red_kpoints, weights, red_path),
+    energies, method = interpolate_energies(lattice, energies_ibz, red_path, lpratio)
+    # Clipped: the spline can dip a hair below zero next to sharp peaks
+    return {'energies': energies, 'energy_interpolation': method,
+            'weights': np.clip(interpolate_on_grid(red_kpoints, weights, red_path), 0.0, None),
             'bands': (first, last), 'states': states, 'red_qpoint': red_qpoint,
             'nvbands': int(len(np.unique(np.asarray(excdb.table)[:, 1])))}

@@ -33,7 +33,7 @@ The excitonic band structure of the excitons selected (clicked on the dispersion
 - The weights of several excitons are added up and divided by their number.
 - With GW, bands outside the range of the QP database (e.g. a BSE band below its first band) get their DFT energy corrected as the nearest band of the database, at each k-point; the plot's tooltip names them.
 
-How the energies and the weights are interpolated along the path, and why, is explained in the [architecture notes](architecture.md#excitonic-band-structure-interpolation).
+The energies and the weights are interpolated from the k-point grid to the path; for some grids (e.g. a layer with a dense grid) the usual interpolation of the energies fails, and a spline on the grid is used instead, as the tooltip says. How and why is explained in the [architecture notes](architecture.md#excitonic-band-structure-interpolation).
 
 ## Exploring the plots
 
