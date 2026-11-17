@@ -167,6 +167,10 @@ class MainWindow(QMainWindow):
         self.compositionPanel = CompositionPanel()
         self.calculations.compositionReady.connect(self.onCompositionReady)
         self.calculations.compositionFailed.connect(self.compositionPanel.showProblem)
+        # Summing degenerate states or not: what depends on it and is cheap follows at once
+        # (the wave function, costly, says it was computed with the other setting)
+        self.options.sumDegenerateChanged.connect(self.updateComposition)
+        self.options.sumDegenerateChanged.connect(lambda checked: self.calculations.computeBandStructure())
         self.calculations.excitonSelected.connect(self.updateComposition)
         self.compositionPanel.compositionNeeded.connect(self.updateComposition)
         self.compositionPanel.exportDataRequested.connect(self.exportComposition)
@@ -459,7 +463,7 @@ class MainWindow(QMainWindow):
         # Open, and in front (behind another tab it catches up when brought up, see
         # CompositionPanel.showEvent); a window not shown (tests) shows nothing
         if self.panels.isShown('composition') and (self.compositionPanel.isVisible() or not self.isVisible()):
-            self.calculations.computeComposition(self.compositionPanel.degenerate())
+            self.calculations.computeComposition(self.options.sumDegenerate)
 
     @Slot(object)
     def onCompositionReady(self, composition):

@@ -130,23 +130,24 @@ def test_no_computed_q_point_on_the_path(tmp_path):
     assert 'None of the computed Q-points (Q30) is on the Q-path' in errors[-1]
 
 
-def test_band_structure_needs_gamma_from_the_q_point():
-    """The excitons of a spectrum carry their Q-point: Γ is Q1, whatever their place on the path."""
+def test_band_structure_at_the_q_point_of_the_excitons():
+    """The excitons of a spectrum carry their Q-point: their band structure is computed there, Γ or not."""
     calc = Calculations(Options(), synchronous=True)
-    applied, submitted = [], []
-    calc._applyBandStructure = applied.append
+    calc.options.saveDir, calc.options.diagoDir, calc.options.qBZ = 'save', 'diagos', object()
+    calc.options.qPoints = [0, 29]
+    submitted = []
     calc.tasks.submit = lambda *args, **kwargs: submitted.append(args)
 
     class Clicked:
-        def __init__(self, q):
-            self._data = PointData(-1, 1, q=q)
+        def __init__(self, q, j=1):
+            self._data = PointData(-1, j, q=q)
 
         def data(self):
             return self._data
-    calc.getExcitonBandStructure([Clicked(29)], None)
-    assert applied and applied[-1]['k'] == [] and not submitted   # not Γ: cleared
+    calc.getExcitonBandStructure([Clicked(29), Clicked(29, 3), Clicked(0, 2)], None)
+    assert calc.bandStructureSelection == (29, [1, 3]) and len(submitted) == 1    # those of the first's Q-point
     calc.getExcitonBandStructure([Clicked(0)], None)
-    assert submitted                                               # Γ: computed
+    assert calc.bandStructureSelection == (0, [1]) and len(submitted) == 2
 
 
 @pytest.mark.data

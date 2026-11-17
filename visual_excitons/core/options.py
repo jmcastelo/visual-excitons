@@ -107,6 +107,8 @@ class Options(QObject):
 
     # Calculation type: True for DFT+GW+BSE, False for DFT+BSE
     gwChanged = Signal(bool)
+    # Whether the states degenerate with an exciton are summed with it (wave function, composition, band structure)
+    sumDegenerateChanged = Signal(bool)
 
     def __init__(self):
         super().__init__()
@@ -168,6 +170,7 @@ class Options(QObject):
         # Exciton wavefunctions
         self.partType = 'h'
         self.holePos = [0.0, 0.0, 0.0]
+        self.sumDegenerate = True
         self.electronPos = [0.0, 0.0, 0.0]
         self.wfCutoffRy = 10
         self.scell = [1, 1, 1]
@@ -465,6 +468,11 @@ class Options(QObject):
         return self.partType
 
     @Slot(int)
+    def setSumDegenerate(self, sum: bool):
+        if bool(sum) != self.sumDegenerate:
+            self.sumDegenerate = bool(sum)
+            self.sumDegenerateChanged.emit(self.sumDegenerate)
+
     def setParticleType(self, index: int):
         if index == 0:
             self.partType = 'h'

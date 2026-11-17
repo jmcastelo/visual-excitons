@@ -128,8 +128,9 @@ def test_composition_panel(window, qtbot, tmp_path):
     qtbot.waitUntil(lambda: calc.composition['excIndex'] == 2, timeout=60000)
     assert calc.compositionCache.keys() == cached.keys()
     assert calc.composition['states'][0] == 2
-    # Each state alone
-    panel.degenerateCheckBox.setChecked(False)
+    # Each state alone: the setting of the Selected exciton section, shared (its copy follows)
+    window.spectra.inspector.sumDegenerateCheckBox.setChecked(False)
+    assert not window.wavefunction.parameters3DWidget.sumDegenerateCheckBox.isChecked()
     qtbot.waitUntil(lambda: not calc.composition['degenerate'], timeout=60000)
     assert calc.composition['states'] == [2]
 
@@ -138,7 +139,7 @@ def test_composition_panel(window, qtbot, tmp_path):
     window.writeSessionFile(str(path))
     window.openSession(str(path))
     assert calc.composition is not None and calc.composition['states'] == [2] and panel.composition is calc.composition
-    assert panel.viewComboBox.currentText() == 'Plane' and not panel.degenerateCheckBox.isChecked()
+    assert panel.viewComboBox.currentText() == 'Plane' and not window.options.sumDegenerate
 
 
 @pytest.mark.data

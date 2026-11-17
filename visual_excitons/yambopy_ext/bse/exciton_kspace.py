@@ -30,7 +30,7 @@ Bands and states are counted from 1, as in yambo's tables.
 
 import numpy as np
 
-__all__ = ['state_weights', 'hole_kpoint_indices', 'kpoint_weights', 'band_pair_weights', 'band_weights',
+__all__ = ['state_weights', 'kpoint_grid', 'hole_kpoint_indices', 'kpoint_weights', 'band_pair_weights', 'band_weights',
            'exciton_kspace']
 
 
@@ -47,6 +47,17 @@ def state_weights(eigenvectors, states):
     return np.sum(np.abs(vectors) ** 2, axis=0) / len(states)
 
 
+def kpoint_grid(red_kpoints, tol=1e-4):
+    """The number of points along each axis of the regular grid *red_kpoints* (reduced coordinates)."""
+    red = np.asarray(red_kpoints, dtype=float)
+    grid = []
+    for axis in range(3):
+        values = np.unique(np.round(red[:, axis] % 1.0, 6) % 1.0)
+        steps = np.diff(np.concatenate([values, [values[0] + 1.0]]))
+        grid.append(1 if len(values) < 2 else int(round(1.0 / steps[steps > tol].min())))
+    return grid
+
+
 def hole_kpoint_indices(red_kpoints, red_qpoint, grid=None, tol=1e-4):
     """
     For each k of the grid *red_kpoints* (reduced coordinates), the index of
@@ -57,13 +68,7 @@ def hole_kpoint_indices(red_kpoints, red_qpoint, grid=None, tol=1e-4):
     """
     red = np.asarray(red_kpoints, dtype=float)
     q = np.asarray(red_qpoint, dtype=float)
-    if grid is None:
-        grid = []
-        for axis in range(3):
-            values = np.unique(np.round(red[:, axis] % 1.0, 6) % 1.0)
-            steps = np.diff(np.concatenate([values, [values[0] + 1.0]]))
-            grid.append(1 if len(values) < 2 else int(round(1.0 / steps[steps > tol].min())))
-    grid = np.asarray(grid, dtype=int)
+    grid = np.asarray(kpoint_grid(red, tol) if grid is None else grid, dtype=int)
 
     def keys(points):
         scaled = (points % 1.0) * grid

@@ -99,7 +99,9 @@ visual_excitons/
 │   └── figure_export.py    Publication figures of the 2D plots: data and styles, dialog with preview
 ├── yambopy_ext/            Code meant for YamboPy (its layout and conventions; no Qt, no program imports)
 │   ├── bz/wigner_seitz.py  The Brillouin zone of any lattice: Wigner-Seitz cell, sections, points filling it
-│   └── bse/exciton_kspace.py  Exciton weights by k-point (electron at k, hole at k-Q), band pair and band
+│   ├── bse/exciton_kspace.py  Exciton weights by k-point (electron at k, hole at k-Q), band pair and band
+│   ├── bse/exciton_bands.py   Excitonic band structure at any Q: weights per band, interpolation along a path
+│   └── dbs/qp_energies.py     QP energies read by content (any file name, split databases too)
 tests/                      pytest suite (see Testing); tests/yambopy_ext: those of yambopy_ext, no Qt
 docs/                       User and developer documentation (this document: architecture.md)
 data/                       Test datasets (not in the repository)
@@ -223,6 +225,28 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 
 - `bse/exciton_kspace.py`: yambo's BSE table is (k, v, c), the k being the electron's; at a finite Q the hole is at k−Q (checked from the DFT transition energies, `test_composition.py`). It replaces `YamboExcitonDB.get_exciton_weights` (the hole's weight at the electron's k: right only at Q = 0) and `get_exciton_transitions` (columns read as (k, c, v), only the last state of a group kept), vectorised. It is what a finite-Q excitonic band structure needs.
 - `bz/wigner_seitz.py`: the zone from scipy's Voronoi construction (all lattices, oblique and 3D included), unlike `yambopy.plot.plotting.BZ_Wigner_Seitz`.
+- `bse/exciton_bands.py`: the excitonic band structure at any Q (see the next section). It replaces `YamboExcitonDB.interpolate` and its QP band range bug: it takes the QP energies from the first columns of the QP database whatever its range, so with BiI3's `ndb.QP` (bands 140-157) for a BSE on bands 139-152 every band is one too high (`test_band_structure.py` documents it).
+- `dbs/qp_energies.py`: QP energies from `QP_table`, `QP_E` and `QP_Eo`. `YamboQPDB` recognises QP databases by file name, so it cannot read a renamed one, nor the split ones (`ndb.QP_140_146`), which have the same variables.
+
+### Excitonic band structure: interpolation
+
+The band structure (`computeBandStructure`, `yambopy_ext/bse/exciton_bands.py`) draws the electronic bands of the BSE (its valence and conduction bands) along the Q-path, each with the weight of the selected excitons on it. Two quantities are interpolated from the k-point grid to the path, differently.
+
+**Which weight goes on which band.** Yambo's BSE table is (k, v, c), k being the electron's; at a finite momentum Q the hole is at k−Q (checked on BiI3 from the DFT transition energies, `test_composition.py`). So `band_kpoint_weights` puts each transition's weight |A|² on its conduction band at k (the electron) and on its valence band at k−Q (the hole). On the path, the width of a valence band at k is the hole's weight at k, that is of transitions whose electron is at k+Q. At Q = 0 both are at k, which is all `YamboExcitonDB.get_exciton_weights` does (and why the band structure was Γ-only). The weights of several states are summed and divided by their number (so a degenerate group weighs as one state).
+
+**Energies: SKW with symmetries** (`interpolate_energies`, as `YamboExcitonDB.interpolate`): `yambopy.tools.skw.SkwInterpolator` on the irreducible k-points, with the crystal's symmetries (those of the reciprocal lattice without time reversal, as SKW expects those of the direct lattice) and time reversal. Energies have the full symmetry, the fit is smooth and the irreducible wedge is small (90 k-points for BiI3 8×8×8, 469 for WSe2 72×72). With GW, the QP energies (`band_energies_ibz`) are those of the QP database, in its energy zero; a BSE band outside its range gets its DFT energy moved to that zero (the difference of zeros is one number, 5.745 eV for BiI3) plus the QP correction of the nearest band of the database at the same k-point.
+
+**Weights: linear on the full grid, no symmetry** (`interpolate_on_grid`). Three options were weighed:
+
+| | Correct at finite Q | Cost | Shape |
+|---|---|---|---|
+| SKW with symmetries, on the irreducible wedge (YamboPy) | No: the weights are folded into the wedge, one representative per star | Small | Smooth |
+| SKW without symmetries, on the full grid | Yes | 3 s and 0.25 GB for 8×8×8 (512 k-points); over 6 minutes and still not done, 2.8 GB, for 72×72 (5184 k-points, 25920 star functions) | Smooth, but rings: small negative weights |
+| Multilinear, periodic, on the full grid | Yes | Negligible on any grid | Exact at grid points, linear between them (triangular widths on coarse grids) |
+
+At a finite Q the weights only have the symmetry of the little group of Q, not the crystal's; and a single state of a degenerate group does not have the full symmetry even at Γ (another reason to sum degenerate states). Folding them into the irreducible wedge, as YamboPy does, takes one star member's weight for all of them. Interpolating without symmetry is correct, and multilinear interpolation does it at no cost: on the full grid (`lattice.red_kpoints`, any order, any cell), each path point gets the weighted average of the 8 corners of its grid cell (periodic, so across the zone boundary too). It never goes negative, and its values at the path points that are grid points are the exact weights (`test_band_structure.py` checks it). The price is the shape between grid points on coarse grids: on BiI3's 8×8×8 grid only 6 of 150 path points are grid points, and the widths are triangular between them; on a 72×72 grid they look smooth.
+
+**Degenerate states.** `Options.sumDegenerate` (one setting, in the Selected exciton section with a linked copy in the Wave function controls; `DEGENERACY_EV` = 10 meV) decides whether the states degenerate with an exciton are summed with it, in the wave function (`computeWaveFunction(degenerate=...)`, its memory estimate), the composition and the band structure. Changing it recomputes the composition and the band structure (`Calculations.computeBandStructure` from `bandStructureSelection`, the excitons last clicked); the wave function, costly, is not: `wfStates` / `wfDegenerate` record how it was computed, and the Exciton section says when that is not the setting of now.
 
 ---
 
@@ -342,7 +366,7 @@ Getting these wrong is the most common source of bugs here.
 - yambopy's `ex_wf2Real` makes even supercell sizes odd, snaps the fixed particle to the nearest grid point and moves it to the **central cell** (`supercell // 2`). The app enforces odd sizes in the GUI and reads back the effective values: `wfSupercell`, `wfGrid` (points per cell), `wfFixedPosition` (crystal coordinates in the unit cell), `wfFixedCrystal()` (in the supercell).
 - The supercell spans cells `0 … n − 1` along each lattice vector from the origin, as the 3D view draws it.
 - Grid point `(i, j, k)` is at `i v1 + j v2 + k v3`, the voxel vectors being supercell vectors divided by the grid size (`wfVoxels()`, `analysis.voxelVectors`). `Calculations.tr4x4` is the same map as a 4×4 transform (voxel vectors as **columns**), used for the 3D items. When upsampling by `f`, divide its 3×3 part by `f`.
-- `waveFunction` is the probability density summed over the degenerate states and spins, **normalized to its maximum** (values in [0, 1]).
+- `waveFunction` is the probability density summed over the spins and, with `Options.sumDegenerate`, the degenerate states (`wfStates`), **normalized to its maximum** (values in [0, 1]).
 
 **View directions** follow VESTA: the direction is from the viewer into the screen. `ExcitonWfWidget.viewRotation()` builds the quaternion; pyqtgraph's `opts['rotation']` is **world → camera**.
 
@@ -497,7 +521,7 @@ The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATA
 
 ### Composition panel (`composition_panel.py`)
 
-`Calculations.computeComposition(degenerate)` analyses the selected exciton in the background (`computeComposition`: reads the BSE database of its Q-point with the states up to it plus 20, kept in `compositionCache` for the other excitons of that Q-point, then `exciton_kspace` with the wave function's degeneracy tolerance). It runs only while the panel is shown: `MainWindow.updateComposition` on each selection, when the panel is opened (`onPanelToggled`, `showPanel`) or brought up (`CompositionPanel.showEvent` emits `compositionNeeded`). Expected problems (a Q-point not computed, an exciton beyond the database) come back as `compositionFailed` and are said in the panel, not in a dialog. The composition goes with the selected exciton: cleared by `resetSpectra`, stored in session results (restored before the selection, so that it is not computed again).
+`Calculations.computeComposition(Options.sumDegenerate)` analyses the selected exciton in the background (`computeComposition`: reads the BSE database of its Q-point with the states up to it plus 20, kept in `compositionCache` for the other excitons of that Q-point, then `exciton_kspace` with `DEGENERACY_EV`). It runs only while the panel is shown: `MainWindow.updateComposition` on each selection, when the panel is opened (`onPanelToggled`, `showPanel`) or brought up (`CompositionPanel.showEvent` emits `compositionNeeded`). Expected problems (a Q-point not computed, an exciton beyond the database) come back as `compositionFailed` and are said in the panel, not in a dialog. The composition goes with the selected exciton: cleared by `resetSpectra`, stored in session results (restored before the selection, so that it is not computed again).
 
 The panel draws a plane map (`TileMapItem`: one polygon per k-point, the 2D Voronoi cell of the grid, clipped to the zone's outline; points up to a tile outside the zone fill the edges of bulk sections) or, for bulk crystals, the zone in 3D (`KSpaceView`, a quaternion `GLViewWidget` with its own gizmo showing the reciprocal vectors; the k-points as one translucent `SortedMeshItem` of spheres, `spheresMeshData` with the headlight shader, drawn in the translucent stage as the wave function's surfaces). Layers (the vacuum axis of `Options.latticeSummary`) only have the plane map. Its settings are a `PersistentState` (`composition` in the registry): the plane and the 3D camera with the dataset; the camera is `None` until the zone is fitted or the camera restored, so that a dataset without a camera of its own gets the zone fitted (`cameraSet`, reset by `clear` on a new dataset).
 

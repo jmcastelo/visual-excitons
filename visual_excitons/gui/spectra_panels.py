@@ -3,6 +3,7 @@ The spectra: the dispersion, absorption and band structure plots and their
 controls, each shown in its own dock by the main window.
 """
 
+import numpy as np
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtGui import QColor
 
@@ -44,6 +45,9 @@ class SpectraPanels(QObject):
         calculations.qPathReady.connect(bandStructureWidget.setXAxis)
         calculations.excitonBandStructureReady.connect(bandStructureWidget.plotData)
         calculations.excitonBandStructureClear.connect(bandStructureWidget.clearData)
+        # Its title says the Q-point, its tooltip how to read it
+        calculations.excitonBandStructureReady.connect(self.updateBandStructureTitle)
+        calculations.excitonBandStructureClear.connect(self.updateBandStructureTitle)
 
         bandStructureWidget.curveClicked.connect(bandStructureStyle.setCurrentCurveIndex)
 
@@ -82,6 +86,32 @@ class SpectraPanels(QObject):
                        calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
             signal.connect(self.updateHighlights)
         self.parametersWidget.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
+
+    @Slot()
+    def updateBandStructureTitle(self, *args):
+        from visual_excitons.gui.composition_panel import fraction
+        info = self.calculations.bandStructureInfo if len(self.calculations.k) else None
+        widget = self.bandStructureWidget
+        if not info:
+            widget.setQPointTitle('', '')
+            return
+        q = np.asarray(info['redQPoint'], dtype=float)
+        gamma = np.allclose(q - np.round(q), 0.0, atol=1e-6)
+        where = 'Γ' if gamma else '(' + ', '.join(fraction(x) for x in q) + ')'
+        states = info['states']
+        names = (f'{states[0]}–{states[-1]}' if len(states) > 1 and states == list(range(states[0], states[-1] + 1))
+                 else ', '.join(map(str, states)))
+        lines = [f'Exciton{"s" if len(states) > 1 else ""} {names} at Q{info["qIndex"] + 1} = {where}'
+                 + (' (with the degenerate states)' if info['degenerate'] and states != info['clicked'] else '') + '.',
+                 'The width of each band is the weight of the exciton on it.']
+        if not gamma:
+            lines.append('At finite Q the hole is at k−Q: on the valence bands, the weight of the hole at k\n'
+                         '(transitions to the electron at k+Q); on the conduction bands, that of the electron at k.')
+        if info.get('estimatedBands'):
+            bands = info['estimatedBands']
+            lines.append(f'QP energies of band{"s" if len(bands) > 1 else ""} ' + ', '.join(map(str, bands))
+                         + ' (outside the QP database): DFT, corrected as the nearest band of the database.')
+        widget.setQPointTitle(f'at Q{info["qIndex"] + 1} = {where}', '\n'.join(lines))
 
     @Slot()
     def updateHighlights(self, *args):

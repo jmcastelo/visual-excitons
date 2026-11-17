@@ -11,6 +11,12 @@ from .export import supercellAtoms, writeDensity
 from .analysis import voxelVectors
 from .atomic_data import BOHR_TO_ANGSTROM
 from visual_excitons.yambopy_ext.bse.exciton_kspace import exciton_kspace
+from visual_excitons.yambopy_ext.bse.exciton_bands import interpolate_exciton_bands, band_energies_ibz
+from visual_excitons.yambopy_ext.dbs.qp_energies import qp_energies
+
+# States within this energy (eV) of an exciton are degenerate with it (summed with it when
+# Options.sumDegenerate: wave function, composition, band structure)
+DEGENERACY_EV = 1e-2
 
 
 
@@ -148,23 +154,37 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
             'darkExcEnergy': darkExcitons[:, 0], 'data': pointsData, 'range': (energyMin, energyMax)}
 
 
-def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, excitonIndices, bseFiles=None,
-                         qpFile='ndb.QP'):
+def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, excitonIndices, degenerate, qBZ,
+                         gw=False, qpDir=None, qpFile=None):
+    """
+    The excitonic band structure of excitons `excitonIndices` (1-based) of
+    Q-point `qIndex` (0-based, the file `bseFile`), along the Q-path `qBZ`:
+    the hole's weights on the valence bands (at k-Q), the electron's on the
+    conduction bands (at k), on DFT or QP energies (see
+    yambopy_ext.bse.exciton_bands, which explains the interpolation).
+    """
+    if lattice is None:
+        context.stage('Loading the lattice')
+        lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
     context.stage('Loading the databases')
-    gammaFile = (bseFiles or {}).get(0, 'ndb.BS_diago_Q1')
-    if not (Path(diagoDir) / gammaFile).is_file():
-        raise ValueError('The band structure needs the excitons at Γ, ndb.BS_diago_Q1, which were not computed.')
-    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=gammaFile, folder=diagoDir)
-    if gw:
-        energies = YamboQPDB.from_db(filename=qpFile or 'ndb.QP', folder=qpDir)
-    else:
-        energies = YamboElectronsDB.from_db_file(folder=saveDir)
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir,
+                                            neigs=max(excitonIndices) + 20)
+    missing = [i for i in excitonIndices if i > len(excitonDB.eigenvalues)]
+    if missing:
+        raise ValueError(f'Exciton {missing[0]} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
+    electrons = YamboElectronsDB.from_db_file(folder=saveDir)
+    qp = qp_energies(str(Path(qpDir) / (qpFile or 'ndb.QP'))) if gw else None
+    first, last = int(excitonDB.start_band) + 1, int(excitonDB.mband)
+    energies, estimated = band_energies_ibz(electrons.eigenvalues_ibz[0], first, last, qp)
 
     context.stage('Interpolating the bands')
-    excitonBands = excitonDB.interpolate(energies=energies, excitons=excitonIndices, bz=qBZ, lpratio=5, verbose=True)
-
-    return {'k': qBZ.kpoints_distances(), 'bands': np.transpose(excitonBands.bands),
-            'weights': np.transpose(excitonBands.weights)}
+    result = interpolate_exciton_bands(excitonDB, qBZ.kpoints('red'), excitonIndices, energies,
+                                       degenerate=degenerate, degen_eps=DEGENERACY_EV)
+    return {'lattice': lattice, 'k': qBZ.kpoints_distances(), 'bands': np.transpose(result['energies']),
+            'weights': np.transpose(result['weights']),
+            'info': {'qIndex': int(qIndex), 'states': result['states'], 'clicked': [int(i) for i in excitonIndices],
+                     'degenerate': bool(degenerate), 'redQPoint': [float(x) for x in result['red_qpoint']],
+                     'bands': list(result['bands']), 'estimatedBands': estimated, 'gw': bool(gw)}}
 
 
 def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None):
@@ -193,13 +213,13 @@ def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, exc
     if excIndex > len(excitonDB.eigenvalues):
         raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
     # The same degeneracy as the wave function's (computeWaveFunction)
-    result = exciton_kspace(excitonDB, excIndex, degenerate=degenerate, degen_eps=1e-2)
+    result = exciton_kspace(excitonDB, excIndex, degenerate=degenerate, degen_eps=DEGENERACY_EV)
     result.update(lattice=lattice, qIndex=qIndex, excIndex=excIndex, degenerate=bool(degenerate))
     return result
 
 
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
-                        cutoff_ry, supercell, cache=None, block_size=256, bseFile=None):
+                        cutoff_ry, supercell, cache=None, block_size=256, bseFile=None, degenerate=True):
     """
     Real-space probability density of exciton `exc_index` (1-based) at Q-point
     `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>), with the effective
@@ -236,7 +256,9 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
         if cache is not None:
             cache[key] = wavefunctionDB
 
-    degen_states = np.array(excitonDB.get_degenerate(exc_index, eps=1e-2)) - 1
+    # With the states degenerate with it (their densities summed), or alone
+    states = excitonDB.get_degenerate(exc_index, eps=DEGENERACY_EV) if degenerate else [exc_index]
+    degen_states = np.array(states) - 1
     Akcv = excitonDB.get_Akcv()[degen_states]
     Qpt = wavefunctionDB.ydb.lat @ excitonDB.car_qpoint
 
@@ -271,6 +293,8 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
         'fixedPosition': np.round(crystal - np.array(supercell) // 2, 10).tolist(),
         'qIndex': q_index,
         'excIndex': exc_index,
+        'states': [int(s) for s in states],
+        'degenerate': bool(degenerate),
     }
 
 
@@ -369,6 +393,11 @@ class Calculations(QObject):
         self.wfSupercell = None
         self.wfGrid = None
         self.wfExciton = None  # (q index, exciton index)
+        self.wfStates = None   # the states summed (1-based), and whether those degenerate were asked
+        self.wfDegenerate = None
+        # The band structure: the excitons last clicked (q index, indices), and what is shown
+        self.bandStructureSelection = None
+        self.bandStructureInfo = None
         self.tr4x4 = np.eye(4, dtype=float)
 
         self.selectedExciton = None  # (q index, exciton index, energy)
@@ -418,6 +447,7 @@ class Calculations(QObject):
         self.emitExcitonDispersionReady()
         self.dispersionNoteChanged.emit('')
         self.k, self.bands, self.weights = [], [], []
+        self.bandStructureSelection = self.bandStructureInfo = None
         self.excitonBandStructureClear.emit()
         # It goes with the selected exciton
         if self.composition is not None:
@@ -709,25 +739,47 @@ class Calculations(QObject):
 
     @Slot()
     def getExcitonBandStructure(self, points, dummy):
-        data = points[0].data()
-        if data.q is not None:
-            gamma = data.q == 0      # Q1 is Γ
-        else:
-            gamma = self.collinear_qpoints is not None and np.all(self.collinear_qpoints[data.i] == [0.0, 0.0, 0.0])
-        if not gamma:
+        """
+        The band structure of the excitons clicked (at any Q-point: that of the
+        first; those of others are left out), kept to be computed again when
+        Options.sumDegenerate changes.
+        """
+        def qIndexOf(point):
+            data = point.data()
+            if data.q is not None:
+                return int(data.q)
+            return int(self.qIndices[data.i]) if self.qIndices is not None else None
+        qIndex = qIndexOf(points[0]) if points else None
+        if qIndex is None:
+            self.bandStructureSelection = None
             self._applyBandStructure({'k': [], 'bands': [], 'weights': []})
             return
+        indices = sorted({int(point.data().j) for point in points if qIndexOf(point) == qIndex})
+        self.bandStructureSelection = (qIndex, indices)
+        self.computeBandStructure()
 
+    def computeBandStructure(self):
+        """The band structure of the excitons last clicked, with the degeneracy setting of now."""
+        if self.bandStructureSelection is None:
+            return
+        qIndex, indices = self.bandStructureSelection
         o = self.options
-        arguments = dict(lattice=self.lattice, diagoDir=o.diagoDir, gw=o.gw, qpDir=o.qpDir, saveDir=o.saveDir,
-                         qBZ=o.qBZ, excitonIndices=tuple(point.data().j for point in points),
-                         bseFiles=dict(o.bseFiles), qpFile=o.qpFile)
+        if o.qBZ is None or not o.saveDir or not o.diagoDir or o.missingQPoint(qIndex):
+            self._applyBandStructure({'k': [], 'bands': [], 'weights': []})
+            return
+        arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
+                         qIndex=qIndex, excitonIndices=indices, degenerate=o.sumDegenerate, qBZ=o.qBZ,
+                         gw=o.gw, qpDir=o.qpDir, qpFile=o.qpFile)
         self.tasks.submit('Interpolating the excitonic band structure…',
                           lambda context: computeBandStructure(context, **arguments),
                           self._applyBandStructure, key='band-structure')
 
     def _applyBandStructure(self, result):
         self.markResultsChanged()
+        if self.lattice is None and result.get('lattice') is not None:
+            self.lattice = result['lattice']
+        # What it is: Q-point, states, bands (see computeBandStructure); None when cleared
+        self.bandStructureInfo = result.get('info')
         self.k, self.bands, self.weights = result['k'], result['bands'], result['weights']
         self.excitonBandStructureNumCurvesChanged.emit(len(self.bands))
         self.excitonBandStructureInit.emit()
@@ -769,7 +821,7 @@ class Calculations(QObject):
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
                          cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
-                         cache=self.wavefunctionCache, block_size=block_size)
+                         cache=self.wavefunctionCache, block_size=block_size, degenerate=self.options.sumDegenerate)
         self.tasks.submit('Computing the exciton wave function…',
                           lambda context: computeWaveFunction(context, **arguments),
                           self._applyWaveFunction, key='wave-function')
@@ -785,6 +837,8 @@ class Calculations(QObject):
         self.wfGrid = result['grid']
         self.wfFixedPosition = result['fixedPosition']
         self.wfExciton = (result['qIndex'], result['excIndex'])
+        self.wfStates = list(result.get('states') or [result['excIndex']])
+        self.wfDegenerate = result.get('degenerate')
         self.wfComputed.emit()
 
     # Results in session files (see session.py)
@@ -818,7 +872,7 @@ class Calculations(QObject):
             arrays['bands/k'] = np.asarray(self.k, dtype=float)
             arrays['bands/bands'] = np.asarray(self.bands, dtype=float)
             arrays['bands/weights'] = np.asarray(self.weights, dtype=float)
-            meta['bands'] = True
+            meta['bands'] = dict(self.bandStructureInfo) if self.bandStructureInfo else True
 
         if self.selectedExciton is not None:
             meta['selectedExciton'] = list(self.selectedExciton)
@@ -841,7 +895,8 @@ class Calculations(QObject):
             arrays['waveFunction/atomPositions'] = np.asarray(self.wfAtomPositions, dtype=float)
             meta['waveFunction'] = {'fixedParticle': self.wfFixedParticle, 'supercell': list(self.wfSupercell),
                                     'grid': list(self.wfGrid), 'fixedPosition': list(self.wfFixedPosition),
-                                    'exciton': list(self.wfExciton)}
+                                    'exciton': list(self.wfExciton),
+                                    'states': list(self.wfStates or []), 'degenerate': self.wfDegenerate}
         return meta, arrays
 
     def restoreResults(self, meta, arrays):
@@ -891,7 +946,8 @@ class Calculations(QObject):
             self.excitonAbsorptionReady.emit(self.excAbsData, self.showExcitonLabels)
 
         if meta.get('bands'):
-            self._applyBandStructure({'k': arrays['bands/k'], 'bands': arrays['bands/bands'],
+            info = meta['bands'] if isinstance(meta['bands'], dict) else None      # True: before finite Q (at Γ)
+            self._applyBandStructure({'info': info, 'k': arrays['bands/k'], 'bands': arrays['bands/bands'],
                                       'weights': arrays['bands/weights']})
 
         if 'waveFunction' in meta:
@@ -901,6 +957,7 @@ class Calculations(QObject):
                 'atomPositions': arrays['waveFunction/atomPositions'], 'tr4x4': arrays['waveFunction/tr4x4'],
                 'fixedParticle': wf['fixedParticle'], 'supercell': list(wf['supercell']), 'grid': list(wf['grid']),
                 'fixedPosition': list(wf['fixedPosition']), 'qIndex': wf['exciton'][0], 'excIndex': wf['exciton'][1],
+                'states': wf.get('states') or None, 'degenerate': wf.get('degenerate'),
             })
 
         # Before the selected exciton, so that it is not computed again for it
@@ -951,7 +1008,7 @@ class Calculations(QObject):
                                      f'{len(excitonDB.eigenvalues)} excitons')
                 bands = int(np.max(excitonDB.table[:, 2])) - (int(np.min(excitonDB.table[:, 1])) - 1)
                 self.excitonSizes[key] = {
-                    'states': len(excitonDB.get_degenerate(exc_index, eps=1e-2)),
+                    'states': len(excitonDB.get_degenerate(exc_index, eps=DEGENERACY_EV)),
                     'bands': bands,
                     # Coefficients: (states, ..., k-points, conduction, valence)
                     'kpoints': excitonDB.get_Akcv().shape[-3],
@@ -961,7 +1018,9 @@ class Calculations(QObject):
         finally:
             DATABASE_LOCK.release()
 
-        size = self.excitonSizes[key]
+        size = dict(self.excitonSizes[key])
+        if not self.options.sumDegenerate:
+            size['states'] = 1          # the exciton alone
         fftBox = self.planeWaves.fftBox(cutoff_ry)
         supercell = [s + 1 - s % 2 for s in supercell]   # odd, as computed
         # A snapshot of the keys: the worker thread may be changing the cache

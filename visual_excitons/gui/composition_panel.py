@@ -193,22 +193,17 @@ class CompositionPanel(QWidget):
         self.dark = False
         self.persistence = PersistentState()
 
-        # What it is: the exciton, its states; the degeneracy
+        # What it is: the exciton and its states (with those degenerate with it per
+        # Options.sumDegenerate, in the Selected exciton section)
         self.infoLabel = QLabel('Select an exciton in a spectrum.')
         self.infoLabel.setWordWrap(True)
         self.infoLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.degenerateCheckBox = QCheckBox('Sum degenerate states')
-        self.degenerateCheckBox.setChecked(True)
-        self.degenerateCheckBox.setToolTip('Sum the states degenerate with the exciton (within 10 meV, as its wave '
-                                           'function): a single one of them is an arbitrary mixture')
-        self.degenerateCheckBox.toggled.connect(lambda checked: self.compositionNeeded.emit())
         self.exportDataButton = QPushButton('Export data…')
         self.exportDataButton.setToolTip('The weights of every k-point (electron and hole) and the composition, '
                                          'as a CSV file')
         self.exportDataButton.clicked.connect(self.exportDataRequested)
         header = QHBoxLayout()
         header.addWidget(self.infoLabel, 1)
-        header.addWidget(self.degenerateCheckBox)
         header.addWidget(self.exportDataButton)
 
         self.tabs = QTabWidget()
@@ -222,7 +217,6 @@ class CompositionPanel(QWidget):
         layout.addWidget(self.tabs, 1)
 
         p = self.persistence
-        p.remember('degenerate', self.degenerateCheckBox)
         p.remember('particle', self.particleComboBox)
         p.remember('scale', self.scaleComboBox)
         p.remember('colormap', self.colormapComboBox)
@@ -421,9 +415,6 @@ class CompositionPanel(QWidget):
         self.crystal = None
         self.cameraSet = False
         self.setComposition(None)
-
-    def degenerate(self):
-        return self.degenerateCheckBox.isChecked()
 
     def isLayer(self):
         return self.crystal is not None and self.crystal['layer'] is not None

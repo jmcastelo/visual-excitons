@@ -147,11 +147,26 @@ class Parameters3DWidget(Inspector):
             spinBox.valueChanged.connect(self.updateExcitonNote)
 
         self.excitonNote = NoteLabel()
+        # A copy of the Selected exciton section's checkbox, linked to it (Options.sumDegenerate;
+        # remembered there): it decides which states a wave function sums
+        from .parameters_widget import DEGENERATE_TIP
+        self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
+        self.sumDegenerateCheckBox.setChecked(self.options.sumDegenerate)
+        self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)
+        self.sumDegenerateCheckBox.toggled.connect(self.options.setSumDegenerate)
+        self.options.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
+        # The states the wave function shown sums, and whether it is with the setting of now
+        self.wfStatesNote = NoteLabel()
+        self.wfStatesNote.hide()
+        self.calculations.wfComputed.connect(self.updateWfStatesNote)
+        self.options.sumDegenerateChanged.connect(self.updateWfStatesNote)
 
         form = formLayout()
         form.addRow('Q-point:', self.qPointSpinBox)
         form.addRow('Exciton:', self.excitonIndexSpinBox)
         form.addRow(self.excitonNote)
+        form.addRow(self.sumDegenerateCheckBox)
+        form.addRow(self.wfStatesNote)
         self.addSection('Exciton', form)
         self.remember('qPoint', self.qPointSpinBox, DATASET)
         self.remember('exciton', self.excitonIndexSpinBox, DATASET)
@@ -849,6 +864,26 @@ class Parameters3DWidget(Inspector):
             self.excitonNote.setText(f'Selected in Spectra: E = {selected[2]:.4f} eV')
         else:
             self.excitonNote.setText('Click a bright exciton in an absorption spectrum to select it here.')
+
+    @Slot()
+    def updateWfStatesNote(self, *args):
+        """The states of the wave function shown, and a warning when computed with the other setting."""
+        calc = self.calculations
+        if calc.waveFunction is None or not calc.wfExciton:
+            self.wfStatesNote.hide()
+            return
+        qIndex, excIndex = calc.wfExciton
+        states = calc.wfStates or [excIndex]
+        text = f'Shown: exciton {excIndex} at Q{qIndex + 1}'
+        if len(states) > 1:
+            text += f', with the degenerate states {states[0]}–{states[-1]}' if states == list(range(states[0], states[-1] + 1)) \
+                else ', with the degenerate states ' + ', '.join(map(str, states))
+        text += '.'
+        if calc.wfDegenerate is not None and calc.wfDegenerate != self.options.sumDegenerate:
+            text += (' <span style="color:#d9822b">Computed ' + ('summing' if calc.wfDegenerate else 'without summing')
+                     + ' the degenerate states: compute it again for the setting of now.</span>')
+        self.wfStatesNote.setText(text)
+        self.wfStatesNote.show()
 
     @Slot(int)
     def updateParticlePositionWidgets(self, index: int):

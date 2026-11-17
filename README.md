@@ -1,6 +1,6 @@
 # Visual Excitons
 
-Visual Excitons is a graphical program to explore the excitons computed with [Yambo](https://www.yambo-code.eu/), reading its databases through [YamboPy](https://github.com/yambo-code/yambopy). It plots the excitonic dispersion along a path of the Brillouin zone, the absorption spectra at each Q-point and the excitonic band structure. It also computes and draws the wave function of a chosen exciton in real space, as isosurfaces or a volume, together with the crystal structure, and analyses its size.
+Visual Excitons is a graphical program to explore the excitons computed with [Yambo](https://www.yambo-code.eu/), reading its databases through [YamboPy](https://github.com/yambo-code/yambopy). It plots the excitonic dispersion along a path of the Brillouin zone, the absorption spectra at each Q-point and the excitonic band structure at any Q-point, and shows where an exciton lives in reciprocal space and what it is made of. It also computes and draws the wave function of a chosen exciton in real space, as isosurfaces or a volume, together with the crystal structure, and analyses its size.
 
 Its panels can be arranged freely, or by layouts for each step of the work. Calculations run in the background, and whole setups can be saved as session files. The 2D plots can be exported as publication figures, or as Matplotlib scripts that recreate them, and the 3D view as images or density files for VESTA and similar programs.
 
@@ -24,7 +24,7 @@ Using the program:
 - [Installation](docs/installation.md): requirements, dependencies and installing.
 - [The main window](docs/interface.md): the panels and how to arrange them, layouts, background calculations, themes, and what is resumed on start.
 - [Datasets and the System panel](docs/datasets.md): opening the databases of a calculation, how they are recognised and checked, partial calculations, the crystal lattice and the Q-path.
-- [Spectra](docs/spectra.md): dispersion, absorption and band structure, selecting excitons, and publication figures.
+- [Spectra](docs/spectra.md): dispersion, absorption and band structure (at any Q), selecting excitons, and publication figures.
 - [Composition of an exciton](docs/composition.md): where the selected exciton lives in reciprocal space (a map of its k-points, in 3D for bulk crystals) and what it is made of (band pairs, bands, k-points), at Γ or finite Q.
 - [Appearance of the plots](docs/appearance.md): colors, lines, symbols, axes and legend of the 2D plots.
 - [Wave function](docs/wavefunction.md): computing it, plot types and colormaps, view directions, layers and the cell origin, atoms and bonds, analysis and export.
@@ -37,7 +37,6 @@ Working on the program:
 
 ## Future features
 
-- Finite-Q band structure plots.
 - Expand the tool to include electronic band structure plots.
 
 ## License

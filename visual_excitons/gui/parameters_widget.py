@@ -6,6 +6,12 @@ from .inspector import Inspector, formLayout, NoteLabel
 from .persistence import DATASET
 
 
+
+# The setting summing degenerate states, as explained in both its checkboxes
+DEGENERATE_TIP = ('Sum the states degenerate with the exciton (within 10 meV): in its wave function, its\n'
+        'composition and its band structure. A single state of a degenerate group is an arbitrary\n'
+        'mixture of them, without the symmetry of the crystal')
+
 class ParametersWidget(Inspector):
     """Inspector of the spectra page."""
 
@@ -117,6 +123,13 @@ class ParametersWidget(Inspector):
         # function in one click, with the memory it needs
 
         self.selectedExcitonNote = NoteLabel()
+        # Shared by everything about the selected exciton (Options.sumDegenerate); a
+        # copy in the Wave function controls' Exciton section, linked to it
+        self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
+        self.sumDegenerateCheckBox.setChecked(self.options.sumDegenerate)
+        self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)
+        self.sumDegenerateCheckBox.toggled.connect(self.options.setSumDegenerate)
+        self.options.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
         self.computeWavefunctionButton = QPushButton('Compute its wave function')
         self.computeWavefunctionButton.setToolTip('Compute the wave function of this exciton with the settings of the\n'
                                                   'Wave function controls, and show it')
@@ -130,6 +143,7 @@ class ParametersWidget(Inspector):
 
         layout = QVBoxLayout()
         layout.addWidget(self.selectedExcitonNote)
+        layout.addWidget(self.sumDegenerateCheckBox)
         layout.addWidget(self.showCompositionButton)
         layout.addWidget(self.computeWavefunctionButton)
         layout.addWidget(self.wfEstimateNote)
@@ -156,7 +170,8 @@ class ParametersWidget(Inspector):
         # Kept between sessions: the spectra settings with the dataset (they
         # depend on its energies), the labels as a preference
         for key, widget in (('excitons', self.nExcitonsSpinBox), ('autoRange', self.autoRangeCheckBox),
-                            ('brightThreshold', self.excMinIntensitySpinBox)):
+                            ('brightThreshold', self.excMinIntensitySpinBox),
+                            ('sumDegenerate', self.sumDegenerateCheckBox)):
             self.remember(key, widget, DATASET)
         # The range as a whole: set one bound at a time, it would be clamped by the old other one
         self.remember('energyRange', scope=DATASET,

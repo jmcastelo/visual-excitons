@@ -9,7 +9,8 @@ class BandStructureWidget(pg.PlotWidget):
     def __init__(self, style, parent = None):
         pg.PlotWidget.__init__(self, parent)
 
-        self.title = 'Excitonic Band Structure'
+        self.baseTitle = 'Excitonic Band Structure'
+        self.title = self.baseTitle
         self.setTitle(self.title)
 
         self.showAxes(True)
@@ -133,6 +134,13 @@ class BandStructureWidget(pg.PlotWidget):
         self.setLabelsColor(self.style.axesStyle.labelsColor.color)
 
     @Slot()
+    def setQPointTitle(self, where, toolTip):
+        """The title with where the band structure is (e.g. 'at Q12 = (0, 1/8, -1/8)'), and how to read it."""
+        self.title = f'{self.baseTitle} {where}' if where else self.baseTitle
+        self.setTitleFont(self.style.axesStyle.titleFont.getFont())
+        self.setTitleColor(self.style.axesStyle.titleColor.getColor())
+        self.setToolTip(toolTip)
+
     def setTitleColor(self, color):
         self.getPlotItem().titleLabel.setText(self.title, color = color)
 

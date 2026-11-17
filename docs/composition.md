@@ -6,7 +6,7 @@ The **Composition** panel shows where the selected exciton lives in reciprocal s
 
 An exciton is a sum of transitions from a valence band v to a conduction band c, each with a weight |A|² (they add up to 1). At a finite momentum Q, a transition takes the hole from k−Q to the electron at k: the electron's weights are at k, the hole's at k−Q, and the two maps are shifted by Q. At Γ they coincide.
 
-- `Sum degenerate states` (on by default) sums the states degenerate with the exciton (within 10 meV, as its [wave function](wavefunction.md) does): a single state of a degenerate group is an arbitrary mixture of them, and its map would not have the symmetry of the crystal. The states summed are named at the top of the panel.
+- The states degenerate with the exciton (within 10 meV) are summed with it when `Sum degenerate states` is on, in the [Selected exciton](spectra.md) section of the Spectra controls (the setting of its wave function and band structure too): a single state of a degenerate group is an arbitrary mixture of them, and its map would not have the symmetry of the crystal. The states summed are named at the top of the panel.
 - `Export data…` saves the weight of every k-point (reduced and Cartesian coordinates, the electron's and the hole's) and the composition by band pairs and bands as a CSV file.
 
 ## k-space
