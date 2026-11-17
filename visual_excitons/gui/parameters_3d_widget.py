@@ -753,6 +753,10 @@ class Parameters3DWidget(Inspector):
         self.remember('showAnalysis', self.showAnalysisCheckBox)
         self.remember('planeBasis', self.planeBasisComboBox)
         self.remember('planeNormal', **vector(self.planeNormalLineEdits))
+        # The orientation of the cut taken from the view (after the normal, which
+        # does not clear it when restored: no editing signal)
+        self.remember('planeUp', get=lambda: self.planeUpHint,
+                      set=lambda up: setattr(self, 'planeUpHint', [float(c) for c in up] if up else None))
         self.remember('planeOffset', self.planeOffsetSpinBox)
         self.remember('planeAtoms', self.planeAtomsSpinBox)
         self.remember('showPlane', self.showPlaneCheckBox)

@@ -643,3 +643,26 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
             if not w.isWindowModified():
                 missing.append(f'"{button.text()}" ({button.toolTip().splitlines()[0] if button.toolTip() else type(button).__name__})')
     assert not missing, 'Not in sessions: ' + '; '.join(missing)
+
+
+@pytest.mark.data
+def test_plane_perpendicular_to_the_view_is_saved(newWindow, tmp_path):
+    """The cut taken from the view keeps its orientation (screen up), even when its normal does not change."""
+    import visual_excitons.gui.main_window as main_window
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    p3 = w.wavefunction.parameters3DWidget
+    p3.setPlaneFromView([0.0, 0.0, 1.0], [0.0, 1.0, 0.0])
+    path = tmp_path / 'cut.vxsession'
+    w.writeSessionFile(str(path))
+
+    # Seen along the same normal, turned: only the orientation changes, and it is a change
+    p3.setPlaneFromView([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    w.updateModified()
+    assert w.isWindowModified()
+    w.writeSessionFile(str(path))
+
+    p3.setPlaneFromView([0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
+    w.openSession(str(path))
+    assert p3.planeSettings()['up'] == [1.0, 0.0, 0.0]
+    assert [edit.text() for edit in p3.planeNormalLineEdits] == ['0.0000', '0.0000', '1.0000']
