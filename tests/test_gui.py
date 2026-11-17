@@ -826,3 +826,21 @@ def test_restored_wave_function_keeps_its_view(window):
     calc.restoringResults = False
     calc.wfComputed.emit()
     assert window.wavefunction.centerOnDisplay
+
+
+def test_panel_menu_ticks_follow_the_panels(window):
+    """The View › Panels ticks match the docks open, after presets and Attach (QtAds leaves them unticked)."""
+    from visual_excitons.gui.docking import PRESETS
+    panels = window.panels
+
+    def inSync():
+        return all(dock.toggleViewAction().isChecked() == (not dock.isClosed()) for dock in panels.docks.values())
+    for name in PRESETS:
+        window.applyPreset(name)
+        assert inSync(), name
+    # A floating panel closed, then Attach all: it stays closed, and unticked
+    panels.docks['absorption'].setFloating()
+    panels.docks['absorption'].toggleView(False)
+    panels.docks['dispersion'].setFloating()
+    panels.attachAll()
+    assert panels.docks['absorption'].isClosed() and not panels.isFloating('dispersion') and inSync()

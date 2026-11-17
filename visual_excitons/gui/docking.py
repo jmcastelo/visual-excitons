@@ -273,9 +273,11 @@ class Panels(QObject):
                 self.manager.addDockWidget(RIGHT, dock)
         dock.setAsCurrentTab()
         self.recordHomes()
+        self.syncToggleActions()
 
     def attachAll(self):
-        for key in list(self.docks):
+        """The floating docks shown back into the main window (closed ones stay closed)."""
+        for key in self.floatingKeys():
             self.attach(key)
 
     def floatingKeys(self):
@@ -284,6 +286,16 @@ class Panels(QObject):
     def toggleActions(self):
         """Actions that show or hide each dock, in the order of PANELS."""
         return [self.docks[key].toggleViewAction() for key in PANELS if key in self.docks]
+
+    def syncToggleActions(self):
+        """
+        Tick the actions of the docks open, untick the others. QtAds updates
+        them in toggleView, not when a dock removed from the manager is added
+        back (presets, Attach): they would stay unticked on docks shown.
+        Setting the check state does not trigger them.
+        """
+        for dock in self.docks.values():
+            dock.toggleViewAction().setChecked(not dock.isClosed())
 
     def isShown(self, key):
         return not self.docks[key].isClosed()
@@ -345,6 +357,7 @@ class Panels(QObject):
                     placed[key].toggleView(False)
         finally:
             self.arranging = False
+        self.syncToggleActions()
         sizes = [(key, shares) for key, shares in preset['sizes'] if key in placed]
         self.setShares(sizes)
         # Once laid out, when the window was not shown yet

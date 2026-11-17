@@ -279,6 +279,8 @@ class MainWindow(QMainWindow):
         viewMenu = self.menuBar().addMenu('&View')
 
         panelsMenu = viewMenu.addMenu('&Panels')
+        # Whatever changed the docks, the ticks as they are now
+        panelsMenu.aboutToShow.connect(self.panels.syncToggleActions)
         for action in self.panels.toggleActions():
             panelsMenu.addAction(action)
         viewMenu.addSeparator()
