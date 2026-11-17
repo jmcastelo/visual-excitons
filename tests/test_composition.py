@@ -104,12 +104,17 @@ def test_composition_panel(window, qtbot, tmp_path):
 
     # Bulk: the zone in 3D by default, the points above the threshold drawn
     assert not panel.isLayer() and panel.is3D() and not panel.viewComboBox.isHidden()
-    import pyqtgraph.opengl as gl
-    scatter = [item for item in panel.view3D.items3D if isinstance(item, gl.GLScatterPlotItem)]
-    drawn = len(scatter[0].pos)
+    from visual_excitons.gui.sorted_mesh_item import SortedMeshItem
+    spheres = [item for item in panel.view3D.items3D if isinstance(item, SortedMeshItem)]
+    assert len(spheres) == 1                                 # one mesh of translucent spheres
+    drawn = panel.spheresShown
     panel.thresholdSpinBox.setValue(50.0)
-    scatter = [item for item in panel.view3D.items3D if isinstance(item, gl.GLScatterPlotItem)]
-    assert 0 < len(scatter[0].pos) < drawn
+    assert 0 < panel.spheresShown < drawn
+    # At finite Q the electron and the hole differ: the particle chosen changes the map
+    assert panel.particleComboBox.isEnabled()
+    electron = panel.weights().copy()
+    panel.particleComboBox.setCurrentText('Hole')
+    assert not np.allclose(panel.weights(), electron)
     # The plane through Γ, then the sum over the planes
     panel.viewComboBox.setCurrentText('Plane')
     assert not panel.is3D() and panel.planeSpinBox.value() == 0 and len(panel.tiles.picture.data()) > 0
@@ -145,6 +150,8 @@ def test_layer_has_a_plane_map_only(window, qtbot, monkeypatch, tmp_path):
     select(window, 0, 1)
     qtbot.waitUntil(lambda: calc.composition is not None, timeout=60000)
     assert panel.isLayer() and not panel.is3D() and panel.viewComboBox.isHidden()
+    # At Γ the electron and the hole are at the same k-points: no choice
+    assert not panel.particleComboBox.isEnabled() and panel.kspaceNote.text().startswith('Electron and hole')
     # The A exciton: at K and K'
     rows = [panel.kpointsTable.item(r, 2).text() for r in range(2)]
     assert sorted(rows) == ['K', 'K′']

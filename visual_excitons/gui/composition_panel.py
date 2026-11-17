@@ -22,6 +22,9 @@ from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormap
 from .axes_3d_widget import AxisGizmo
 from .inspector import NoteLabel
 from .theme import PLOT_COLORS
+from .gl_style import (OPAQUE_STAGE, LABEL_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
+                       headlightShader, enableMultisampling, spheresMeshData)
+from .sorted_mesh_item import SortedMeshItem
 
 PARTICLES = ['Electron', 'Hole', 'Electron + hole']
 # Smallest weight shown on the logarithmic scale (relative to the largest)
@@ -76,6 +79,7 @@ class KSpaceView(gl.GLViewWidget):
     def __init__(self, parent=None):
         # Quaternions, as the real-space view: free rotation, and a camera state to keep
         super().__init__(parent, rotationMethod='quaternion')
+        enableMultisampling(self)
         self.gizmo = None
         self.items3D = []
 
@@ -90,6 +94,15 @@ class KSpaceView(gl.GLViewWidget):
     def repositionGizmo(self):
         if self.gizmo is not None:
             self.gizmo.move(self.gizmo.margin, self.height() - self.gizmo.height() - self.gizmo.margin)
+
+    def paint(self, **kwargs):
+        # glClear() respects the depth write mask, which the translucent spheres
+        # (drawn last) turn off: without this, the next frame would not clear the
+        # depth buffer, and everything would fail the depth test (as in
+        # ExcitonWfWidget.paint)
+        from OpenGL import GL
+        GL.glDepthMask(GL.GL_TRUE)
+        super().paint(**kwargs)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -176,6 +189,7 @@ class CompositionPanel(QWidget):
         super().__init__(parent)
         self.composition = None
         self.crystal = None          # lat, rlat, red_kpoints, grid, layer axis, special points, Q-path
+        self.spheresShown = 0        # k-points drawn in 3D
         self.dark = False
         self.persistence = PersistentState()
 
@@ -214,6 +228,7 @@ class CompositionPanel(QWidget):
         p.remember('colormap', self.colormapComboBox)
         p.remember('view', self.viewComboBox)
         p.remember('threshold', self.thresholdSpinBox)
+        p.remember('opacity', self.opacitySpinBox)
         p.remember('qPath', self.qPathCheckBox)
         p.remember('plane', self.planeSpinBox, DATASET)
         # The 3D camera: None until the zone is fitted or the camera moved, so
@@ -259,6 +274,11 @@ class CompositionPanel(QWidget):
         self.thresholdSpinBox.setValue(5.0)
         self.thresholdSpinBox.setToolTip('k-points weighing less than this (relative to the largest) are not drawn '
                                          'in 3D, so that those behind are seen')
+        self.opacityLabel = QLabel('Opacity:')
+        self.opacitySpinBox = QDoubleSpinBox(minimum=0.05, maximum=1.0, singleStep=0.05, decimals=2)
+        self.opacitySpinBox.setValue(0.6)
+        self.opacitySpinBox.setToolTip('Opacity of the spheres of the k-points in 3D: translucent, those behind '
+                                       'show through')
         self.qPathCheckBox = QCheckBox('Q-path')
         self.qPathCheckBox.setToolTip('The Q-path of the dispersion, where it lies in what is shown')
         self.exportImageButton = QPushButton('Export image…')
@@ -271,6 +291,7 @@ class CompositionPanel(QWidget):
         self.viewComboBox.currentIndexChanged.connect(self.updateControls)
         self.planeSpinBox.valueChanged.connect(self.redraw)
         self.thresholdSpinBox.valueChanged.connect(self.redraw)
+        self.opacitySpinBox.valueChanged.connect(self.redraw)
         self.qPathCheckBox.toggled.connect(self.redraw)
 
         row1 = QHBoxLayout()
@@ -281,7 +302,7 @@ class CompositionPanel(QWidget):
         row2 = QHBoxLayout()
         self.viewLabel = QLabel('View:')
         for widget in (self.viewLabel, self.viewComboBox, self.planeLabel, self.planeSpinBox, self.thresholdLabel,
-                       self.thresholdSpinBox, self.qPathCheckBox):
+                       self.thresholdSpinBox, self.opacityLabel, self.opacitySpinBox, self.qPathCheckBox):
             row2.addWidget(widget)
         row2.addStretch(1)
         row2.addWidget(self.exportImageButton)
@@ -422,8 +443,13 @@ class CompositionPanel(QWidget):
         plane = bulk and self.viewComboBox.currentIndex() == 1
         for widget in (self.planeLabel, self.planeSpinBox):
             widget.setVisible(plane)
-        for widget in (self.thresholdLabel, self.thresholdSpinBox):
+        for widget in (self.thresholdLabel, self.thresholdSpinBox, self.opacityLabel, self.opacitySpinBox):
             widget.setVisible(bulk and not plane)
+        # At Γ the electron and the hole are at the same k-points: nothing to choose
+        gamma = self.atGamma()
+        self.particleComboBox.setEnabled(not gamma)
+        self.particleComboBox.setToolTip('At Γ, the electron and the hole are at the same k-points' if gamma else
+                                         'Whose k-points: the electron\'s (k), the hole\'s (k−Q), or their average')
         self.stack.setCurrentIndex(1 if self.is3D() else 0)
 
     def updateInfo(self):
@@ -443,6 +469,16 @@ class CompositionPanel(QWidget):
         where = 'Γ' if atGamma else '(' + ', '.join(fraction(x) for x in q) + ')'
         self.infoLabel.setText(f'Exciton {c["excIndex"]} at Q{c["qIndex"] + 1} = {where}, {c["energy"]:.4f} eV{summed}.'
                                + ('' if atGamma else ' The hole is at k−Q, the electron at k.'))
+
+    def atGamma(self):
+        c = self.composition
+        if c is None:
+            return False
+        q = np.asarray(c['red_qpoint'], dtype=float)
+        return bool(np.allclose(q - np.round(q), 0.0, atol=1e-6))
+
+    def particleName(self):
+        return 'Electron and hole' if self.atGamma() else self.particleComboBox.currentText()
 
     def weights(self):
         """The weights shown, per k-point of the grid."""
@@ -524,10 +560,7 @@ class CompositionPanel(QWidget):
         self.specialItem.setData([p[0] for p in positions], [p[1] for p in positions],
                                  brush=pg.mkBrush(foreground), pen=None)
         for (x, y), text in zip(positions, tickLabels(names)):
-            # On a translucent ground: readable over dark and light tiles
-            ground = pg.mkColor(PLOT_COLORS[self.dark]['background'])
-            ground.setAlpha(170)
-            label = pg.TextItem(text, color=foreground, anchor=(-0.15, 1.1), fill=pg.mkBrush(ground))
+            label = pg.TextItem(text, color=foreground, anchor=(-0.15, 1.1))
             label.setPos(x, y)
             self.mapPlot.addItem(label, ignoreBounds=True)
             self.specialLabels.append(label)
@@ -545,7 +578,7 @@ class CompositionPanel(QWidget):
         what = 'all the planes summed (with the special points and Q-path of the plane through Γ)' \
             if plane is None and not self.isLayer() else \
             ('the plane through Γ' if plane in (None, 0) else f'the plane k{"₁₂₃"[axis]} = {plane}/{k["grid"][axis]}')
-        self.kspaceNote.setText(f'{self.particleComboBox.currentText()}, {what}' +
+        self.kspaceNote.setText(f'{self.particleName()}, {what}' +
                                 (' (the parts of the Q-path off it are not drawn)' if hidden else '') + '.')
         # The zone in view (the tiles outside it are clipped)
         if len(data['outline']):
@@ -561,25 +594,39 @@ class CompositionPanel(QWidget):
         color = pg.mkColor(foreground).getRgbF()
 
         edges = zone['vertices'][np.asarray(zone['edges']).ravel()]
-        self.view3D.addItem3D(gl.GLLinePlotItem(pos=edges, mode='lines', color=color, width=1.5, antialias=True))
+        lines = gl.GLLinePlotItem(pos=edges, mode='lines', color=color, width=1.5, antialias=True)
+        lines.setGLOptions(OPAQUE_GL_OPTIONS)
+        lines.setDepthValue(OPAQUE_STAGE)
+        self.view3D.addItem3D(lines)
 
+        # The k-points as lit spheres, translucent, drawn back to front (as the
+        # wave function's surfaces) so that those behind show through
         threshold = self.thresholdSpinBox.value() / 100
         shown = pointValues >= max(threshold, 1e-12)
         rgba, _, _, _ = self.colors(pointValues[shown])
+        colors = rgba / 255.0
+        colors[:, 3] = self.opacitySpinBox.value()
         step = min(np.linalg.norm(k['rlat'][i] / k['grid'][i]) for i in range(3)) * TO_INVERSE_ANGSTROM
-        sizes = step * (0.35 + 0.65 * pointValues[shown])
+        radii = step * (0.18 + 0.32 * pointValues[shown])
+        self.spheresShown = int(shown.sum())
         if shown.any():
-            scatter = gl.GLScatterPlotItem(pos=points[shown], size=sizes, color=rgba / 255.0, pxMode=False)
-            scatter.setGLOptions('translucent')
-            self.view3D.addItem3D(scatter)
+            spheres = SortedMeshItem(meshdata=spheresMeshData(points[shown], radii, colors, rows=12, cols=16),
+                                     shader=headlightShader, smooth=True)
+            spheres.setGLOptions(TRANSLUCENT_GL_OPTIONS)
+            spheres.setDepthValue(TRANSLUCENT_STAGE)
+            self.view3D.addItem3D(spheres)
 
         for name, text in zip(k['special'], tickLabels(list(k['special']))):
             car = np.asarray(k['special'][name], dtype=float) @ k['rlat'] * TO_INVERSE_ANGSTROM
-            self.view3D.addItem3D(gl.GLTextItem(pos=car, text=text, color=pg.mkColor(foreground)))
+            label = gl.GLTextItem(pos=car, text=text, color=pg.mkColor(foreground))
+            label.setDepthValue(LABEL_STAGE)
+            self.view3D.addItem3D(label)
         if self.qPathCheckBox.isChecked() and k['path'] is not None and len(k['path']):
-            self.view3D.addItem3D(gl.GLLinePlotItem(pos=k['path'] * TO_INVERSE_ANGSTROM, color=color, width=2,
-                                                    antialias=True))
-        self.kspaceNote.setText(f'{self.particleComboBox.currentText()}: {int(shown.sum())} of {len(shown)} k-points '
+            path = gl.GLLinePlotItem(pos=k['path'] * TO_INVERSE_ANGSTROM, color=color, width=2, antialias=True)
+            path.setGLOptions(OPAQUE_GL_OPTIONS)
+            path.setDepthValue(OPAQUE_STAGE)
+            self.view3D.addItem3D(path)
+        self.kspaceNote.setText(f'{self.particleName()}: {int(shown.sum())} of {len(shown)} k-points '
                                 f'of the zone drawn (those of {self.thresholdSpinBox.value():g} % of the largest '
                                 'weight or more), sized and colored by their weight.')
 

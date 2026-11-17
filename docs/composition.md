@@ -13,7 +13,7 @@ An exciton is a sum of transitions from a valence band v to a conduction band c,
 
 The weight of each k-point of the grid, relative to the largest, in the first Brillouin zone (its Wigner–Seitz cell, for any lattice), with its special points labelled (K′, the time-reversed partner of K, included).
 
-- `Particle`: the electron's weights (at k), the hole's (at k−Q), or their average.
+- `Particle`: the electron's weights (at k), the hole's (at k−Q), or their average. At Γ they are the same, and the choice is disabled.
 - `Scale`: linear, or logarithmic, which brings out contributions down to 0.1 % of the largest.
 - `Colormap`: the colors of the weights.
 - `Q-path`: the path of the dispersion, where it lies in what is shown.
@@ -22,7 +22,7 @@ For a **layer** (a 2D material, with vacuum along one lattice vector), the map i
 
 For a **bulk crystal**, `View` chooses:
 
-- `3D`: the Brillouin zone as a wireframe, with the k-points as spheres sized and colored by their weight. `Hide below` leaves out those weighing less than a share of the largest (5 % by default), so that those behind are seen. Drag to rotate, as the 3D view of the wave function; the axes gizmo shows the Cartesian axes and the reciprocal lattice vectors.
+- `3D`: the Brillouin zone as a wireframe, with the k-points as lit spheres sized and colored by their weight, translucent (`Opacity`, 0.6 by default) so that those behind show through. `Hide below` leaves out those weighing less than a share of the largest (5 % by default). Drag to rotate, as the 3D view of the wave function; the axes gizmo shows the Cartesian axes and the reciprocal lattice vectors.
 - `Plane`: the k-points of one plane of the grid perpendicular to c (`0` goes through Γ), on the section of the zone by that plane; or `Sum`, all the planes added up (with the special points and Q-path of the plane through Γ).
 
 `Export image…` saves what the tab shows as an image.
