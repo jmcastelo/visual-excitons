@@ -20,6 +20,8 @@ class DispersionWidget(pg.PlotWidget):
         self.showAxes(True)
 
         xAxis = pg.AxisItem('bottom')
+        # The path is labelled by its special points: no '(x0.001)' scale after its title
+        xAxis.enableAutoSIPrefix(False)
         yAxis = pg.AxisItem('left')
         x2Axis = pg.AxisItem('top', showValues = False, maxTickLength = 0)
         y2Axis = pg.AxisItem('right', showValues = False)

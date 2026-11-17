@@ -192,7 +192,7 @@ class MainWindow(QMainWindow):
         for key, widget in (('system', scrollable(self.system)),
                             ('dispersion', self.spectra.dispersionWidget),
                             ('absorption', self.spectra.absorptionWidget),
-                            ('bands', self.spectra.bandStructureWidget),
+                            ('bands', self.spectra.bandStructurePanel),
                             ('wavefunction', self.wavefunction.excitonWfWidget),
                             ('analysis', self.wavefunction.analysisWidget),
                             ('composition', self.compositionPanel),

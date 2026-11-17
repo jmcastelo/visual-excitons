@@ -25,15 +25,15 @@ The figures use the data as computed: e.g. the absorption spectra are sampled ev
 
 ## Band structure
 
-The excitonic band structure of the excitons selected (clicked on the dispersion, or on an absorption spectrum, `Ctrl`-click for several), at their Q-point, Γ or any other computed one: the electronic bands along the Q-path, DFT or quasiparticle (with GW), each drawn as wide as the weight of the excitons on it. Its title says the Q-point; hover over the plot for how to read it.
+The excitonic band structure of the excitons selected (clicked on the dispersion, or on an absorption spectrum, `Ctrl`-click for several), at their Q-point, Γ or any other computed one: the electronic bands along the Q-path, DFT or quasiparticle (with GW), each drawn as wide as the weight of the excitons on it. Its title says the Q-point; a note below the plot says which excitons and energies it shows, and how to read it at a finite Q.
 
 - At Γ the electron and the hole are at the same k-point: a transition at k weighs on its valence and conduction bands at k.
 - At a finite Q, a transition takes the hole from the valence band at k−Q to the conduction band at k. So the width of a **valence** band at k is the weight of the **hole** at k (transitions to the electron at k+Q), and that of a **conduction** band at k the weight of the **electron** at k. The two can be at different places of the path, or the hole's off it (see the hole's map in the [Composition](composition.md) panel).
 - With `Sum degenerate states` (see **Selected exciton** above), the states degenerate with each exciton clicked are added to it.
 - The weights of several excitons are added up and divided by their number.
-- With GW, bands outside the range of the QP database (e.g. a BSE band below its first band) get their DFT energy corrected as the nearest band of the database, at each k-point; the plot's tooltip names them.
+- With GW, bands outside the range of the QP database (e.g. a BSE band below its first band) get their DFT energy corrected as the nearest band of the database, at each k-point; the note below the plot names them.
 
-The energies and the weights are interpolated from the k-point grid to the path; for some grids (e.g. a layer with a dense grid) the usual interpolation of the energies fails, and a spline on the grid is used instead, as the tooltip says. How and why is explained in the [architecture notes](architecture.md#excitonic-band-structure-interpolation).
+The energies and the weights are interpolated from the k-point grid to the path; for some grids (e.g. a layer with a dense grid) the usual interpolation of the energies fails, and a spline on the grid is used instead, as the note below the plot says. How and why is explained in the [architecture notes](architecture.md#excitonic-band-structure-interpolation).
 
 ## Exploring the plots
 

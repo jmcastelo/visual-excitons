@@ -4,7 +4,8 @@ controls, each shown in its own dock by the main window.
 """
 
 import numpy as np
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Slot, Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QColor
 
 from .dispersion_widget import DispersionWidget
@@ -12,6 +13,7 @@ from .band_structure_widget import BandStructureWidget
 from .absorption_widget import AbsorptionWidget
 from .parameters_widget import ParametersWidget
 from .theme import PLOT_COLORS
+from .inspector import NoteLabel
 
 
 class SpectraPanels(QObject):
@@ -82,6 +84,17 @@ class SpectraPanels(QObject):
         self.dispersionWidget = dispersionWidget
         self.absorptionWidget = absorptionWidget
         self.bandStructureWidget = bandStructureWidget
+        # Its panel: the plot, with a note below saying what it shows and how to read it
+        self.bandStructureNote = NoteLabel()
+        self.bandStructureNote.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.bandStructureNote.setContentsMargins(6, 2, 6, 4)
+        self.bandStructureNote.hide()
+        self.bandStructurePanel = QWidget()
+        layout = QVBoxLayout(self.bandStructurePanel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(bandStructureWidget, 1)
+        layout.addWidget(self.bandStructureNote)
         for signal in (calculations.excitonSelected, calculations.excitonDispersionReady,
                        calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
             signal.connect(self.updateHighlights)
@@ -89,11 +102,13 @@ class SpectraPanels(QObject):
 
     @Slot()
     def updateBandStructureTitle(self, *args):
+        """The band structure's title (its Q-point) and the note below it (how to read it)."""
         from visual_excitons.gui.composition_panel import fraction
         info = self.calculations.bandStructureInfo if len(self.calculations.k) else None
         widget = self.bandStructureWidget
         if not info:
-            widget.setQPointTitle('', '')
+            widget.setQPointTitle('')
+            self.bandStructureNote.hide()
             return
         q = np.asarray(info['redQPoint'], dtype=float)
         gamma = np.allclose(q - np.round(q), 0.0, atol=1e-6)
@@ -101,20 +116,23 @@ class SpectraPanels(QObject):
         states = info['states']
         names = (f'{states[0]}–{states[-1]}' if len(states) > 1 and states == list(range(states[0], states[-1] + 1))
                  else ', '.join(map(str, states)))
-        lines = [f'Exciton{"s" if len(states) > 1 else ""} {names} at Q{info["qIndex"] + 1} = {where}'
-                 + (' (with the degenerate states)' if info['degenerate'] and states != info['clicked'] else '') + '.',
-                 'The width of each band is the weight of the exciton on it.']
+        lines = [f'<b>Exciton{"s" if len(states) > 1 else ""} {names}</b> at Q{info["qIndex"] + 1} = {where}'
+                 + (', with the degenerate states' if info['degenerate'] and states != info['clicked'] else '')
+                 + ('; QP energies' if info.get('gw') else '; DFT energies')
+                 + '. The width of each band is the weight of the exciton on it.']
         if not gamma:
-            lines.append('At finite Q the hole is at k−Q: on the valence bands, the weight of the hole at k\n'
+            lines.append('At finite Q the hole is at k−Q: on the valence bands, the weight of the hole at k '
                          '(transitions to the electron at k+Q); on the conduction bands, that of the electron at k.')
         if info.get('energyInterpolation') == 'spline':
-            lines.append('Energies interpolated with a spline on the full k-point grid (the SKW fit with\n'
-                         'symmetries did not reproduce them for this grid).')
+            lines.append('Energies interpolated with a spline on the full k-point grid: the SKW fit with symmetries '
+                         'did not reproduce them for this grid.')
         if info.get('estimatedBands'):
             bands = info['estimatedBands']
             lines.append(f'QP energies of band{"s" if len(bands) > 1 else ""} ' + ', '.join(map(str, bands))
                          + ' (outside the QP database): DFT, corrected as the nearest band of the database.')
-        widget.setQPointTitle(f'at Q{info["qIndex"] + 1} = {where}', '\n'.join(lines))
+        widget.setQPointTitle(f'at Q{info["qIndex"] + 1} = {where}')
+        self.bandStructureNote.setText('<br>'.join(lines))
+        self.bandStructureNote.show()
 
     @Slot()
     def updateHighlights(self, *args):

@@ -142,10 +142,11 @@ def test_title_and_wave_function_note(window, qtbot):
     calc, widget = window.calculations, window.spectra.bandStructureWidget
     calc.getExcitonBandStructure([Clicked(11)], None)
     qtbot.waitUntil(lambda: calc.bandStructureInfo is not None, timeout=60000)
-    assert widget.title.endswith('at Q12 = (0, 1/8, -1/8)') and 'k−Q' in widget.toolTip()
+    note = window.spectra.bandStructureNote
+    assert widget.title.endswith('at Q12 = (0, 1/8, -1/8)') and 'k−Q' in note.text() and not note.isHidden()
     calc.getExcitonBandStructure([Clicked(0)], None)
     qtbot.waitUntil(lambda: calc.bandStructureInfo['qIndex'] == 0, timeout=60000)
-    assert widget.title.endswith('at Q1 = Γ') and 'k−Q' not in widget.toolTip()
+    assert widget.title.endswith('at Q1 = Γ') and 'k−Q' not in note.text()
 
     # A wave function computed with the degenerate states: said, and warned once the setting changes
     p3 = window.wavefunction.parameters3DWidget
@@ -188,3 +189,15 @@ def test_skw_is_kept_where_it_fits(bii3):
     bii3.setGW(False)
     calc = compute(bii3, 0, [1])
     assert calc.bandStructureInfo['energyInterpolation'] == 'SKW'
+
+
+def test_path_axes_have_no_scale_factor(qtbot):
+    """The path axes are labelled by their special points: no '(x0.001)' after their title, also after a new path."""
+    from visual_excitons.core.style import BandStructureStyle, DispersionStyle
+    from visual_excitons.gui.band_structure_widget import BandStructureWidget
+    from visual_excitons.gui.dispersion_widget import DispersionWidget
+    for widget in (BandStructureWidget(BandStructureStyle()), DispersionWidget(DispersionStyle())):
+        qtbot.addWidget(widget)
+        widget.setXAxis([0.0, 0.004, 0.009], ['G', 'K', 'M'])
+        axis = widget.getAxis('bottom')
+        assert not axis.autoSIPrefix and '0.001' not in axis.labelString()

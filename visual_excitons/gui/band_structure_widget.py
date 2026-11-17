@@ -23,8 +23,6 @@ class BandStructureWidget(pg.PlotWidget):
 
         self.setLabel('bottom', text = self.xLabel, units = self.xUnits)
         self.setLabel('left', text = self.yLabel, units = self.yUnits)
-        # The path is labelled by its special points: no '(x0.001)' scale after its title
-        self.getAxis('bottom').enableAutoSIPrefix(False)
 
         self.style = style
         # x range of the Q-path, until one is set (see setXAxis)
@@ -94,6 +92,9 @@ class BandStructureWidget(pg.PlotWidget):
     @Slot()
     def setXAxis(self, x, labels):
         xAxis = pg.AxisItem('bottom', text = 'K-Path')
+        # The path is labelled by its special points: no '(x0.001)' scale after its title
+        # (set on each new axis: the one of the previous path is replaced)
+        xAxis.enableAutoSIPrefix(False)
         xAxis.setTicks([list(zip(x, tickLabels(labels)))])
         xAxis.setGrid(128)
 
@@ -136,12 +137,11 @@ class BandStructureWidget(pg.PlotWidget):
         self.setLabelsColor(self.style.axesStyle.labelsColor.color)
 
     @Slot()
-    def setQPointTitle(self, where, toolTip):
-        """The title with where the band structure is (e.g. 'at Q12 = (0, 1/8, -1/8)'), and how to read it."""
+    def setQPointTitle(self, where):
+        """The title with where the band structure is (e.g. 'at Q12 = (0, 1/8, -1/8)')."""
         self.title = f'{self.baseTitle} {where}' if where else self.baseTitle
         self.setTitleFont(self.style.axesStyle.titleFont.getFont())
         self.setTitleColor(self.style.axesStyle.titleColor.getColor())
-        self.setToolTip(toolTip)
 
     def setTitleColor(self, color):
         self.getPlotItem().titleLabel.setText(self.title, color = color)
