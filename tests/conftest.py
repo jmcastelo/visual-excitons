@@ -95,6 +95,9 @@ def datasetPath(name: str) -> Path:
 
 @pytest.fixture(scope='session', autouse=True)
 def isolatedSettings(tmp_path_factory):
+    from PySide6.QtCore import QStandardPaths
+    # Caches (e.g. the symmetry matrices) in Qt's test folders, not the user's
+    QStandardPaths.setTestModeEnabled(True)
     directory = tmp_path_factory.mktemp('settings')
     for fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
         QSettings.setPath(fmt, QSettings.Scope.UserScope, str(directory))

@@ -191,6 +191,159 @@ def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, e
                      'energyInterpolation': result['energy_interpolation']}}
 
 
+def loadWavefunctionDB(cache, saveDir, lattice, excitonDB):
+    """
+    The wave functions of the bands of the BSE of `excitonDB`, kept in `cache`
+    (a dict) for the next calculation that needs them (wave function, symmetry
+    and spin): one database at a time, they are large.
+    """
+    bandsRange = [int(np.min(excitonDB.table[:, 1])) - 1, int(np.max(excitonDB.table[:, 2]))]
+    key = (saveDir, tuple(bandsRange))
+    if cache is not None and key in cache:
+        return cache[key]
+    if cache is not None:
+        # Free the previous one before loading, not after
+        cache.clear()
+    wavefunctionDB = YamboWFDB(path=saveDir, save='.', latdb=lattice, bands_range=bandsRange)
+    if cache is not None:
+        cache[key] = wavefunctionDB
+    return wavefunctionDB
+
+
+# Spin axes offered: Cartesian, or the lattice's third vector (the layer normal of a layer along c)
+SPIN_AXES = ('z', 'x', 'y', 'c')
+
+# Degenerate states for the symmetry analysis: within 1 meV (the 10 meV of DEGENERACY_EV
+# lumps nearby states into groups that are not irreducible)
+SYMMETRY_DEGENERACY_EV = 1e-3
+
+
+# Seconds per k-point of the full grid and per symmetry to compute the electronic
+# representation matrices (measured: 0.023 for BiI3 8x8x8, 0.018 for WSe2 72x72x1)
+DMAT_SECONDS_PER_KPOINT = 0.02
+
+
+def symmetryCacheKey(saveDir, firstBand, lastBand, rotations):
+    """A name for the representation matrices of a dataset, its bands and its symmetries, for the disk cache."""
+    import hashlib
+    digest = hashlib.sha1()
+    for name in ('ns.db1', 'ns.wf'):
+        path = Path(saveDir) / name
+        stat = path.stat() if path.exists() else None
+        digest.update(f'{path.resolve()}|{stat.st_size if stat else 0}|{stat.st_mtime_ns if stat else 0}'.encode())
+    digest.update(f'{firstBand}-{lastBand}'.encode())
+    digest.update(np.round(np.asarray(rotations, dtype=float), 6).tobytes())
+    return digest.hexdigest()[:20]
+
+
+def computeCharacter(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, axis='z', wavefunctionCache=None,
+                     symmetryCache=None, diskCache=None):
+    """
+    The symmetry (irreducible representation of the little group of Q) and the
+    spin along `axis` of the degenerate group of exciton `excIndex` (1-based)
+    of Q-point `qIndex` (0-based), from the wave functions (see
+    yambopy_ext.bse.exciton_symmetry and exciton_spin).
+
+    `symmetryCache`, a dict, keeps the crystal's symmetries and the electronic
+    representation matrices computed (they serve every Q-point of the dataset);
+    `diskCache`, a folder, keeps the matrices between sessions (they take about
+    DMAT_SECONDS_PER_KPOINT per k-point and symmetry: minutes for dense grids).
+    """
+    from visual_excitons.yambopy_ext.bse.exciton_symmetry import crystal_symmetries, degenerate_groups, exciton_irreps
+    from visual_excitons.yambopy_ext.bse.exciton_spin import exciton_spin, spin_operator, spin_matrix_elements
+    if lattice is None:
+        context.stage('Loading the lattice')
+        lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
+    context.stage('Loading the exciton')
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=excIndex + 20)
+    if excIndex > len(excitonDB.eigenvalues):
+        raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
+    groups = degenerate_groups(np.real(excitonDB.eigenvalues), atol=SYMMETRY_DEGENERACY_EV, rtol=0)
+    group = next(g for g in groups if excIndex in g)
+    if group[-1] == len(excitonDB.eigenvalues):
+        # The group may go on beyond the states read: read more
+        excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=excIndex + 100)
+        groups = degenerate_groups(np.real(excitonDB.eigenvalues), atol=SYMMETRY_DEGENERACY_EV, rtol=0)
+        group = next(g for g in groups if excIndex in g)
+    context.stage('Loading the wave functions')
+    wavefunctionDB = loadWavefunctionDB(wavefunctionCache, saveDir, lattice, excitonDB)
+
+    result = {'lattice': lattice, 'qIndex': int(qIndex), 'excIndex': int(excIndex), 'states': group,
+              'energy': float(np.mean(np.real(excitonDB.eigenvalues)[np.array(group) - 1])), 'axis': axis,
+              'notes': []}
+    car_q = np.zeros(3) if excitonDB.car_qpoint is None else np.asarray(excitonDB.car_qpoint, dtype=float)
+    red_q = np.linalg.solve(np.asarray(lattice.rlat, dtype=float).T, car_q)
+    result['redQPoint'] = [float(x) for x in red_q]
+    gamma = np.allclose(red_q - np.round(red_q), 0.0, atol=1e-6)
+    kind = (excitonDB.Lkind or '').lower()
+    if kind and gamma and 'bar' not in kind:
+        result['notes'].append(f'The BSE kernel is {excitonDB.Lkind} at Γ, where Lbar is recommended: '
+                               'Lfull breaks symmetries, so the labels may not hold.')
+    if kind and not gamma and 'full' not in kind:
+        result['notes'].append(f'The BSE kernel is {excitonDB.Lkind} at a finite Q, where Lfull should be used.')
+
+    # Symmetry
+    context.stage('Analysing the symmetry')
+    # The representation matrices depend on the dataset and the bands of the BSE, not on Q
+    key = (saveDir, int(np.min(excitonDB.table[:, 1])), int(np.max(excitonDB.table[:, 2])))
+    cached = symmetryCache.get(key) if symmetryCache is not None else None
+    if cached is None:
+        cached = {'symmetries': crystal_symmetries(lattice), 'dmats': {}}
+        if symmetryCache is not None:
+            symmetryCache.clear()
+            symmetryCache[key] = cached
+    # The matrices of earlier sessions
+    folder = Path(diskCache) if diskCache else None
+    name = symmetryCacheKey(saveDir, key[1], key[2], cached['symmetries'][0]) if folder else None
+    if folder is not None and folder.is_dir():
+        for path in folder.glob(f'dmat_{name}_*.npy'):
+            isym = int(path.stem.rsplit('_', 1)[1])
+            if isym not in cached['dmats']:
+                try:
+                    cached['dmats'][isym] = np.load(path)
+                except (OSError, ValueError):
+                    pass
+    before = set(cached['dmats'])
+    try:
+        irreps = exciton_irreps(excitonDB, wavefunctionDB, [group], symmetries=cached['symmetries'],
+                                dmats=cached['dmats'])
+        result['pointGroup'] = irreps['point_group']
+        result['operations'] = len(irreps['operations'])
+        entry = irreps['groups'][0]
+        result['irreps'] = entry.get('irreps')
+        result['irrepsError'] = entry.get('error')
+    except (NotImplementedError, ValueError) as error:
+        result['pointGroup'], result['irreps'], result['irrepsError'] = None, None, str(error)
+    if folder is not None:
+        for isym in set(cached['dmats']) - before:
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                np.save(folder / f'dmat_{name}_{isym}.npy', cached['dmats'][isym])
+            except OSError:
+                break                       # no cache then: computed again next time
+
+    # Spin (spinor wave functions only)
+    if wavefunctionDB.nspinor == 2:
+        context.stage('Computing the spin')
+        direction = (np.asarray(lattice.lat, dtype=float)[2] if axis == 'c'
+                     else np.eye(3)[{'x': 0, 'y': 1, 'z': 2}[axis]])
+        spin = exciton_spin(excitonDB, wavefunctionDB, [group], direction=direction,
+                            matrix_elements=spin_matrix_elements(wavefunctionDB, spin_operator(direction)))[0]
+        result['spin'] = {k: spin[k] for k in ('total', 'electron', 'hole')}
+    else:
+        result['spin'] = None
+        result['notes'].append('Without spin-orbit coupling (no spinor wave functions), spin is not resolved this '
+                               'way: each band holds both spins.')
+    return result
+
+
+def jsonableCharacter(character):
+    """The symmetry and spin of computeCharacter, for a session file."""
+    keys = ('qIndex', 'excIndex', 'states', 'energy', 'axis', 'notes', 'redQPoint', 'pointGroup', 'operations',
+            'irreps', 'irrepsError', 'spin')
+    return {key: character.get(key) for key in keys}
+
+
 def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None):
     """
     Where exciton `excIndex` (1-based) of Q-point `qIndex` (0-based) lives in
@@ -247,18 +400,7 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
 
     # Loading the wave functions and the real-space calculation report their own
     # stages and progress (tqdm hooks)
-    bandsRange = [int(np.min(excitonDB.table[:, 1])) - 1, int(np.max(excitonDB.table[:, 2]))]
-    key = (saveDir, tuple(bandsRange))
-    if cache is not None and key in cache:
-        wavefunctionDB = cache[key]
-    else:
-        if cache is not None:
-            # One database at a time, they are large: free the previous one
-            # before loading, not after
-            cache.clear()
-        wavefunctionDB = YamboWFDB(path=saveDir, save='.', latdb=lattice, bands_range=bandsRange)
-        if cache is not None:
-            cache[key] = wavefunctionDB
+    wavefunctionDB = loadWavefunctionDB(cache, saveDir, lattice, excitonDB)
 
     # With the states degenerate with it (their densities summed), or alone
     states = excitonDB.get_degenerate(exc_index, eps=DEGENERACY_EV) if degenerate else [exc_index]
@@ -337,6 +479,8 @@ class Calculations(QObject):
     compositionReady = Signal(object)
     # Why the composition of the selected exciton cannot be shown (e.g. its Q-point was not computed)
     compositionFailed = Signal(str)
+    # The symmetry and spin of an exciton (a dict, see computeCharacter), or None
+    characterReady = Signal(object)
 
     # Progress and errors of the background calculations (see tasks.py)
     busyStarted = Signal(str)          # a task starts: its message
@@ -388,6 +532,12 @@ class Calculations(QObject):
         # the BSE database it was read from
         self.composition = None
         self.compositionCache = {}
+        # The symmetry and spin of an exciton (see computeCharacter), and the crystal's
+        # symmetries and representation matrices computed for it (kept for other Q-points)
+        self.character = None
+        self.symmetryCache = {}
+        # Where the representation matrices are kept between sessions (None: not kept)
+        self.diskCacheFolder = None
 
         self.waveFunction = None
         self.wfAtomPositions = None
@@ -470,6 +620,10 @@ class Calculations(QObject):
         self.waveFunction = None
         self.wfAtomPositions = None
         self.compositionCache = {}
+        self.symmetryCache = {}
+        if self.character is not None:
+            self.character = None
+            self.characterReady.emit(None)
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
         self.planeWaves = None
@@ -507,6 +661,36 @@ class Calculations(QObject):
             except ValueError as error:          # e.g. an exciton beyond those of the database
                 return {'error': str(error)}
         self.tasks.submit('Analysing the exciton…', compute, self._applyComposition, key='composition')
+
+    # Symmetry and spin of the selected exciton (on request: they need the wave functions)
+
+    def characterMatches(self):
+        """Whether the symmetry and spin shown are those of the selected exciton."""
+        c, selected = self.character, self.selectedExciton
+        return c is not None and selected is not None and (c['qIndex'], c['excIndex']) == tuple(selected[:2])
+
+    def computeCharacter(self, axis='z'):
+        """The symmetry and spin along `axis` of the selected exciton, in the background."""
+        if self.selectedExciton is None or not self.options.saveDir or not self.options.diagoDir:
+            return
+        qIndex, excIndex, _ = self.selectedExciton
+        missing = self.options.missingQPoint(qIndex)
+        if missing:
+            return self._reject('Analysing the symmetry and spin…', missing)
+        o = self.options
+        arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
+                         qIndex=qIndex, excIndex=excIndex, axis=axis, wavefunctionCache=self.wavefunctionCache,
+                         symmetryCache=self.symmetryCache,
+                         diskCache=str(Path(self.diskCacheFolder) / 'symmetry') if self.diskCacheFolder else None)
+        self.tasks.submit('Analysing the symmetry and spin…', lambda context: computeCharacter(context, **arguments),
+                          self._applyCharacter, key='character')
+
+    def _applyCharacter(self, result):
+        self.markResultsChanged()
+        if self.lattice is None:
+            self.lattice = result['lattice']
+        self.character = {key: value for key, value in result.items() if key != 'lattice'}
+        self.characterReady.emit(self.character)
 
     def _failComposition(self, reason):
         if self.composition is not None:
@@ -881,6 +1065,9 @@ class Calculations(QObject):
         if self.selectedExciton is not None:
             meta['selectedExciton'] = list(self.selectedExciton)
 
+        if self.character is not None:
+            meta['character'] = jsonableCharacter(self.character)
+
         if self.composition is not None:
             c = self.composition
             arrays['composition/electron'] = np.asarray(c['electron'], dtype=float)
@@ -963,6 +1150,9 @@ class Calculations(QObject):
                 'fixedPosition': list(wf['fixedPosition']), 'qIndex': wf['exciton'][0], 'excIndex': wf['exciton'][1],
                 'states': wf.get('states') or None, 'degenerate': wf.get('degenerate'),
             })
+
+        if 'character' in meta and isinstance(meta['character'], dict):
+            self._applyCharacter(dict(meta['character'], lattice=lattice))
 
         # Before the selected exciton, so that it is not computed again for it
         if 'composition' in meta:

@@ -23,6 +23,10 @@ Each section starts with a hidden comment (`<!-- ... -->`) with its status, when
 | 13 | `SkwInterpolator` does not reproduce its data for a layer with a dense k-grid | Not filed |
 | 14 | Exciton weight functions loop over the transitions in Python | Not filed (enhancement) |
 | 15 | No Brillouin zone geometry for oblique or 3D lattices | Not filed (enhancement) |
+| 16 | `compute_exc_rep` warns about `Lkind` for databases that store it in capitals | Not filed |
+| 17 | `compute_exc_rep` only prints, writes caches into the data folders and calls `exit()` | Not filed |
+| 18 | `YamboWFDB.get_spin_m_e_BZ` copies the wave functions to the whole Brillouin zone | Not filed |
+| 19 | `compute_exc_rep` fails at Q-points whose little group is trivial (C1) | Not filed |
 
 ---
 
@@ -273,3 +277,91 @@ A possible cause: the search box for the lattice vectors of the star functions (
 `yambopy.plot.plotting.BZ_Wigner_Seitz` draws the first Brillouin zone as a matplotlib patch for hexagonal and rectangular 2D lattices only (oblique lattices are not supported, and 3D zones not at all), and `BrillouinZone` builds paths but has no zone geometry.
 
 **Suggestion:** compute the Wigner–Seitz cell of the reciprocal lattice with the Voronoi construction (`scipy.spatial.Voronoi`), which works for every lattice. An implementation is available: `wigner_seitz_cell` (vertices, edges and faces in 3D), `wigner_seitz_polygon` (2D), `plane_section` (the zone cut by a plane) and `fill_wigner_seitz` (the points of a k-grid inside the zone), tested on cubic, hexagonal, FCC, BCC and triclinic lattices.
+
+---
+
+<!-- Status: not filed. Found 2026-11-17 (BiI3 bulk, Yambo database with Lkind "BAR"). -->
+## 16. `compute_exc_rep` warns about `Lkind` for databases that store it in capitals
+
+`compute_exc_rep` checks the kind of the BSE kernel with lowercase strings:
+
+```python
+if iqpt==1 and 'bar' not in excdb.Lkind:
+    print(f"Warning: You are using Lkind={excdb.Lkind} at q=0, but 'Lbar' is recommended. ...")
+```
+
+Databases can store it in capitals (here `Lkind = "BAR"`), so the check fails and a calculation done the recommended way gets the warning:
+
+```
+Warning: You are using Lkind=BAR at q=0, but 'Lbar' is recommended. Symmetries are broken in this way.
+```
+
+**Suggested fix:** compare case-insensitively, e.g. `'bar' not in excdb.Lkind.lower()` (and the same for `'full'`).
+
+---
+
+<!-- Status: not filed. Found 2026-11-17. A version returning its results is offered: visual_excitons/yambopy_ext/bse/exciton_symmetry.py (exciton_irreps). -->
+## 17. `compute_exc_rep` only prints, writes caches into the data folders and calls `exit()`
+
+`yambopy.bse.exciton_irreps.compute_exc_rep` does the group-theory analysis of the excitons well, but it is hard to use from other code:
+
+- it returns nothing: the little group and the representations are only printed;
+- it writes files where the data are: `Dmat_elec_Cache_spglib.npy` (and `BS_left_ev_Cache_qpt_<n>.npy`) into the BSE folder, and `Symmetry_info_excitons.txt` into the current directory, which may be read-only or shared;
+- for projective representations it calls `exit("Error : Projective representations are not implemented")`, which ends the whole Python process (an interactive session, a notebook kernel or a GUI) instead of raising an exception;
+- it loads the eigenvectors of all the states (or the states asked plus 100), even when the representation of one exciton is wanted.
+
+**Suggestions:** return the results (e.g. a list of energy, degeneracy and decomposition, plus the little group), make caching optional with a chosen location, raise `NotImplementedError` instead of `exit()`, and accept the states to analyse. The electronic representation matrices (`wfdb.Dmat`) could also be passed in, as they serve every Q-point of a dataset.
+
+---
+
+<!-- Status: not filed. Found 2026-11-17 (BiI3 bulk 8x8x8: a 5.90 GiB array for 14 bands). Fix offered: visual_excitons/yambopy_ext/bse/exciton_spin.py (spin_matrix_elements), checked identical to 1e-15 (tests/test_character.py). -->
+## 18. `YamboWFDB.get_spin_m_e_BZ` copies the wave functions to the whole Brillouin zone
+
+To compute the spin matrix elements ⟨k,m|S|k,n⟩ on the full grid, `get_spin_m_e_BZ` already rotates the spin operator instead of the wave functions, but then copies the irreducible wave functions to every k-point of the zone:
+
+```python
+wfc_tmps = self.wf[:,0,...][kpt_idx]
+nk, nb, nspinor, ng = wfc_tmps.shape
+S_me = S_z_tmp[:,None,:,:]@wfc_tmps
+```
+
+That is one array of nk_BZ × nbands × 2 × ng complex numbers, and another of the same size for `S_me`. For a BiI3 bulk calculation (8×8×8 grid, 14 bands) it fails:
+
+```
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 5.90 GiB for an array with shape (512, 14, 2, 27626) and data type complex128
+```
+
+and it would need far more for denser grids (e.g. 5184 k-points for 72×72), which makes `compute_exc_spin_iqpt` unusable there.
+
+**Suggested fix:** since S acts on the spinor index only, sum over the plane waves first, on the irreducible k-points, and apply the rotated operator afterwards:
+
+```python
+psi = self.wf[:, 0]                                                   # (nk_ibz, nb, 2, ng)
+P = np.einsum('kmag,knbg->kmnab', psi.conj(), psi, optimize=True)     # (nk_ibz, nb, nb, 2, 2): small
+S_me = np.einsum('kab,kmnab->kmn', S_z_tmp, P[kpt_idx], optimize=True)
+S_me[time_rev] = S_me[time_rev].conj()
+```
+
+This gives the same matrix elements (to 1e-15 for BiI3), about 30 times faster, with memory proportional to the irreducible k-points only.
+
+---
+
+<!-- Status: not filed. Found 2026-11-17 (BiI3 bulk, Q12 = (0, 1/8, -1/8), little group C1). Worked around in visual_excitons/yambopy_ext/bse/exciton_symmetry.py (reshapes the table). -->
+## 19. `compute_exc_rep` fails at Q-points whose little group is trivial (C1)
+
+For a Q-point whose little group is only the identity (C1), `get_pg_info` returns the character table as a one-dimensional array:
+
+```python
+>>> get_pg_info(np.array([np.eye(3)]))[3]
+array([1.])          # shape (1,), where (1, 1) is expected
+```
+
+`decompose_rep2irrep` then fails on it (`np.einsum('j,j,rj->r', ...)`):
+
+```
+ValueError: Einstein sum subscript j does not contain the correct number of indices for operand 2.
+```
+
+so `compute_exc_rep` cannot analyse excitons at such Q-points (e.g. Q12 = (0, 1/8, −1/8) of a BiI3 bulk calculation, where every exciton is simply A).
+
+**Suggested fix:** return the table as a 2D array (irreps × classes) in `get_pg_info` for every group, or reshape it in `decompose_rep2irrep`: `char_table = np.asarray(char_table).reshape(len(irrep_labels), len(class_order))`.

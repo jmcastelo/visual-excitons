@@ -33,4 +33,15 @@ For a **bulk crystal**, `View` chooses:
 - **Bands**: the weight of each valence band (the hole's) and of each conduction band (the electron's).
 - **k-points**: those weighing most, for the electron and for the hole (one list at Γ), in reduced coordinates, with the special point they are at or near.
 
-The composition and the panel's settings are part of [sessions](sessions.md): a session opens with them shown, without computing them again.
+## Symmetry and spin
+
+`Analyse` finds, for the selected exciton, from the wave functions (in the background):
+
+- **Its symmetry**: the irreducible representation of the little group of its Q-point (the symmetries of the crystal that leave Q unchanged, found with spglib) that its degenerate group transforms as, e.g. `Au` of S₆ for the lowest exciton of BiI3 at Γ, or `A` of C₁ at a Q-point no symmetry leaves unchanged. States within 1 meV make the group here (not the 10 meV of `Sum degenerate states`, which lumps nearby states into groups that are not irreducible); when the states found are not a closed group (an accidental near-degeneracy), it says so instead of giving a label. It follows the group theory of M. Nalabothula et al., Phys. Rev. B 113, 205130 (2026).
+- **Its spin** along the `Spin axis` (z, x, y, or the third lattice vector: the normal of a layer along c), for each state of its group in the basis where it is definite, with the electron's and the hole's parts (they add up to it), in units of ħ (A. R. Kshirsagar et al., Phys. Rev. B 112, 12 (2025)). It needs spinor wave functions (a calculation with spin–orbit coupling); without them, a note says so. For example, in a WSe₂ monolayer the spin-forbidden dark excitons have a spin close to ±1 along z, the bright ones close to 0.
+
+It loads the wave functions of the bands of the BSE, as a wave function does (and reuses them if already loaded). The first time for a dataset it also computes the representation matrices of the electronic states under each symmetry needed: about 0.02 s per k-point and symmetry, e.g. a minute for BiI3 8×8×8 at Γ, about 19 minutes for WSe₂ 72×72 at Γ; the tab estimates it before you start. They are kept for the session and on disk (in the program's cache folder, never next to the data), so the next Q-points, and the next sessions, are fast. A note warns when the BSE kernel is not the one recommended for the Q-point (`Lbar` at Γ, `Lfull` at a finite Q), and when the Q-point is not supported (a BSE with coupling, or non-symmorphic symmetries giving projective representations at a boundary Q-point).
+
+Once analysed, the symmetry and the spin also appear in one line in the `Selected exciton` section of the Spectra controls.
+
+The composition, the symmetry and spin, and the panel's settings are part of [sessions](sessions.md): a session opens with them shown, without computing them again.

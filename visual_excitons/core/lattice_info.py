@@ -42,7 +42,10 @@ def formula(numbers):
 
 
 def spaceGroup(cell, numbers, positions, symprec):
-    """(international symbol, number, point group) of the crystal, or None; `symprec` relative to the longest vector."""
+    """
+    (international symbol, number, point group, number of operations) of the
+    crystal, or None; `symprec` relative to the longest vector.
+    """
     import spglib
     cell = np.asarray(cell, dtype=float)
     scale = float(np.max(np.linalg.norm(cell, axis=1)))
@@ -53,7 +56,7 @@ def spaceGroup(cell, numbers, positions, symprec):
     if dataset is None:
         return None
     get = (lambda name: getattr(dataset, name)) if hasattr(dataset, 'number') else (lambda name: dataset[name])
-    return str(get('international')), int(get('number')), str(get('pointgroup'))
+    return str(get('international')), int(get('number')), str(get('pointgroup')), len(get('rotations'))
 
 
 def latticeSummary(cell, numbers, positions, grid, symprec):

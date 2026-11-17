@@ -5,15 +5,17 @@ status bar and persistent settings frame them.
 """
 
 import json
+
+import numpy as np
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot, QSettings, QTimer, QEvent
+from PySide6.QtCore import Qt, Slot, QSettings, QTimer, QEvent, QStandardPaths
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox, QApplication,
                                QProgressBar, QToolButton, QInputDialog)
 
 from visual_excitons.core.options import Options
-from visual_excitons.core.calculations import Calculations
+from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
 from .options_widget import OptionsWidget
@@ -175,6 +177,13 @@ class MainWindow(QMainWindow):
         self.compositionPanel.compositionNeeded.connect(self.updateComposition)
         self.compositionPanel.exportDataRequested.connect(self.exportComposition)
         self.compositionPanel.exportImageRequested.connect(self.exportCompositionImage)
+        # Symmetry and spin (on request), kept on disk between sessions: the representation matrices
+        self.calculations.diskCacheFolder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
+        self.compositionPanel.characterRequested.connect(self.calculations.computeCharacter)
+        self.calculations.characterReady.connect(self.compositionPanel.setCharacter)
+        self.calculations.characterReady.connect(self.updateCharacterSummary)
+        self.calculations.excitonSelected.connect(self.onCharacterSelection)
+        self.compositionPanel.setSelectedExciton(self.calculations.selectedExciton)
         self.spectra.inspector.showCompositionRequested.connect(lambda: self.showPanel('composition'))
         self.options.databaseFound.connect(lambda found: self.compositionPanel.clear())
         self.system.qPathApplied.connect(lambda state: self.compositionPanel.setQPath(self.qPathCartesian()))
@@ -474,6 +483,46 @@ class MainWindow(QMainWindow):
                                              summary.get('layer'), self.options.highSymmetryPoints,
                                              self.qPathCartesian())
         self.compositionPanel.setComposition(composition)
+
+    @Slot()
+    def onCharacterSelection(self, *args):
+        """Another exciton selected: whose symmetry and spin the Composition panel offers to analyse, and the cost."""
+        selected = self.calculations.selectedExciton
+        self.compositionPanel.setSelectedExciton(selected)
+        self.updateCharacterSummary()
+        o = self.options
+        summary = o.latticeSummary() or {}
+        grid, group = summary.get('grid'), summary.get('spaceGroup')
+        if selected is None or not grid:
+            self.compositionPanel.setCharacterCost('')
+            return
+        nk = int(np.prod(grid))
+        operations = group[3] if group and len(group) > 3 else None
+        loaded = any(key[0] == o.saveDir for key in list(self.calculations.wavefunctionCache.keys()))
+        text = 'Loads the wave functions of the bands of the BSE' + (' (already loaded).' if loaded else '.')
+        if operations:
+            minutes = DMAT_SECONDS_PER_KPOINT * nk * operations / 60
+            when = f'about {minutes:.0f} min' if minutes >= 1.5 else f'about {minutes * 60:.0f} s'
+            text += (f' The first time for this dataset, the symmetry matrices take up to {when} ({nk} k-points, up '
+                     f'to {operations} symmetries; fewer at a finite Q); they are then kept, on disk too.')
+        self.compositionPanel.setCharacterCost(text)
+
+    @Slot()
+    def updateCharacterSummary(self, *args):
+        """One line in the Selected exciton section: the symmetry and spin of the selected exciton, if analysed."""
+        note = self.spectra.inspector.characterSummary
+        c = self.calculations.character
+        if c is None or not self.calculations.characterMatches():
+            note.hide()
+            return
+        parts = []
+        if c.get('irreps'):
+            parts.append(f'Symmetry {c["irreps"]} ({c["pointGroup"]})')
+        if c.get('spin'):
+            spins = ', '.join(f'{v:+.2f}' for v in c['spin']['total'])
+            parts.append(f'spin along {c["axis"]}: {spins}')
+        note.setText(' · '.join(parts) if parts else 'Symmetry and spin: see the Composition panel.')
+        note.show()
 
     def qPathCartesian(self):
         """The k-points of the Q-path (Cartesian, Bohr⁻¹ without 2π), or None."""

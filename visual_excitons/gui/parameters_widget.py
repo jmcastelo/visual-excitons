@@ -123,6 +123,9 @@ class ParametersWidget(Inspector):
         # function in one click, with the memory it needs
 
         self.selectedExcitonNote = NoteLabel()
+        # Its symmetry and spin, once analysed (in the Composition panel)
+        self.characterSummary = NoteLabel()
+        self.characterSummary.hide()
         # Shared by everything about the selected exciton (Options.sumDegenerate); a
         # copy in the Wave function controls' Exciton section, linked to it
         self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
@@ -143,6 +146,7 @@ class ParametersWidget(Inspector):
 
         layout = QVBoxLayout()
         layout.addWidget(self.selectedExcitonNote)
+        layout.addWidget(self.characterSummary)
         layout.addWidget(self.sumDegenerateCheckBox)
         layout.addWidget(self.showCompositionButton)
         layout.addWidget(self.computeWavefunctionButton)

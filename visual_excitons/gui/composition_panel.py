@@ -184,6 +184,8 @@ class CompositionPanel(QWidget):
     compositionNeeded = Signal()
     exportDataRequested = Signal()
     exportImageRequested = Signal()
+    # The symmetry and spin of the selected exciton, along an axis ('z', 'x', 'y' or 'c')
+    characterRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -210,6 +212,7 @@ class CompositionPanel(QWidget):
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(self.buildKSpaceTab(), 'k-space')
         self.tabs.addTab(self.buildTransitionsTab(), 'Transitions')
+        self.tabs.addTab(self.buildCharacterTab(), 'Symmetry and spin')
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -223,6 +226,7 @@ class CompositionPanel(QWidget):
         p.remember('view', self.viewComboBox)
         p.remember('threshold', self.thresholdSpinBox)
         p.remember('opacity', self.opacitySpinBox)
+        p.remember('spinAxis', self.spinAxisComboBox)
         p.remember('qPath', self.qPathCheckBox)
         p.remember('plane', self.planeSpinBox, DATASET)
         # The 3D camera: None until the zone is fitted or the camera moved, so
@@ -361,6 +365,106 @@ class CompositionPanel(QWidget):
         splitter.addWidget(self.kpointsTable)
         splitter.setSizes([400, 500])
         return splitter
+
+    def buildCharacterTab(self):
+        self.analyseButton = QPushButton('Analyse')
+        self.analyseButton.setToolTip('The symmetry and the spin of the selected exciton, from the wave functions '
+                                      '(in the background)')
+        self.analyseButton.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.analyseButton.clicked.connect(lambda: self.characterRequested.emit(self.spinAxis()))
+        self.spinAxisComboBox = QComboBox()
+        for text, axis in (('z', 'z'), ('x', 'x'), ('y', 'y'), ('c (third lattice vector)', 'c')):
+            self.spinAxisComboBox.addItem(text, axis)
+        self.spinAxisComboBox.setToolTip('The axis of the spin: Cartesian, or the third lattice vector (the normal '
+                                         'of a layer along c)')
+        self.spinAxisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.characterCostNote = NoteLabel()
+        row = QHBoxLayout()
+        row.addWidget(self.analyseButton)
+        row.addWidget(QLabel('Spin axis:'))
+        row.addWidget(self.spinAxisComboBox)
+        row.addStretch(1)
+
+        self.characterLabel = QLabel()
+        self.characterLabel.setWordWrap(True)
+        self.characterLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.spinTable = table(['State', 'Spin', 'Electron', 'Hole'])
+        self.spinTable.setToolTip('The spin of each state of the degenerate group along the axis, in units of ħ, in '
+                                  'the basis where it is definite; the electron\'s and the hole\'s parts add up to it')
+        self.characterNote = NoteLabel()
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(4, 6, 4, 4)
+        layout.addLayout(row)
+        layout.addWidget(self.characterCostNote)
+        layout.addWidget(self.characterLabel)
+        layout.addWidget(self.spinTable, 1)
+        layout.addWidget(self.characterNote)
+        self.character = None
+        self.selected = None
+        self.showCharacter()
+        return tab
+
+    def spinAxis(self):
+        return self.spinAxisComboBox.currentData()
+
+    @Slot(object)
+    def setCharacter(self, character):
+        self.character = character
+        self.showCharacter()
+
+    def setSelectedExciton(self, selected):
+        """The exciton selected (q index, exciton index, energy), or None: whose symmetry and spin to analyse."""
+        self.selected = tuple(selected[:2]) if selected is not None else None
+        self.showCharacter()
+
+    def setCharacterCost(self, text):
+        self.characterCostNote.setText(text)
+        self.characterCostNote.setVisible(bool(text))
+
+    def showCharacter(self):
+        c = self.character
+        self.analyseButton.setEnabled(self.selected is not None)
+        if self.selected is None:
+            self.characterLabel.setText('Select an exciton in a spectrum, then analyse it.')
+            self.spinTable.setRowCount(0)
+            self.characterNote.setText('')
+            return
+        if c is None or (c['qIndex'], c['excIndex']) != self.selected:
+            q, exc = self.selected
+            self.characterLabel.setText(f'Exciton {exc} at Q{q + 1}: not analysed yet. <b>Analyse</b> finds the '
+                                        'irreducible representation its degenerate group transforms as, under the '
+                                        'symmetries that leave its Q-point unchanged, and the spin of its states.')
+            self.spinTable.setRowCount(0)
+            self.characterNote.setText('')
+            return
+        states = c['states']
+        group = (f'states {states[0]}–{states[-1]}' if len(states) > 1 else f'state {states[0]}')
+        q = np.asarray(c['redQPoint'], dtype=float)
+        where = 'Γ' if np.allclose(q - np.round(q), 0.0, atol=1e-6) else '(' + ', '.join(fraction(x) for x in q) + ')'
+        lines = [f'Exciton {c["excIndex"]} at Q{c["qIndex"] + 1} = {where}, {c["energy"]:.4f} eV ({group}, '
+                 'degenerate within 1 meV).']
+        if c.get('irreps'):
+            lines.append(f'Symmetry: <b>{c["irreps"]}</b> of the little group {c["pointGroup"]} '
+                         f'({c["operations"]} operations).')
+        elif c.get('irrepsError'):
+            lines.append(f'Symmetry: not found. {c["irrepsError"]}')
+        self.characterLabel.setText('<br>'.join(lines))
+        spin = c.get('spin')
+        if spin:
+            rows = [(s, f'{t:+.3f}', f'{e:+.3f}', f'{h:+.3f}')
+                    for s, t, e, h in zip(range(1, len(spin['total']) + 1), spin['total'], spin['electron'],
+                                          spin['hole'])]
+            fill(self.spinTable, rows)
+        else:
+            self.spinTable.setRowCount(0)
+        notes = list(c.get('notes') or [])
+        if spin:
+            axis = {'c': 'the third lattice vector'}.get(c.get('axis'), c.get('axis'))
+            notes.insert(0, f'Spin along {axis}, in units of ħ, for each state of the group in the basis where it '
+                            'is definite.')
+        self.characterNote.setText(' '.join(notes))
 
     # Content
 
