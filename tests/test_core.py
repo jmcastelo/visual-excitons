@@ -222,12 +222,11 @@ def test_new_lattice_clears_the_q_path():
     from conftest import datasetPath
     options = Options()
     options.setSaveDir(str(datasetPath('BiI3_Bulk_8x8x8') / 'save'))
-    options.setIbrav(options.detectLatticeType())
-    options.setLatticeData(options.ibrav)
+    options.identifyLattice()
     options.extraHighSymmetryPoints = {'M': [0.25, 0.25, 0.0]}
     options.setBrillouinZone(path='LGZFM', npoints=50)
     assert options.qBZ is not None
-    options.setLatticeData(options.ibrav)   # e.g. another dataset or ibrav
+    options.setLatticeData()                # e.g. another dataset
     assert options.qBZ is None and options.extraHighSymmetryPoints == {}
 
 
@@ -251,27 +250,28 @@ A = 6.8
 def test_lattice_detected_from_the_cell(cell, ibrav, variant):
     """Centred lattices too: the primitive vector lengths alone took an FCC crystal for a rhombohedral one."""
     options = optionsWithCell(cell)
-    assert options.detectLatticeType() == ibrav
-    options.setIbrav(ibrav)
-    options.setLatticeData(ibrav)
-    assert options.variant == variant and options.latticeFromCell
+    assert options.identifyLattice() == ibrav and options.ibrav == ibrav
+    assert options.variant == variant and options.symmetryTolerance == 1e-5
     # The Brillouin zone of the cell itself: its special points in the cell's reduced coordinates
     options.setBrillouinZone(npoints=40)
     np.testing.assert_allclose(options.qBZ.cell, options.cell)
     assert options.getPathString() == options.defaultPath
 
 
-def test_lattice_chosen_by_hand_uses_the_parameters():
-    options = optionsWithCell(np.eye(3) * A)
-    assert options.detectLatticeType() == 1
-    options.setIbrav(6)                                                        # tetragonal, by hand
-    options.setLatticeData(6)
-    assert options.variant == 'TET' and not options.latticeFromCell
+def test_slightly_distorted_cell_is_identified_with_a_looser_tolerance():
+    """A hexagonal cell with numerical noise: not hexagonal at the strictest tolerance, hexagonal at a looser one."""
+    cell = np.array([[3.0, 0.0, 0.0], [-1.5, 1.5 * np.sqrt(3) * (1 + 2e-5), 0.0], [0.0, 0.0, 5.0]])
+    options = optionsWithCell(cell)
+    assert options.identifyLattice() == 4 and options.symmetryTolerance > 1e-5
+    assert options.variant == 'HEX' and options.strictVariant.startswith('ORC')
 
 
 def test_unsupported_lattice_is_not_detected():
     triclinic = [[3.0, 0.1, 0.2], [0.4, 4.1, 0.3], [0.5, 0.6, 5.3]]
-    assert optionsWithCell(triclinic).detectLatticeType() is None
+    options = optionsWithCell(triclinic)
+    assert options.identifyLattice() is None and options.ibrav == -1 and options.latticeProblem
+    with pytest.raises(ValueError, match='not identified'):
+        options.setBrillouinZone(npoints=10)
 
 
 def test_new_dispersion_or_dataset_drops_curve_styles(calculations):

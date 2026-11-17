@@ -25,8 +25,7 @@ def bii3():
     options.setSaveDir(dataset['save'])
     options.setDiagoDir(dataset['diago'])
     options.setQPDir(dataset['qp'])
-    options.setIbrav(options.detectLatticeType())
-    options.setLatticeData(options.ibrav)
+    options.identifyLattice()
     options.setBrillouinZone(path='LGZF', npoints=100)
 
     # Inline: each call returns with its result applied

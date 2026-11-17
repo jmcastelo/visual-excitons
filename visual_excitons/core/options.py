@@ -1,10 +1,12 @@
 from PySide6.QtCore import QObject, Signal, Slot
 from pathlib import PurePath, Path
-from yambopy import IBRAV_REQUIRED_PARAMETERS, get_lattice_data, lattice_data_for_cell, YamboLatticeDB, BrillouinZone
+from yambopy import get_lattice_data, lattice_data_for_cell, YamboLatticeDB, BrillouinZone
 import numpy as np
 
 from .tasks import databaseAccess
 from .databases import bseFiles, qpDatabases
+from .cellshift import kGrid
+from .lattice_info import latticeSummary
 
 
 
@@ -25,6 +27,16 @@ def get_cell_params(cell):
     return cell_params
 
 
+
+# Symmetry tolerances tried to identify the lattice (relative to the longest
+# lattice vector), strictest first: the most symmetric lattice found is taken,
+# so that a cell slightly off its symmetry (e.g. relaxed with numerical noise:
+# hexagonal with a and b differing by 1e-5) is not taken for a lower one
+SYMMETRY_TOLERANCES = (1e-5, 1e-4, 1e-3)
+
+# Order of the point group of each lattice family (its holohedry), by variant family
+LATTICE_SYMMETRY = {'CUB': 48, 'FCC': 48, 'BCC': 48, 'HEX': 24, 'TET': 16, 'BCT': 16, 'RHL': 12,
+                    'ORC': 8, 'ORCC': 8, 'ORCF': 8, 'ORCI': 8}
 
 # Lattice variants (Setyawan-Curtarolo) by family, and their ibrav (with the
 # other orientation of the same lattice, if any)
@@ -113,19 +125,22 @@ class Options(QObject):
         self.qPoints = []           # computed Q-points (see computedQPoints)
         self.nIbzQpoints = 0        # irreducible Q-points of the grid (from the SAVE directory)
 
-        # ibrav
+        # ibrav (of the lattice detected; -1: none)
         self.ibrav = -1
-        self.availableIbrav = [ibrav for ibrav in list(IBRAV_REQUIRED_PARAMETERS.keys())]
 
         # Lattice data
         self.cell = []
         self.latticeParameters = {}
         self.variant = ''
         # The lattice identified from the cell (lattice_data_for_cell): its ibrav,
-        # and whether the points and the Brillouin zone come from the cell
+        # (variant, special points, default path), the tolerance it took, or why not
         self.detectedIbrav = None
         self.cellLatticeData = None
-        self.latticeFromCell = False
+        self.symmetryTolerance = None
+        self.strictVariant = None      # the variant at the strictest tolerance, if another
+        self.latticeProblem = ''
+        # The atoms of the cell (Cartesian, Bohr) and the k-point grid
+        self.atomicNumbers, self.atomicPositions, self.kGrid = [], np.empty((0, 3)), None
         self.highSymmetryPoints = {}
         self.extraHighSymmetryPoints = {}
         self.availableHighSymmetryPoints = []
@@ -228,7 +243,9 @@ class Options(QObject):
         self.nQpoints, self.qPoints, self.nIbzQpoints = 0, [], 0
         self.ibrav = -1
         self.cell, self.latticeParameters, self.variant = [], {}, ''
-        self.detectedIbrav, self.cellLatticeData, self.latticeFromCell = None, None, False
+        self.detectedIbrav, self.cellLatticeData, self.symmetryTolerance, self.latticeProblem = None, None, None, ''
+        self.strictVariant = None
+        self.atomicNumbers, self.atomicPositions, self.kGrid = [], np.empty((0, 3)), None
         self.highSymmetryPoints, self.extraHighSymmetryPoints, self.availableHighSymmetryPoints = {}, {}, []
         self.defaultPath = ''
         self.qBZ = None
@@ -317,7 +334,11 @@ class Options(QObject):
         self.cell = lattice.lat
         self.latticeParameters = get_cell_params(self.cell)
         self.nIbzQpoints = int(lattice.ibz_nkpoints)
-        self.detectedIbrav, self.cellLatticeData, self.latticeFromCell = None, None, False
+        self.atomicNumbers = [int(z) for z in lattice.atomic_numbers]
+        self.atomicPositions = np.asarray(lattice.car_atomic_positions, dtype=float)[:len(self.atomicNumbers)]
+        # From the irreducible k-points (they have the grid's steps): no expansion needed
+        self.kGrid = kGrid(lattice)
+        self.detectedIbrav, self.cellLatticeData, self.symmetryTolerance, self.latticeProblem = None, None, None, ''
 
     def detectLatticeType(self):
         """
@@ -325,16 +346,34 @@ class Options(QObject):
         the symmetry of the cell (spglib, through lattice_data_for_cell), so
         centred lattices (FCC, BCC, BCT...) are found whatever primitive
         vectors the cell has, and whatever its orientation; their special
-        points are then in the reduced coordinates of the cell itself.
+        points are then in the reduced coordinates of the cell itself. Of the
+        SYMMETRY_TOLERANCES, the most symmetric lattice found is taken, with
+        the strictest tolerance giving it (symmetryTolerance; strictVariant:
+        what the strictest gave, if different); latticeProblem says why none was.
         """
-        self.detectedIbrav, self.cellLatticeData = None, None
-        try:
-            _, variant, points, defaultPath = lattice_data_for_cell(np.asarray(self.cell, dtype=float))
-        except ValueError:
+        self.detectedIbrav, self.cellLatticeData, self.symmetryTolerance, self.latticeProblem = None, None, None, ''
+        self.strictVariant = None
+        found = []
+        for tolerance in SYMMETRY_TOLERANCES:
+            try:
+                _, variant, points, defaultPath = lattice_data_for_cell(np.asarray(self.cell, dtype=float),
+                                                                        symprec=tolerance)
+            except ValueError as error:
+                self.latticeProblem = str(error)
+                continue
+            family = variant.rstrip('0123456789')
+            if not ibravCandidates(variant):
+                self.latticeProblem = f'lattice variant {variant} not supported'
+                continue
+            found.append((LATTICE_SYMMETRY.get(family, 0), tolerance, variant, points, defaultPath))
+        if not found:
             return None
+        best = max(found, key=lambda entry: (entry[0], -entry[1]))
+        _, tolerance, variant, points, defaultPath = best
+        if found[0][1] == SYMMETRY_TOLERANCES[0] and found[0][2] != variant:
+            self.strictVariant = found[0][2]
+        self.symmetryTolerance, self.latticeProblem = tolerance, ''
         candidates = ibravCandidates(variant)
-        if not candidates:
-            return None
         # Of the orientations of the same lattice, the one of this cell if it is a standard one
         ibrav = candidates[0]
         for candidate in candidates:
@@ -349,18 +388,23 @@ class Options(QObject):
         self.cellLatticeData = (variant, points, defaultPath)
         return ibrav
 
-    def setLatticeData(self, ibrav):
-        """
-        The special points and default path of lattice `ibrav`: from the cell
-        if it is the lattice detected, from the lattice parameters otherwise
-        (a lattice chosen by hand).
-        """
-        self.latticeFromCell = self.cellLatticeData is not None and ibrav == self.detectedIbrav
-        if self.latticeFromCell:
-            self.variant, points, self.defaultPath = self.cellLatticeData
-            self.highSymmetryPoints = dict(points)
-        else:
-            cell, self.variant, self.highSymmetryPoints, self.defaultPath = get_lattice_data(ibrav, self.latticeParameters)
+    def identifyLattice(self):
+        """Detect the lattice and take its special points; its ibrav, or None (latticeProblem says why)."""
+        ibrav = self.detectLatticeType()
+        self.setIbrav(ibrav if ibrav is not None else -1)
+        if ibrav is None:
+            self.variant, self.highSymmetryPoints, self.defaultPath = '', {}, ''
+            self.availableHighSymmetryPoints, self.qBZ, self.extraHighSymmetryPoints = [], None, {}
+            return None
+        self.setLatticeData()
+        return ibrav
+
+    def setLatticeData(self):
+        """The special points and default path of the lattice detected, in the cell's reduced coordinates."""
+        if self.cellLatticeData is None:
+            raise ValueError('The lattice of the cell was not identified.')
+        self.variant, points, self.defaultPath = self.cellLatticeData
+        self.highSymmetryPoints = dict(points)
         self.availableHighSymmetryPoints = [label for label in self.highSymmetryPoints.keys()]
         # A path and extra points belong to the previous lattice: they must be set again
         self.qBZ = None
@@ -375,10 +419,17 @@ class Options(QObject):
         self.ibrav = i
 
     def setBrillouinZone(self, path: str = None, npoints: int = None, density: float = None):
-        lattice = (dict(cell=np.asarray(self.cell, dtype=float)) if self.latticeFromCell and self.ibrav == self.detectedIbrav
-                   else dict(ibrav=self.ibrav, parameters=self.latticeParameters))
-        self.qBZ = BrillouinZone(**lattice, path_string=path, extra_points=self.extraHighSymmetryPoints, npoints=npoints,
+        if self.cellLatticeData is None:
+            raise ValueError('The lattice of the cell was not identified: no Q-path can be set.')
+        self.qBZ = BrillouinZone(cell=np.asarray(self.cell, dtype=float), path_string=path, extra_points=self.extraHighSymmetryPoints, npoints=npoints,
                                  density=density)
+
+    def latticeSummary(self):
+        """The crystal's description for the System panel (see lattice_info.latticeSummary), or None."""
+        if not self.hasCell():
+            return None
+        return latticeSummary(self.cell, self.atomicNumbers, self.atomicPositions, self.kGrid,
+                              self.symmetryTolerance or SYMMETRY_TOLERANCES[0])
 
     def getPathString(self):
         return self.qBZ.path_string

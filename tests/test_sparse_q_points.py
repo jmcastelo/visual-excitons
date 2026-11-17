@@ -56,8 +56,7 @@ def calculationsFor(folder):
     options = Options()
     options.setSaveDir(str(folder / 'save'))
     options.setDiagoDir(str(folder / 'diagos'))
-    options.setIbrav(options.detectLatticeType())
-    options.setLatticeData(options.ibrav)
+    options.identifyLattice()
     options.setBrillouinZone(path='LGZF', npoints=100)
     calculations = Calculations(options, synchronous=True)
     errors, notes = [], []

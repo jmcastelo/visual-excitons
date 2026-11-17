@@ -5,6 +5,8 @@ from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QMenu, QHeaderView
 from pathlib import Path
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
+from visual_excitons.core.lattice_info import bravaisName
+from visual_excitons.core.options import SYMMETRY_TOLERANCES
 from visual_excitons.core.consistency import checkDataset, summary, Busy, OK, INFO, WARNING, ERROR
 from .inspector import NoteLabel
 
@@ -127,41 +129,60 @@ class OptionsWidget(QWidget):
         self.options.saveDirChanged.connect(self.setSaveLabel)
         self.options.diagoDirChanged.connect(self.setDiagoLabel)
         self.options.qpDirChanged.connect(self.setQPLabel)
-        self.options.databaseFound.connect(self.onDatabaseFound)
 
         dirGroupBox = QGroupBox('Data')
         dirGroupBox.setLayout(dirLayout)
 
         # Bravais lattice
 
-        self.ibravComboBox = QComboBox()
-        self.ibravComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.ibravComboBox.addItems([str(ibrav) for ibrav in self.options.availableIbrav])
-        self.ibravComboBox.setToolTip('Bravais lattice type (Quantum ESPRESSO ibrav), detected from ns.db1')
-        self.ibravComboBox.currentTextChanged.connect(self.getLatticeData)
-        self.ibravComboBox.setEnabled(False)
-        self.options.databaseFound.connect(self.setIbrav)
-
-        self.variantLabel = QLabel()
+        # What the crystal is: detected, not chosen (a lattice chosen by hand would
+        # take its special points in a standard orientation, maybe not the cell's)
+        def infoLabel(toolTip=''):
+            label = QLabel()
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setToolTip(toolTip)
+            return label
+        self.latticeLabel = infoLabel('The Bravais lattice, identified from the symmetry of the cell (spglib): '
+                                      'Quantum ESPRESSO ibrav and Setyawan-Curtarolo variant, which give the '
+                                      'special points')
+        self.spaceGroupLabel = infoLabel('Space group of the crystal, with its atoms (spglib), and its point group')
+        self.atomsLabel = infoLabel('Formula and atoms in the unit cell')
+        self.volumeLabel = infoLabel('Volume of the unit cell')
+        self.kGridLabel = infoLabel('k-point grid of the DFT calculation, and its irreducible points '
+                                    '(the Q-points of the BSE databases)')
+        self.vacuumLabel = infoLabel('A layer: the axis along which the cell has vacuum')
+        self.latticeNote = NoteLabel()
+        self.latticeNote.hide()
 
         self.parameterLabels = {name: QLabel() for name in ('a', 'b', 'c', 'alpha', 'beta', 'gamma')}
         for label in self.parameterLabels.values():
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         bravaisLayout = QGridLayout()
-        bravaisLayout.setColumnStretch(4, 1)
+        bravaisLayout.setColumnStretch(3, 1)
         bravaisLayout.setHorizontalSpacing(12)
-        bravaisLayout.addWidget(QLabel('ibrav:'), 0, 0)
-        bravaisLayout.addWidget(self.ibravComboBox, 0, 1)
-        bravaisLayout.addWidget(QLabel('Variant:'), 0, 2)
-        bravaisLayout.addWidget(self.variantLabel, 0, 3)
-        for row, (length, angle, angleSymbol) in enumerate((('a', 'alpha', 'α'), ('b', 'beta', 'β'), ('c', 'gamma', 'γ')), start=1):
+        row = 0
+        for text, label in (('Lattice:', self.latticeLabel), ('Space group:', self.spaceGroupLabel),
+                            ('Atoms:', self.atomsLabel)):
+            bravaisLayout.addWidget(QLabel(text), row, 0)
+            bravaisLayout.addWidget(label, row, 1, 1, 3)
+            row += 1
+        for length, angle, angleSymbol in (('a', 'alpha', 'α'), ('b', 'beta', 'β'), ('c', 'gamma', 'γ')):
             bravaisLayout.addWidget(QLabel(f'{length}:'), row, 0)
             bravaisLayout.addWidget(self.parameterLabels[length], row, 1)
             bravaisLayout.addWidget(QLabel(f'{angleSymbol}:'), row, 2)
             bravaisLayout.addWidget(self.parameterLabels[angle], row, 3)
+            row += 1
+        for text, label in (('Volume:', self.volumeLabel), ('k-points:', self.kGridLabel),
+                            ('Vacuum:', self.vacuumLabel)):
+            bravaisLayout.addWidget(QLabel(text), row, 0)
+            bravaisLayout.addWidget(label, row, 1, 1, 3)
+            row += 1
+        bravaisLayout.addWidget(self.latticeNote, row, 0, 1, 4)
+        self.options.databaseFound.connect(self.onDatabaseFound)
 
-        bravaisGroup = QGroupBox('Crystal lattice')
+        bravaisGroup = QGroupBox('Crystal')
         bravaisGroup.setLayout(bravaisLayout)
 
         # Q-path
@@ -383,72 +404,56 @@ class OptionsWidget(QWidget):
         self.setStatus(self.qpLabel, text)
 
     @Slot(bool)
-    def setIbrav(self, found):
-        if found:
-            ibrav = self.options.detectLatticeType()
-            if ibrav:
-                # The lattice data of this dataset, also when the type is the
-                # one already chosen (no change of text: not set otherwise)
-                if self.ibravComboBox.currentText() == str(ibrav):
-                    self.getLatticeData(str(ibrav))
-                else:
-                    self.ibravComboBox.setCurrentText(str(ibrav))
-            else:
-                msgBox = QMessageBox()
-                msgBox.setText('Warning')
-                msgBox.setInformativeText('Unable to detect Bravais lattice type')
-                msgBox.exec()
-
-                self.ibravComboBox.setCurrentIndex(0)
-
-            self.ibravComboBox.setEnabled(True)
-        else:
-            self.ibravComboBox.setEnabled(False)
-
-    @Slot(int)
-    def getLatticeData(self, ibrav):
-        try:
-            self.options.setLatticeData(int(ibrav))
-        except ValueError as error:
-            self.qPathLineEdit.clear()
-            self.variantLabel.clear()
-            self.options.setIbrav(-1)
-            self.setPathButton.setEnabled(False)
-
-            msgBox = QMessageBox()
-            msgBox.setText('Error')
-            msgBox.setInformativeText(str(error))
-            msgBox.exec()
-        else:
-            self.qPathLineEdit.setText(self.options.defaultPath)
-            self.variantLabel.setText(self.options.variant)
-            self.options.setIbrav(int(ibrav))
-            self.setPathButton.setEnabled(True)
-            self.populateHSPTable(self.options.highSymmetryPoints)
-
-    @Slot(bool)
     def onDatabaseFound(self, found):
-        if found:
-            self.variantLabel.setText(self.options.variant)
-            self.qPathLineEdit.setText(self.options.defaultPath)
+        """The crystal of the dataset found (or none): its description, special points and default path."""
+        o = self.options
+        ibrav = o.identifyLattice() if found else None
+        self.qPathLineEdit.setText(o.defaultPath if ibrav is not None else '')
+        self.setPathButton.setEnabled(ibrav is not None)
+        self.populateHSPTable(o.highSymmetryPoints if ibrav is not None else {})
+        self.showLattice(found)
 
-            # Lengths are in Bohr in the database
-            for paramName, label in self.parameterLabels.items():
-                value = self.options.latticeParameters[paramName]
-                if paramName in ('a', 'b', 'c'):
-                    label.setText(f'{value * BOHR_TO_ANGSTROM:.5f} Å')
-                    label.setToolTip(f'{value:.5f} Bohr')
-                else:
-                    label.setText(f'{value:.4f}°')
-
+    def showLattice(self, found):
+        """The description of the crystal (see lattice_info.latticeSummary)."""
+        o = self.options
+        labels = (self.latticeLabel, self.spaceGroupLabel, self.atomsLabel, self.volumeLabel, self.kGridLabel,
+                  self.vacuumLabel, *self.parameterLabels.values())
+        for label in labels:
+            label.clear()
+        self.latticeNote.hide()
+        info = o.latticeSummary() if found else None
+        if info is None:
+            return
+        if o.ibrav != -1:
+            self.latticeLabel.setText(f'{bravaisName(o.ibrav)} · ibrav {o.ibrav} · {o.variant}')
         else:
-            self.variantLabel.clear()
-            self.qPathLineEdit.clear()
-            self.setPathButton.setEnabled(False)
-            self.populateHSPTable({})
-
-            for param, label in self.parameterLabels.items():
-                label.clear()
+            self.latticeLabel.setText('Not identified')
+        group = info['spaceGroup']
+        self.spaceGroupLabel.setText(f'{group[0]} (No. {group[1]}), point group {group[2]}' if group else 'Not found')
+        self.atomsLabel.setText(f'{info["formula"]} · {info["atoms"]} atom{"s" if info["atoms"] != 1 else ""} per cell')
+        self.volumeLabel.setText(f'{info["volume"]:.3f} Å³')
+        if info['grid']:
+            self.kGridLabel.setText(' × '.join(str(n) for n in info['grid']) + f' ({o.nIbzQpoints} irreducible)')
+        self.vacuumLabel.setText(f'along {"abc"[info["layer"]]}: a layer (2D)' if info['layer'] is not None
+                                 else 'none (bulk)')
+        # Lengths are in Bohr in the database
+        for paramName, label in self.parameterLabels.items():
+            value = o.latticeParameters[paramName]
+            if paramName in ('a', 'b', 'c'):
+                label.setText(f'{value * BOHR_TO_ANGSTROM:.5f} Å')
+                label.setToolTip(f'{value:.5f} Bohr')
+            else:
+                label.setText(f'{value:.4f}°')
+        if o.ibrav == -1:
+            self.latticeNote.setText(f'The lattice could not be identified ({o.latticeProblem}), so no Q-path can '
+                                     'be set: only cubic, hexagonal, rhombohedral, tetragonal and orthorhombic '
+                                     'lattices have special points here.')
+            self.latticeNote.show()
+        elif o.symmetryTolerance and o.symmetryTolerance > SYMMETRY_TOLERANCES[0]:
+            strict = f' (at the strictest, {o.strictVariant})' if o.strictVariant else ''
+            self.latticeNote.setText(f'Identified with a symmetry tolerance of {o.symmetryTolerance:g}, relative to '
+                                     f'the longest lattice vector{strict}: the cell is slightly off this symmetry.')
+            self.latticeNote.show()
 
     @Slot(int)
     def updateInterpolationEdit(self, index):
@@ -492,9 +497,11 @@ class OptionsWidget(QWidget):
     def restoreQPath(self, state: dict) -> bool:
         """Set a Q-path saved with qPathState. False (and the default path left) if it cannot be set."""
         try:
-            ibrav = str(int(state['ibrav']))
-            if ibrav != self.ibravComboBox.currentText() and self.ibravComboBox.findText(ibrav) >= 0:
-                self.ibravComboBox.setCurrentText(ibrav)   # resets the points and the path
+            # Saved for another lattice (e.g. chosen by hand in earlier versions): not valid
+            if int(state['ibrav']) != self.options.ibrav or self.options.ibrav == -1:
+                return False
+            self.options.setLatticeData()             # the points and path of the lattice, afresh
+            self.populateHSPTable(self.options.highSymmetryPoints)
 
             # Extra points, as rows below those of the lattice
             self.hspTable.blockSignals(True)
