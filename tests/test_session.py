@@ -576,7 +576,7 @@ def test_every_control_is_part_of_the_session(newWindow, monkeypatch):
         return True
 
     missing = []
-    for root in (system, spectra, w.wavefunction.inspector, w.appearancePanel):
+    for root in (system, spectra, w.wavefunction.inspector, w.appearancePanel, w.compositionPanel):
         for widget in root.findChildren(QWidget):
             if widget in excluded or id(widget) in inDialog:
                 continue
@@ -601,7 +601,8 @@ def test_every_control_is_part_of_the_session(newWindow, monkeypatch):
 def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     """Buttons that change the setup (view, cell origin, cut plane, Q-path, styles) mark the session modified."""
     from PySide6.QtGui import QColor, QFont
-    from PySide6.QtWidgets import QWidget, QAbstractButton, QToolButton, QColorDialog, QFontDialog, QTabBar, QMessageBox
+    from PySide6.QtWidgets import (QWidget, QAbstractButton, QToolButton, QColorDialog, QFontDialog, QTabBar, QMessageBox,
+                                   QAbstractItemView)
     import visual_excitons.gui.main_window as main_window
     monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Cancel)
     w = newWindow()
@@ -613,7 +614,8 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     panel, p3, view = w.appearancePanel, w.wavefunction.parameters3DWidget, w.wavefunction.excitonWfWidget
     # Not part of a setup: files and checks, calculations and exports (their results are, see the other tests)
     notSetup = {'Browse…', 'Details…', 'Check all BSE', 'Compute dispersion', 'Add spectrum',
-                'Compute its wave function', 'Compute wave function', 'Export figure…', 'Image…', 'Density…'}
+                'Compute its wave function', 'Compute wave function', 'Export figure…', 'Image…', 'Density…',
+                'Show its composition', 'Export data…', 'Export image…'}
     # Something for each button to change
     before = {'Set Q-path': lambda: w.system.qPathLineEdit.setText('GLZ'),
               'Apply': lambda: [edit.setText(text) for edit, text in zip(p3.viewDirLineEdits, ('1', '0', '0'))],
@@ -623,12 +625,12 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     inDialog = {id(child) for dialog in dialogs for child in dialog.findChildren(QWidget)}
 
     missing = []
-    for root in (w.system, w.spectra.inspector, w.wavefunction.inspector, panel):
+    for root in (w.system, w.spectra.inspector, w.wavefunction.inspector, panel, w.compositionPanel):
         for button in root.findChildren(QAbstractButton):
             if (button.isCheckable() or id(button) in inDialog or button.text() in notSetup
                     or isinstance(button.parentWidget(), QTabBar)                    # tab scroll arrows
                     or (isinstance(button, QToolButton) and button.text())           # section headers
-                    or button is w.system.hspTable.findChild(QAbstractButton)):      # table corner
+                    or isinstance(button.parentWidget(), QAbstractItemView)):        # table corners
                 continue
             before.get(button.text(), lambda: None)()
             w.markSessionSaved()

@@ -18,6 +18,7 @@ from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStr
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
 from .options_widget import OptionsWidget
 from .start_page import StartPage
+from .composition_panel import CompositionPanel
 from .spectra_panels import SpectraPanels
 from .wavefunction_panels import WavefunctionPanels
 from .docking import Panels, PRESETS, DEFAULT_PRESET, scrollable
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         self.theme.themeChanged.connect(self.spectra.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
         self.theme.themeChanged.connect(self.panels.applyTheme)
+        self.theme.themeChanged.connect(self.compositionPanel.setDarkTheme)
         self.setTheme(self.settings.value('theme', 'System'))
 
         # Parameters kept between sessions (see persistence.py): preferences now,
@@ -103,6 +105,7 @@ class MainWindow(QMainWindow):
         self.exports.remember('figure', get=self.figureExportState, set=self.restoreFigureExportState)
         self.exports.remember('image', get=self.imageExportState, set=self.restoreImageExportState)
         self.state.add('exports', self.exports)
+        self.state.add('composition', self.compositionPanel.persistence)
         # A dataset opened for the first time starts from the defaults, not from
         # the parameters of the previous one
         self.datasetDefaults = self.state.values(DATASET)
@@ -160,6 +163,18 @@ class MainWindow(QMainWindow):
         self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
         self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
 
+        # Where the selected exciton lives in reciprocal space, and what it is made of
+        self.compositionPanel = CompositionPanel()
+        self.calculations.compositionReady.connect(self.onCompositionReady)
+        self.calculations.compositionFailed.connect(self.compositionPanel.showProblem)
+        self.calculations.excitonSelected.connect(self.updateComposition)
+        self.compositionPanel.compositionNeeded.connect(self.updateComposition)
+        self.compositionPanel.exportDataRequested.connect(self.exportComposition)
+        self.compositionPanel.exportImageRequested.connect(self.exportCompositionImage)
+        self.spectra.inspector.showCompositionRequested.connect(lambda: self.showPanel('composition'))
+        self.options.databaseFound.connect(lambda found: self.compositionPanel.clear())
+        self.system.qPathApplied.connect(lambda state: self.compositionPanel.setQPath(self.qPathCartesian()))
+
         # The styles of the 2D plots
         self.appearancePanel = AppearancePanel({'dispersion': self.dispersionStyle, 'absorption': self.absorptionStyle,
                                                 'bands': self.bandStructureStyle}, curveNames=self.curveNames)
@@ -176,6 +191,7 @@ class MainWindow(QMainWindow):
                             ('bands', self.spectra.bandStructureWidget),
                             ('wavefunction', self.wavefunction.excitonWfWidget),
                             ('analysis', self.wavefunction.analysisWidget),
+                            ('composition', self.compositionPanel),
                             ('spectraControls', self.spectra.inspector),
                             ('appearance', self.appearancePanel),
                             ('wavefunctionControls', self.wavefunction.inspector)):
@@ -433,6 +449,70 @@ class MainWindow(QMainWindow):
         self.panels.show(key)
         if key == 'analysis':
             self.analysisCheckBox.setChecked(True)
+        elif key == 'composition':
+            self.updateComposition()
+
+    # Composition of the selected exciton (computed while its panel is shown)
+
+    @Slot()
+    def updateComposition(self, *args):
+        # Open, and in front (behind another tab it catches up when brought up, see
+        # CompositionPanel.showEvent); a window not shown (tests) shows nothing
+        if self.panels.isShown('composition') and (self.compositionPanel.isVisible() or not self.isVisible()):
+            self.calculations.computeComposition(self.compositionPanel.degenerate())
+
+    @Slot(object)
+    def onCompositionReady(self, composition):
+        if composition is not None:
+            lattice = self.calculations.lattice
+            summary = self.options.latticeSummary() or {}
+            self.compositionPanel.setCrystal(lattice.lat, lattice.rlat, lattice.red_kpoints, self.calculations.kGrid(),
+                                             summary.get('layer'), self.options.highSymmetryPoints,
+                                             self.qPathCartesian())
+        self.compositionPanel.setComposition(composition)
+
+    def qPathCartesian(self):
+        """The k-points of the Q-path (Cartesian, Bohr⁻¹ without 2π), or None."""
+        return self.options.qBZ.kpoints('car') if self.options.qBZ is not None else None
+
+    @Slot()
+    def exportComposition(self):
+        c = self.calculations.composition
+        if c is None:
+            QMessageBox.information(self, 'Export composition', 'Select an exciton in a spectrum first.')
+            return
+        name = f'{datasetName(self.dataset or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_composition.csv'
+        filename, _ = QFileDialog.getSaveFileName(self, 'Export composition', self.exportPath(name), 'CSV files (*.csv)')
+        if not filename:
+            return
+        from visual_excitons.core.kspace import compositionCSV
+        try:
+            Path(filename).write_text(compositionCSV(c, self.calculations.lattice, datasetName(self.dataset or {})))
+        except OSError as error:
+            QMessageBox.critical(self, 'Export composition failed', str(error))
+            return
+        self.rememberExportFolder(filename)
+        self.statusBar().showMessage(f'Composition saved to {filename}', 6000)
+
+    @Slot()
+    def exportCompositionImage(self):
+        c = self.calculations.composition
+        if c is None:
+            QMessageBox.information(self, 'Export image', 'Select an exciton in a spectrum first.')
+            return
+        name = f'{datasetName(self.dataset or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_kspace.png'
+        filename, _ = QFileDialog.getSaveFileName(self, 'Export image', self.exportPath(name), IMAGE_FILTERS)
+        if not filename:
+            return
+        if not Path(filename).suffix:
+            filename += '.png'
+        panel = self.compositionPanel
+        image = panel.view3D.grabFramebuffer() if panel.is3D() else panel.mapPlot.grab().toImage()
+        if not image.save(filename):
+            QMessageBox.critical(self, 'Export image failed', f'Could not write {filename}')
+            return
+        self.rememberExportFolder(filename)
+        self.statusBar().showMessage(f'Image saved to {filename}', 6000)
 
     @Slot()
     def computeSelectedWaveFunction(self):
@@ -444,6 +524,8 @@ class MainWindow(QMainWindow):
     def onPanelToggled(self, key, shown):
         if key == 'analysis':
             self.analysisCheckBox.setChecked(shown)
+        elif key == 'composition' and shown:
+            self.updateComposition()
 
     def syncAnalysisCheckBox(self):
         self.analysisCheckBox.setChecked(self.panels.isShown('analysis'))

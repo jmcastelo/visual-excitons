@@ -12,6 +12,7 @@ class ParametersWidget(Inspector):
     absorptionParametersChanged = Signal()
     # Asks the main window to switch to the wave-function page
     computeWavefunctionRequested = Signal()
+    showCompositionRequested = Signal()
     # Asks the main window to export the plots as a publication figure
     exportFigureRequested = Signal()
 
@@ -122,9 +123,14 @@ class ParametersWidget(Inspector):
         self.computeWavefunctionButton.clicked.connect(self.computeWavefunctionRequested)
         self.wfEstimateNote = NoteLabel()
         self.wfEstimateNote.hide()
+        self.showCompositionButton = QPushButton('Show its composition')
+        self.showCompositionButton.setToolTip('Where this exciton lives in reciprocal space and what it is made of\n'
+                                              '(bands, k-points), in the Composition panel')
+        self.showCompositionButton.clicked.connect(self.showCompositionRequested)
 
         layout = QVBoxLayout()
         layout.addWidget(self.selectedExcitonNote)
+        layout.addWidget(self.showCompositionButton)
         layout.addWidget(self.computeWavefunctionButton)
         layout.addWidget(self.wfEstimateNote)
         self.addSection('Selected exciton', layout)

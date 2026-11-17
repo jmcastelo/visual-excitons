@@ -25,6 +25,7 @@ Using the program:
 - [The main window](docs/interface.md): the panels and how to arrange them, layouts, background calculations, themes, and what is resumed on start.
 - [Datasets and the System panel](docs/datasets.md): opening the databases of a calculation, how they are recognised and checked, partial calculations, the crystal lattice and the Q-path.
 - [Spectra](docs/spectra.md): dispersion, absorption and band structure, selecting excitons, and publication figures.
+- [Composition of an exciton](docs/composition.md): where the selected exciton lives in reciprocal space (a map of its k-points, in 3D for bulk crystals) and what it is made of (band pairs, bands, k-points), at Γ or finite Q.
 - [Appearance of the plots](docs/appearance.md): colors, lines, symbols, axes and legend of the 2D plots.
 - [Wave function](docs/wavefunction.md): computing it, plot types and colormaps, view directions, layers and the cell origin, atoms and bonds, analysis and export.
 - [Sessions](docs/sessions.md): saving and opening whole setups, with their results.

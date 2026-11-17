@@ -7,6 +7,7 @@ The main window is made of panels:
 - **System**: the data of a calculation, its crystal lattice and the Q-path.
 - **Dispersion**, **Absorption** and **Band structure**: the excitonic spectra.
 - **Wave function**: the exciton wave function in real space, with the crystal structure.
+- **Composition**: where the selected exciton lives in reciprocal space and what it is made of (see [Composition of an exciton](composition.md)).
 - **Analysis**: cuts of the wave function and the distribution of electron–hole distances (see [Analysis](wavefunction.md#analysis)).
 - **Spectra controls** and **Wave function controls**: the parameters, made of collapsible sections. Click a section header to open or close it; the panel scrolls when its open sections do not fit.
 - **Appearance**: the style of the 2D plots (see [Appearance of the plots](appearance.md)).
@@ -18,7 +19,7 @@ The `Layout` menu arranges the panels for each step of the usual workflow, or sh
 | Layout | Shortcut | Panels |
 |---|---|---|
 | System | `Ctrl+1` | System |
-| Spectra | `Ctrl+2` | Dispersion, absorption, band structure, the spectra controls and the Appearance panel |
+| Spectra | `Ctrl+2` | Dispersion, absorption, band structure, the composition of the selected exciton, the spectra controls and the Appearance panel |
 | Wave function | `Ctrl+3` | Wave function, analysis (when on) and the wave function controls |
 | Overview | `Ctrl+4` | All of them: the spectra on the left, the wave function in the middle, the controls, the Appearance and the System panel as tabs on the right |
 

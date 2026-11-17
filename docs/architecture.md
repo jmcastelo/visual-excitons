@@ -63,6 +63,7 @@ visual_excitons/
 │   ├── consistency.py      Checks that the databases of a dataset belong together
 │   ├── cellshift.py        Cell origin: layers detected and centred, atoms and density shifted
 │   ├── lattice_info.py     The crystal described in the System panel: lattice, space group, formula, k-grid
+│   ├── kspace.py           What the Composition panel draws: plane maps, zone points, special points, CSV
 │   ├── memory.py           Real-space grid and memory estimates
 │   ├── atomic_data.py      Symbols, covalent radii, Jmol colors, Bohr/Å constants
 │   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend); state() / setState()
@@ -70,6 +71,7 @@ visual_excitons/
 │   ├── main_window.py      MainWindow: panels, menus, status bar, datasets, persistence
 │   ├── docking.py          Dockable panels (QtAds): presets, saved layouts
 │   ├── start_page.py       Start page over the panels while no dataset is open
+│   ├── composition_panel.py The Composition panel: the selected exciton in k-space (map, 3D) and its transitions
 │   ├── theme.py            System / Light / Dark themes, plot colors
 │   ├── inspector.py        Control panel framework: collapsible sections, forms, notes
 │   ├── persistence.py      Values kept between sessions (global and per dataset)
@@ -95,7 +97,10 @@ visual_excitons/
 │   ├── analysis_widget.py  Analysis panel (plane cut, distance distribution)
 │   ├── image_export.py     Image export of the 3D view
 │   └── figure_export.py    Publication figures of the 2D plots: data and styles, dialog with preview
-tests/                      pytest suite (see Testing)
+├── yambopy_ext/            Code meant for YamboPy (its layout and conventions; no Qt, no program imports)
+│   ├── bz/wigner_seitz.py  The Brillouin zone of any lattice: Wigner-Seitz cell, sections, points filling it
+│   └── bse/exciton_kspace.py  Exciton weights by k-point (electron at k, hole at k-Q), band pair and band
+tests/                      pytest suite (see Testing); tests/yambopy_ext: those of yambopy_ext, no Qt
 docs/                       User and developer documentation (this document: architecture.md)
 data/                       Test datasets (not in the repository)
 ```
@@ -212,6 +217,12 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `session.py` | `writeSession`, `readSession`, `datasetFingerprint` | See section 9 |
 | `atomic_data.py` | `chemical_symbols`, `covalent_radii` (Å), `jmol_colors`, `BOHR_TO_ANGSTROM`, `ANGSTROM_TO_BOHR` | From ASE |
 | `style.py` | `DispersionStyle`, `AbsorptionStyle`, `BandStructureStyle` | State of the 2D plot styles; edited by `appearance_panel.py` |
+| `kspace.py` | `planeMap`, `zonePoints`, `nearestSpecialPoint`, `compositionCSV` | What the Composition panel draws, in Å⁻¹ (with 2π); built on `yambopy_ext` |
+
+**Code meant for YamboPy (`yambopy_ext/`).** Modules that would belong in YamboPy, as a replacement or an enhancement of its own, are written to move there unchanged: YamboPy's layout (`bz`, `bse`), its conventions (snake_case, NumPy-style docstrings, `lattice.red_kpoints` / `lattice.rlat` in Bohr⁻¹ without 2π, 1-based bands and states as in yambo's tables), NumPy, SciPy and YamboPy only (no Qt, nothing from the rest of the program), and their tests in `tests/yambopy_ext` (no Qt, synthetic data). Each module's docstring says what in YamboPy it would replace. The program uses them through `core/` (e.g. `computeComposition`, `kspace.py`).
+
+- `bse/exciton_kspace.py`: yambo's BSE table is (k, v, c), the k being the electron's; at a finite Q the hole is at k−Q (checked from the DFT transition energies, `test_composition.py`). It replaces `YamboExcitonDB.get_exciton_weights` (the hole's weight at the electron's k: right only at Q = 0) and `get_exciton_transitions` (columns read as (k, c, v), only the last state of a group kept), vectorised. It is what a finite-Q excitonic band structure needs.
+- `bz/wigner_seitz.py`: the zone from scipy's Voronoi construction (all lattices, oblique and 3D included), unlike `yambopy.plot.plotting.BZ_Wigner_Seitz`.
 
 ---
 
@@ -483,6 +494,12 @@ Cell origin (`core/cellshift.py`): `Parameters3DWidget.cellShift()` (fractions o
 Centering: `ExcitonWfWidget.sceneBounds()` is the box of the visible items (mesh vertices, line points and the volume's grid, each through its transform), and `centerView()` puts the camera center in its middle. It runs on `Parameters3DWidget.supercellResized` (not on other redraws of the lattice, such as atom sizes), on a new dataset, and on the first display of a wave function computed (`WavefunctionPanels.centerOnDisplay`), not of one restored (`Calculations.restoringResults`).
 
 The **camera** (`ExcitonWfWidget.cameraState()` / `setCameraState()`) is a `DATASET` value of `WavefunctionPanels`: datasets are opened after the preferences are restored, and opening one centers the view, so a camera restored as a preference would be overridden.
+
+### Composition panel (`composition_panel.py`)
+
+`Calculations.computeComposition(degenerate)` analyses the selected exciton in the background (`computeComposition`: reads the BSE database of its Q-point with the states up to it plus 20, kept in `compositionCache` for the other excitons of that Q-point, then `exciton_kspace` with the wave function's degeneracy tolerance). It runs only while the panel is shown: `MainWindow.updateComposition` on each selection, when the panel is opened (`onPanelToggled`, `showPanel`) or brought up (`CompositionPanel.showEvent` emits `compositionNeeded`). Expected problems (a Q-point not computed, an exciton beyond the database) come back as `compositionFailed` and are said in the panel, not in a dialog. The composition goes with the selected exciton: cleared by `resetSpectra`, stored in session results (restored before the selection, so that it is not computed again).
+
+The panel draws a plane map (`TileMapItem`: one polygon per k-point, the 2D Voronoi cell of the grid, clipped to the zone's outline; points up to a tile outside the zone fill the edges of bulk sections) or, for bulk crystals, the zone in 3D (`KSpaceView`, a quaternion `GLViewWidget` with its own gizmo showing the reciprocal vectors). Layers (the vacuum axis of `Options.latticeSummary`) only have the plane map. Its settings are a `PersistentState` (`composition` in the registry): the plane and the 3D camera with the dataset; the camera is `None` until the zone is fitted or the camera restored, so that a dataset without a camera of its own gets the zone fitted (`cameraSet`, reset by `clear` on a new dataset).
 
 ### Sessions (`core/session.py`, `MainWindow`)
 

@@ -10,6 +10,7 @@ from .memory import PlaneWaves, estimateMemory, chooseBlockSize, availableMemory
 from .export import supercellAtoms, writeDensity
 from .analysis import voxelVectors
 from .atomic_data import BOHR_TO_ANGSTROM
+from visual_excitons.yambopy_ext.bse.exciton_kspace import exciton_kspace
 
 
 
@@ -166,6 +167,37 @@ def computeBandStructure(context, lattice, diagoDir, gw, qpDir, saveDir, qBZ, ex
             'weights': np.transpose(excitonBands.weights)}
 
 
+def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None):
+    """
+    Where exciton `excIndex` (1-based) of Q-point `qIndex` (0-based) lives in
+    reciprocal space and what it is made of (see yambopy_ext.bse.exciton_kspace),
+    with the states degenerate with it if `degenerate`.
+
+    `cache`, a dict, keeps the BSE database read (with the states up to the
+    one asked plus a margin): another exciton of the same Q-point is instant.
+    """
+    if lattice is None:
+        context.stage('Loading the lattice')
+        lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
+    neigs = excIndex + 20       # the states degenerate with it, at most a few above
+    key = (diagoDir, bseFile)
+    cached = cache.get(key) if cache is not None else None
+    if cached is not None and cached[1] >= neigs:
+        excitonDB = cached[0]
+    else:
+        context.stage('Loading the exciton')
+        excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=neigs)
+        if cache is not None:
+            cache.clear()       # one database at a time
+            cache[key] = (excitonDB, neigs)
+    if excIndex > len(excitonDB.eigenvalues):
+        raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
+    # The same degeneracy as the wave function's (computeWaveFunction)
+    result = exciton_kspace(excitonDB, excIndex, degenerate=degenerate, degen_eps=1e-2)
+    result.update(lattice=lattice, qIndex=qIndex, excIndex=excIndex, degenerate=bool(degenerate))
+    return result
+
+
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
                         cutoff_ry, supercell, cache=None, block_size=256, bseFile=None):
     """
@@ -273,6 +305,10 @@ class Calculations(QObject):
     # Exciton chosen in the spectra, shared with the wave-function page:
     # Q-point index (0-based, as in ndb.BS_diago_Q<index + 1>), exciton index (1-based), energy (eV)
     excitonSelected = Signal(int, int, float)
+    # The composition of the selected exciton (a dict, see computeComposition), or None
+    compositionReady = Signal(object)
+    # Why the composition of the selected exciton cannot be shown (e.g. its Q-point was not computed)
+    compositionFailed = Signal(str)
 
     # Progress and errors of the background calculations (see tasks.py)
     busyStarted = Signal(str)          # a task starts: its message
@@ -319,6 +355,11 @@ class Calculations(QObject):
         self.excitonDispersion = None
         self.collinear_qpoints = None
         self.qIndices = None
+
+        # The composition of the selected exciton (see computeComposition), and
+        # the BSE database it was read from
+        self.composition = None
+        self.compositionCache = {}
 
         self.waveFunction = None
         self.wfAtomPositions = None
@@ -378,6 +419,10 @@ class Calculations(QObject):
         self.dispersionNoteChanged.emit('')
         self.k, self.bands, self.weights = [], [], []
         self.excitonBandStructureClear.emit()
+        # It goes with the selected exciton
+        if self.composition is not None:
+            self.composition = None
+            self.compositionReady.emit(None)
 
     def hasResults(self):
         """Whether anything was computed: dispersion, absorption spectra, band structure or wave function."""
@@ -390,10 +435,59 @@ class Calculations(QObject):
         self.lattice = None
         self.waveFunction = None
         self.wfAtomPositions = None
+        self.compositionCache = {}
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
         self.planeWaves = None
         self.excitonSizes = {}
+
+    # Composition of the selected exciton
+
+    def compositionMatches(self, degenerate):
+        """Whether the composition shown is that of the selected exciton, with `degenerate` as asked."""
+        c, selected = self.composition, self.selectedExciton
+        return (c is not None and selected is not None and (c['qIndex'], c['excIndex']) == tuple(selected[:2])
+                and c['degenerate'] == bool(degenerate))
+
+    def computeComposition(self, degenerate=True):
+        """The composition of the selected exciton, in the background (compositionReady when done)."""
+        if self.selectedExciton is None:
+            if self.composition is not None:
+                self.composition = None
+                self.compositionReady.emit(None)
+            return
+        if self.compositionMatches(degenerate) or not self.options.saveDir or not self.options.diagoDir:
+            return
+        qIndex, excIndex, _ = self.selectedExciton
+        # Computed when an exciton is selected: problems are said in its panel, not in a dialog
+        missing = self.options.missingQPoint(qIndex)
+        if missing:
+            return self._failComposition(missing)
+        o = self.options
+        arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
+                         qIndex=qIndex, excIndex=excIndex, degenerate=degenerate, cache=self.compositionCache)
+
+        def compute(context):
+            try:
+                return computeComposition(context, **arguments)
+            except ValueError as error:          # e.g. an exciton beyond those of the database
+                return {'error': str(error)}
+        self.tasks.submit('Analysing the exciton…', compute, self._applyComposition, key='composition')
+
+    def _failComposition(self, reason):
+        if self.composition is not None:
+            self.composition = None
+            self.compositionReady.emit(None)
+        self.compositionFailed.emit(reason)
+
+    def _applyComposition(self, result):
+        if 'error' in result:
+            return self._failComposition(result['error'])
+        self.markResultsChanged()
+        if self.lattice is None:
+            self.lattice = result['lattice']
+        self.composition = {key: value for key, value in result.items() if key != 'lattice'}
+        self.compositionReady.emit(self.composition)
 
     @Slot(list, bool)
     def selectExciton(self, points, dummy=None):
@@ -729,6 +823,17 @@ class Calculations(QObject):
         if self.selectedExciton is not None:
             meta['selectedExciton'] = list(self.selectedExciton)
 
+        if self.composition is not None:
+            c = self.composition
+            arrays['composition/electron'] = np.asarray(c['electron'], dtype=float)
+            arrays['composition/hole'] = np.asarray(c['hole'], dtype=float)
+            meta['composition'] = {'qIndex': int(c['qIndex']), 'excIndex': int(c['excIndex']),
+                                   'degenerate': bool(c['degenerate']), 'states': list(c['states']),
+                                   'energy': float(c['energy']), 'redQPoint': [float(x) for x in c['red_qpoint']],
+                                   'pairs': [list(p) for p in c['pairs']],
+                                   'valence': [[b, w] for b, w in c['valence'].items()],
+                                   'conduction': [[b, w] for b, w in c['conduction'].items()]}
+
         if includeWaveFunction and self.waveFunction is not None:
             # Single precision: plenty for a density relative to its maximum, half the size
             arrays['waveFunction/density'] = self.waveFunction.astype(np.float32)
@@ -796,6 +901,19 @@ class Calculations(QObject):
                 'atomPositions': arrays['waveFunction/atomPositions'], 'tr4x4': arrays['waveFunction/tr4x4'],
                 'fixedParticle': wf['fixedParticle'], 'supercell': list(wf['supercell']), 'grid': list(wf['grid']),
                 'fixedPosition': list(wf['fixedPosition']), 'qIndex': wf['exciton'][0], 'excIndex': wf['exciton'][1],
+            })
+
+        # Before the selected exciton, so that it is not computed again for it
+        if 'composition' in meta:
+            c = meta['composition']
+            self._applyComposition({
+                'lattice': lattice, 'qIndex': int(c['qIndex']), 'excIndex': int(c['excIndex']),
+                'degenerate': bool(c['degenerate']), 'states': [int(x) for x in c['states']],
+                'energy': float(c['energy']), 'red_qpoint': np.asarray(c['redQPoint'], dtype=float),
+                'electron': arrays['composition/electron'], 'hole': arrays['composition/hole'],
+                'pairs': [(int(v), int(cb), float(w)) for v, cb, w in c['pairs']],
+                'valence': {int(b): float(w) for b, w in c['valence']},
+                'conduction': {int(b): float(w) for b, w in c['conduction']},
             })
 
         if 'selectedExciton' in meta:
