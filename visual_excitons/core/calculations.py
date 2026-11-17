@@ -358,23 +358,19 @@ class Calculations(QObject):
         self.resultsVersion += 1
         self.resultsChanged.emit()
 
-    def hasResults(self):
-        """Whether anything was computed: dispersion, absorption spectra, band structure or wave function."""
-        return bool(len(self.dispPoints) or self.excAbsData or len(self.k) or self.waveFunction is not None)
-
     @Slot()
-    def resetDataset(self):
-        """Forget everything computed from the previous dataset."""
+    def resetSpectra(self):
+        """
+        Forget the dispersion, absorption spectra, band structure and selected
+        exciton, e.g. when the QP corrections change their energies (the wave
+        function stays: it does not depend on them).
+        """
         self.markResultsChanged()
         self.tasks.reset()
-        self.lattice = None
         self.excitonDispersion = None
         self.collinear_qpoints = None
         self.qIndices = None
-        self.waveFunction = None
-        self.wfAtomPositions = None
         self.selectedExciton = None
-        # Results of the previous dataset off the plots
         self.clearAbsorptionCurves()
         self.excitonAbsorptionClear.emit()
         self.dispPoints, self.dispPointsData, self.dispXInter, self.dispYInter = [], [], [], []
@@ -382,6 +378,18 @@ class Calculations(QObject):
         self.dispersionNoteChanged.emit('')
         self.k, self.bands, self.weights = [], [], []
         self.excitonBandStructureClear.emit()
+
+    def hasResults(self):
+        """Whether anything was computed: dispersion, absorption spectra, band structure or wave function."""
+        return bool(len(self.dispPoints) or self.excAbsData or len(self.k) or self.waveFunction is not None)
+
+    @Slot()
+    def resetDataset(self):
+        """Forget everything computed from the previous dataset."""
+        self.resetSpectra()
+        self.lattice = None
+        self.waveFunction = None
+        self.wfAtomPositions = None
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
         self.planeWaves = None

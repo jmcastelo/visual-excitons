@@ -433,3 +433,59 @@ def test_saving_an_untitled_session_when_asked(newWindow, monkeypatch, tmp_path)
     assert not w.close()
     monkeypatch.setattr(main_window.QFileDialog, 'getSaveFileName', lambda *args, **kwargs: (str(path), ''))
     assert w.close() and path.is_file()
+
+
+# Directories chosen by hand in the System panel
+
+@pytest.mark.data
+def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
+    import visual_excitons.gui.main_window as main_window
+    bii3 = datasetPath('BiI3_Bulk_8x8x8')
+    w = newWindow()
+    w.openDataset(main_window.findDataset(bii3))
+    warnings = []
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: warnings.append(args[2]))
+
+    # Folders without the databases: said so, nothing changes
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    for kind in ('save', 'diago', 'qp'):
+        before = (w.options.saveDir, w.options.diagoDir, w.options.qpDir)
+        w.system.directoryChosen.emit(kind, str(empty))
+        assert (w.options.saveDir, w.options.diagoDir, w.options.qpDir) == before
+        assert 'The directory in use stays' in warnings[-1]
+    assert w.system.diagoDirEdit.text() == w.options.diagoDir and w.options.qPoints
+
+    # Another BSE directory: part of the dataset, remembered; results from the old one go
+    injectResults(w)
+    partial = tmp_path / 'partial'
+    partial.mkdir()
+    for n in (1, 2):
+        (partial / f'ndb.BS_diago_Q{n}').symlink_to(bii3 / 'diagos' / f'ndb.BS_diago_Q{n}')
+    w.system.directoryChosen.emit('diago', str(partial))
+    assert w.options.diagoDir == str(partial) and w.options.qPoints == [0, 1]
+    assert w.dataset['diago'] == str(partial) and w.recentDatasets()[0]['diago'] == str(partial)
+    assert not w.calculations.hasResults()
+
+    # Without the QP corrections: the spectra go, the wave function stays
+    injectResults(w)
+    w.system.calcTypeComboBox.setCurrentIndex(0)
+    assert w.dataset['gw'] is False and w.recentDatasets()[0]['gw'] is False
+    assert not len(w.calculations.dispPoints) and w.calculations.waveFunction is not None
+
+    # Another SAVE directory: another dataset, asked first (the wave function is not saved)
+    from PySide6.QtWidgets import QMessageBox
+    w.spectra.inspector.nExcitonsSpinBox.setValue(9)
+    bn = datasetPath('BN')
+    answers = []
+    monkeypatch.setattr(main_window.QMessageBox, 'warning',
+                        lambda *args: answers.append(args[2]) or QMessageBox.StandardButton.Cancel)
+    w.system.directoryChosen.emit('save', str(main_window.findDataset(bn)['save']))
+    assert 'opening another dataset' in answers[-1] and w.dataset['save'] == str(bii3 / 'save')
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Discard)
+    w.system.directoryChosen.emit('save', str(main_window.findDataset(bn)['save']))
+    # BiI3 keeps its parameters
+    assert w.dataset['save'] == str(main_window.findDataset(bn)['save']) and w.dataset['diago'] == str(partial)
+    assert w.calculations.waveFunction is None and w.options.nExcitons == 6
+    assert [d['save'] for d in w.recentDatasets()][:2] == [w.dataset['save'], str(bii3 / 'save')]
+    assert w.recentDatasets()[1]['state']['spectra/excitons'] == 9

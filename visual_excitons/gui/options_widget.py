@@ -17,6 +17,9 @@ class OptionsWidget(QWidget):
 
     # Read every BSE file (run in the background by the main window, see setFullBSEChecks)
     checkAllBSERequested = Signal()
+    # A directory chosen by the user: 'save', 'diago' or 'qp', and the path (the
+    # main window applies it: a new SAVE directory is another dataset)
+    directoryChosen = Signal(str, str)
 
     # A Q-path was set successfully: its state (see qPathState), to be saved
     qPathApplied = Signal(dict)
@@ -321,45 +324,48 @@ class OptionsWidget(QWidget):
 
     @Slot()
     def selectSaveDir(self):
-        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.saveDir, QFileDialog.Option.ShowDirsOnly)
-        if directory != '':
-            self.options.setSaveDir(directory)
-            self.saveDirEdit.setText(directory)
+        directory = QFileDialog.getExistingDirectory(self, 'SAVE directory', self.options.saveDir, QFileDialog.Option.ShowDirsOnly)
+        if directory:
+            self.directoryChosen.emit('save', directory)
 
     @Slot()
     def selectDiagoDir(self):
-        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
-        if directory != '':
-            self.options.setDiagoDir(directory)
-            self.diagoDirEdit.setText(directory)
+        directory = QFileDialog.getExistingDirectory(self, 'BSE directory', self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
+        if directory:
+            self.directoryChosen.emit('diago', directory)
 
     @Slot()
     def selectQPDir(self):
-        directory = QFileDialog.getExistingDirectory(self, "Open Directory", self.options.qpDir or self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
-        if directory != '':
-            self.options.setQPDir(directory)
-            self.qpDirEdit.setText(directory)
+        directory = QFileDialog.getExistingDirectory(self, 'GW directory', self.options.qpDir or self.options.diagoDir,
+                                                     QFileDialog.Option.ShowDirsOnly)
+        if directory:
+            self.directoryChosen.emit('qp', directory)
+
+    def directoryEdited(self, kind, edit, current):
+        """A directory typed in `edit`: chosen if it is one and not the one in use (`current`), else put back."""
+        text = edit.text().strip()
+        if text and Path(text).is_dir() and Path(text).resolve() != (Path(current).resolve() if current else None):
+            self.directoryChosen.emit(kind, text)
+        else:
+            edit.setText(current)
 
     @Slot()
     def editSaveDir(self):
-        if Path(self.saveDirEdit.text()).is_dir():
-            self.options.setSaveDir(self.saveDirEdit.text())
-        else:
-            self.saveDirEdit.setText(self.options.saveDir)
+        self.directoryEdited('save', self.saveDirEdit, self.options.saveDir)
 
     @Slot()
     def editDiagoDir(self):
-        if Path(self.diagoDirEdit.text()).is_dir():
-            self.options.setDiagoDir(self.diagoDirEdit.text())
-        else:
-            self.diagoDirEdit.setText(self.options.diagoDir)
+        self.directoryEdited('diago', self.diagoDirEdit, self.options.diagoDir)
 
     @Slot()
     def editQPDir(self):
-        if Path(self.qpDirEdit.text()).is_dir():
-            self.options.setQPDir(self.qpDirEdit.text())
-        else:
-            self.qpDirEdit.setText(self.options.qpDir)
+        self.directoryEdited('qp', self.qpDirEdit, self.options.qpDir)
+
+    def showDirectories(self):
+        """The directories in use in the fields (after a choice that was not applied)."""
+        self.saveDirEdit.setText(self.options.saveDir)
+        self.diagoDirEdit.setText(self.options.diagoDir)
+        self.qpDirEdit.setText(self.options.qpDir)
 
     @Slot()
     def setSaveLabel(self, dir, text):

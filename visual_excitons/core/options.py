@@ -242,12 +242,11 @@ class Options(QObject):
 
     def setDiagoDir(self, dir):
         files, problems = bseFiles(dir)
-        self.qPoints = list(files)
-        self.nQpoints = len(self.qPoints)
-        if self.nQpoints > 0:
+        # A folder without BSE databases changes nothing (the directory in use stays)
+        if files:
+            self.qPoints = list(files)
+            self.nQpoints = len(self.qPoints)
             self.bseFiles, self.bseProblems = files, problems
-
-        if self.nQpoints > 0 :
             self.diagoDir = dir
             self.parentDir = Path(dir).parent.absolute()
             self.jobString = PurePath(self.diagoDir).name

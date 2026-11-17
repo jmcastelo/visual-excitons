@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
             lambda filename: self.statusBar().showMessage(f'Probability density saved to {filename}', 6000))
         self.options.databaseFound.connect(self.onDatasetForExports)
         self.options.qpDatabasesChanged.connect(self.onQPDatabaseChosen)
+        self.options.gwChanged.connect(self.onGWChanged)
 
         self.theme.themeChanged.connect(self.spectra.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
@@ -148,6 +149,7 @@ class MainWindow(QMainWindow):
         self.wavefunction.parameters3DWidget.selectedEstimateChanged.connect(self.spectra.inspector.setWaveFunctionEstimate)
         self.system.qPathApplied.connect(self.saveQPath)
         self.system.checkAllBSERequested.connect(self.checkAllBSE)
+        self.system.directoryChosen.connect(self.onDirectoryChosen)
         self.spectra.inspector.exportFigureRequested.connect(self.exportFigure)
         self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
         self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
@@ -598,11 +600,67 @@ class MainWindow(QMainWindow):
                                        lambda context: checkDataset(context=context, **arguments),
                                        lambda findings: self.system.setFullBSEChecks(key, findings), key='check-bse')
 
+    @Slot(str, str)
+    def onDirectoryChosen(self, kind, path):
+        """
+        A directory chosen in the System panel: a SAVE directory opens another
+        dataset (with the BSE and GW directories in use); a BSE or GW directory
+        changes those of the dataset open, and the results computed from them.
+        """
+        from visual_excitons.core.databases import bseFiles, qpDatabases
+        path = str(Path(path).resolve())
+        problem = {'save': lambda: not Path(path, 'ns.db1').is_file() and 'No SAVE database (ns.db1)',
+                   'diago': lambda: not bseFiles(path)[0] and 'No BSE databases (ndb.BS_diago_Q*)',
+                   'qp': lambda: not qpDatabases(path) and 'No QP database'}[kind]()
+        if problem:
+            QMessageBox.warning(self, 'Directory not used', f'{problem} found in\n{path}\n\n'
+                                'The directory in use stays.')
+            self.system.showDirectories()
+            return
+        o = self.options
+        if kind == 'save':
+            if self.dataset is not None and not self.maybeSaveSession('opening another dataset'):
+                self.system.showDirectories()
+                return
+            self.openDataset({'save': path, 'diago': o.diagoDir or None, 'qp': o.qpDir or None,
+                              'qpFile': o.qpFile or None, 'gw': o.gw})
+            return
+        if kind == 'diago':
+            o.setDiagoDir(path)
+            # The excitons may be others: everything computed from them goes
+            self.calculations.resetDataset()
+            self.wavefunction.onDatasetChanged(True)
+        else:
+            o.setQPDir(path)        # the spectra go in onQPDatabaseChosen
+        if self.dataset is not None:
+            self.dataset.update({'diago': o.diagoDir or None, 'qp': o.qpDir or None, 'qpFile': o.qpFile or None})
+            self.addRecentDataset(self.dataset)
+        self.updateDatasetLabel()
+        self.modifiedTimer.start()
+
+    @Slot(bool)
+    def onGWChanged(self, gw):
+        """With or without the QP corrections: the energies change, the spectra go."""
+        if self.dataset is None or bool(self.dataset.get('gw')) == gw:
+            return            # opening a dataset, which sets it
+        self.dataset['gw'] = gw
+        self.calculations.resetSpectra()
+        self.addRecentDataset(self.dataset)
+        self.updateDatasetLabel()
+        self.modifiedTimer.start()
+
     @Slot(list, str)
     def onQPDatabaseChosen(self, databases, name):
-        """Remember the QP database used with the dataset (e.g. ndb.QP_140_146 rather than ndb.QP)."""
-        if self.dataset is not None:
-            self.dataset['qp'], self.dataset['qpFile'] = self.options.qpDir, name
+        """
+        Remember the QP database used with the dataset (e.g. ndb.QP_140_146
+        rather than ndb.QP); another one changes the energies: the spectra go.
+        """
+        if self.dataset is None:
+            return
+        changed = (self.dataset.get('qp'), self.dataset.get('qpFile')) != (self.options.qpDir, name)
+        self.dataset['qp'], self.dataset['qpFile'] = self.options.qpDir, name
+        if changed and self.options.gw and self.calculations.hasResults():
+            self.calculations.resetSpectra()
 
     @Slot(dict)
     def saveQPath(self, state: dict):
