@@ -489,3 +489,157 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
     assert w.calculations.waveFunction is None and w.options.nExcitons == 6
     assert [d['save'] for d in w.recentDatasets()][:2] == [w.dataset['save'], str(bii3 / 'save')]
     assert w.recentDatasets()[1]['state']['spectra/excitons'] == 9
+
+
+@pytest.mark.data
+def test_export_choices_are_part_of_the_session(newWindow, tmp_path):
+    """One session per figure: the figure and 3D image export choices are saved with it."""
+    import json
+    import visual_excitons.gui.main_window as main_window
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    settings = w.settings
+    settings.setValue('figureExport/options', json.dumps({'width': 12.0, 'panels': ['absorption'], 'dpi': 600}))
+    settings.setValue('imageExport/scale', 2)
+    settings.setValue('imageExport/transparent', True)
+    path = tmp_path / 'figure.vxsession'
+    w.writeSessionFile(str(path))
+
+    # Other choices in a later export: the session is modified
+    settings.setValue('figureExport/options', json.dumps({'width': 8.0}))
+    settings.setValue('imageExport/transparent', False)
+    w.updateModified()
+    assert w.isWindowModified()
+
+    # Opening it brings its choices back for the next export
+    w.openSession(str(path))
+    assert json.loads(settings.value('figureExport/options')) == {'width': 12.0, 'panels': ['absorption'], 'dpi': 600}
+    assert settings.value('imageExport/transparent', type=bool) and settings.value('imageExport/scale', type=int) == 2
+    w.updateModified()
+    assert not w.isWindowModified()
+
+
+@pytest.mark.data
+def test_every_control_is_part_of_the_session(newWindow, monkeypatch):
+    """
+    Changing any control of the panels marks the session modified (so it is
+    saved in it), except those that are not part of a setup on purpose.
+    """
+    from PySide6.QtWidgets import (QWidget, QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QAbstractButton, QLineEdit,
+                                   QAbstractSpinBox, QColorDialog, QFontDialog, QMessageBox)
+    import visual_excitons.gui.main_window as main_window
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Cancel)
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    w.system.qPathLineEdit.setText('LGZF')
+    assert w.system.setBrillouinZone()
+    w.sessionPath = 'compared.vxsession'
+    w.markSessionSaved()
+    system, spectra, p3 = w.system, w.spectra.inspector, w.wavefunction.parameters3DWidget
+    excluded = {
+        # Applied with Set Q-path, then saved (the path, its sampling)
+        system.qPathLineEdit, system.interpolationComboBox, system.numPointsSpin, system.densitySpin,
+        # Directories: applied when valid (see test_directories_chosen_by_hand)
+        system.saveDirEdit, system.diagoDirEdit, system.qpDirEdit,
+        # The Q-point of the next spectrum to add: a chooser, not a setting
+        spectra.qPointComboBox,
+        # The Appearance panel's own preference
+        w.appearancePanel.sameAxesCheckBox,
+        *p3.shownParticleLineEdits,                  # shown only with a cell shift (linked to the computed ones)
+    }
+    dialogs = w.appearancePanel.findChildren(QColorDialog) + w.appearancePanel.findChildren(QFontDialog)
+    inDialog = {id(child) for dialog in dialogs for child in dialog.findChildren(QWidget)}
+
+    def change(widget):
+        if isinstance(widget, QComboBox):
+            if widget.count() < 2:
+                return False
+            widget.setCurrentIndex((widget.currentIndex() + 1) % widget.count())
+            widget.activated.emit(widget.currentIndex())
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            old = widget.value()
+            widget.stepBy(2 if widget.value() + 2 * widget.singleStep() <= widget.maximum() else -2)
+            widget.editingFinished.emit()
+            return widget.value() != old
+        elif isinstance(widget, QSlider):
+            widget.setValue(widget.value() + (2 if widget.value() + 2 <= widget.maximum() else -2))
+        elif isinstance(widget, QAbstractButton):
+            old = widget.isChecked()
+            widget.click()
+            return widget.isChecked() != old
+        elif isinstance(widget, QLineEdit):
+            try:
+                widget.setText(str(float(widget.text()) + 0.1))
+            except ValueError:
+                return False
+            widget.editingFinished.emit()
+        return True
+
+    missing = []
+    for root in (system, spectra, w.wavefunction.inspector, w.appearancePanel):
+        for widget in root.findChildren(QWidget):
+            if widget in excluded or id(widget) in inDialog:
+                continue
+            if isinstance(widget, QAbstractButton) and not widget.isCheckable():
+                continue
+            if isinstance(widget, QLineEdit) and (widget.isReadOnly() or isinstance(widget.parentWidget(),
+                                                                                    (QAbstractSpinBox, QComboBox))):
+                continue
+            if not isinstance(widget, (QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QAbstractButton, QLineEdit)):
+                continue
+            w.markSessionSaved()
+            if not change(widget):
+                continue
+            w.updateModified()
+            if not w.isWindowModified():
+                missing.append(f'{type(widget).__name__} {widget.text() if isinstance(widget, QAbstractButton) else ""}'
+                               f' ({widget.toolTip().splitlines()[0] if widget.toolTip() else "no tooltip"})')
+    assert not missing, 'Not in sessions: ' + '; '.join(missing)
+
+
+@pytest.mark.data
+def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
+    """Buttons that change the setup (view, cell origin, cut plane, Q-path, styles) mark the session modified."""
+    from PySide6.QtGui import QColor, QFont
+    from PySide6.QtWidgets import QWidget, QAbstractButton, QToolButton, QColorDialog, QFontDialog, QTabBar, QMessageBox
+    import visual_excitons.gui.main_window as main_window
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Cancel)
+    w = newWindow()
+    w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    w.system.qPathLineEdit.setText('LGZF')
+    assert w.system.setBrillouinZone()
+    injectResults(w)                              # curves to style, a wave function
+    w.sessionPath = 'compared.vxsession'
+    panel, p3, view = w.appearancePanel, w.wavefunction.parameters3DWidget, w.wavefunction.excitonWfWidget
+    # Not part of a setup: files and checks, calculations and exports (their results are, see the other tests)
+    notSetup = {'Browse…', 'Details…', 'Check all BSE', 'Compute dispersion', 'Add spectrum',
+                'Compute its wave function', 'Compute wave function', 'Export figure…', 'Image…', 'Density…'}
+    # Something for each button to change
+    before = {'Set Q-path': lambda: w.system.qPathLineEdit.setText('GLZ'),
+              'Apply': lambda: [edit.setText(text) for edit, text in zip(p3.viewDirLineEdits, ('1', '0', '0'))],
+              'Reset': lambda: p3.setCellOrigin([0.25, 0.0, 0.0]),
+              'Center': lambda: view.setCameraState({**view.cameraState(), 'center': [9.0, 9.0, 9.0]})}
+    dialogs = panel.findChildren(QColorDialog) + panel.findChildren(QFontDialog)
+    inDialog = {id(child) for dialog in dialogs for child in dialog.findChildren(QWidget)}
+
+    missing = []
+    for root in (w.system, w.spectra.inspector, w.wavefunction.inspector, panel):
+        for button in root.findChildren(QAbstractButton):
+            if (button.isCheckable() or id(button) in inDialog or button.text() in notSetup
+                    or isinstance(button.parentWidget(), QTabBar)                    # tab scroll arrows
+                    or (isinstance(button, QToolButton) and button.text())           # section headers
+                    or button is w.system.hspTable.findChild(QAbstractButton)):      # table corner
+                continue
+            before.get(button.text(), lambda: None)()
+            w.markSessionSaved()
+            button.click()
+            if panel.colorDialog.isVisible():
+                panel.colorDialog.setCurrentColor(QColor('#123456'))
+                panel.colorDialog.accept()
+            if panel.fontDialog.isVisible():
+                panel.fontDialog.setCurrentFont(QFont('Serif', 17))
+                panel.fontDialog.accept()
+            w.updateModified()
+            if not w.isWindowModified():
+                missing.append(f'"{button.text()}" ({button.toolTip().splitlines()[0] if button.toolTip() else type(button).__name__})')
+    assert not missing, 'Not in sessions: ' + '; '.join(missing)

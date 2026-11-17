@@ -97,6 +97,12 @@ class MainWindow(QMainWindow):
         self.appearance.remember('styles', get=self.appearanceState, set=self.restoreAppearance)
         self.state.add('appearance', self.appearance)
         self.state.add('appearancePanel', self.appearancePanel.persistence)
+        # The export dialogs' last choices (2D figure, 3D image): in sessions, one
+        # per figure; the dialogs keep them in the settings between sessions
+        self.exports = PersistentState()
+        self.exports.remember('figure', get=self.figureExportState, set=self.restoreFigureExportState)
+        self.exports.remember('image', get=self.imageExportState, set=self.restoreImageExportState)
+        self.state.add('exports', self.exports)
         # A dataset opened for the first time starts from the defaults, not from
         # the parameters of the previous one
         self.datasetDefaults = self.state.values(DATASET)
@@ -983,6 +989,34 @@ class MainWindow(QMainWindow):
         self.exportDensityAction.setEnabled(False)
         self.wavefunction.parameters3DWidget.exportDensityButton.setEnabled(False)
 
+    # The export dialogs' choices, as kept in the settings (see the dialogs)
+
+    IMAGE_EXPORT_KEYS = {'scale': int, 'width': int, 'transparent': bool, 'gizmo': bool, 'cellInfo': bool}
+
+    def figureExportState(self):
+        try:
+            saved = json.loads(self.settings.value('figureExport/options', '{}'))
+        except (TypeError, ValueError):
+            saved = {}
+        return saved if isinstance(saved, dict) else {}
+
+    def restoreFigureExportState(self, state):
+        if isinstance(state, dict):
+            self.settings.setValue('figureExport/options', json.dumps(state))
+
+    def imageExportState(self):
+        state = {}
+        for key, kind in self.IMAGE_EXPORT_KEYS.items():
+            if self.settings.contains(f'imageExport/{key}'):
+                state[key] = self.settings.value(f'imageExport/{key}', type=kind)
+        return state
+
+    def restoreImageExportState(self, state):
+        if isinstance(state, dict):
+            for key, kind in self.IMAGE_EXPORT_KEYS.items():
+                if key in state:
+                    self.settings.setValue(f'imageExport/{key}', kind(state[key]))
+
     @Slot()
     def exportImage(self):
         # The view must have been shown to be rendered
@@ -992,6 +1026,7 @@ class MainWindow(QMainWindow):
         dialog = ImageExportDialog(view, self)
         if dialog.exec() != ImageExportDialog.DialogCode.Accepted:
             return
+        self.modifiedTimer.start()          # its choices are part of the session
         filename, _ = QFileDialog.getSaveFileName(self, 'Export image', self.exportPath(self.exportBaseName() + '.png'),
                                                   IMAGE_FILTERS)
         if not filename:
@@ -1018,6 +1053,7 @@ class MainWindow(QMainWindow):
         name = datasetName(self.dataset or {}) or 'figure'
         dialog = FigureExportDialog(data, styles, defaultName=f'{name}_figure', programVersion=__version__, parent=self)
         dialog.exec()
+        self.modifiedTimer.start()          # its choices are part of the session
         if getattr(dialog, 'savedFile', None):
             self.statusBar().showMessage(f'Saved {dialog.savedFile}', 6000)
 
