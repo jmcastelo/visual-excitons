@@ -34,6 +34,7 @@ Working on the program:
 
 - [Development](docs/development.md): setting up a development copy, and the tests.
 - [Architecture](docs/architecture.md): how the code is organised, data flows, threading, rendering, conventions and pitfalls.
+- [YamboPy issues](docs/yambopy-issues.md): problems found in YamboPy, written to be filed as GitHub issues (and the fixes offered).
 
 ## Future features
 
