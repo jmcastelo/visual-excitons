@@ -20,7 +20,6 @@ from .volume_item import volumeRGBA, FloatVolumeItem
 from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
                        headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData,
                        MSAA_SAMPLES, PrecomputedNormalsMeshData)
-from .wf_geometry import isoMesh, isoSetMesh, volumeColors
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols, ANGSTROM_TO_BOHR
 
 
@@ -191,15 +190,6 @@ class WavefunctionView(gl.GLViewWidget):
 
     # Probability density: geometry computed by wf_geometry (possibly in the
     # worker thread), uploaded here
-
-    def plotWfIso(self, wf, level, transform, opacity):
-        self.showIsoMesh(isoMesh(wf, level), level, transform, opacity)
-
-    def plotWfIsoSet(self, wf, numLevels, transform, opacity):
-        self.showIsoSetMesh(isoSetMesh(wf, numLevels, self.colormap, opacity), transform)
-
-    def plotWfVol(self, wf, sliceDensity, transform, opacity=0.8, contrast=1.0):
-        self.showVolume(volumeColors(wf, self.colormap, opacity, contrast, sliceDensity), sliceDensity, transform)
 
     def showIsoMesh(self, mesh, level, transform, opacity):
         """The isosurface at `level`: `mesh` = (vertices, faces, normals) from wf_geometry.isoMesh."""
