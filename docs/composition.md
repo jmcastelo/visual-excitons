@@ -17,6 +17,7 @@ The weight of each k-point of the grid, relative to the largest, in the first Br
 - `Scale`: linear, or logarithmic, which brings out contributions down to 0.1 % of the largest.
 - `Colormap`: the colors of the weights.
 - `Q-path`: the path of the dispersion, where it lies in what is shown.
+- `Neighbours` (on planes): the zone alone, or with 1 to 3 rings of its periodic replicas around it, to see weights that lie across the zone's edges (e.g. at K and K′ of a hexagonal zone) as one patch. The first ring is the 6 neighbours of a hexagonal zone (7 zones in all; 31 and 61 with 2 and 3 rings) or the 8 of a square one. On a plane of a bulk crystal away from Γ, the zone's section is not the same in every zone the plane crosses: each replica is the section of its own zone (displaced by a reciprocal lattice vector, possibly with a component along the normal), so together they tile the plane exactly.
 
 For a **layer** (a 2D material, with vacuum along one lattice vector), the map is the plane of its k-points: each k-point is a tile (the cell of the grid around it: hexagons for a hexagonal grid), clipped to the zone.
 
@@ -25,7 +26,7 @@ For a **bulk crystal**, `View` chooses:
 - `3D`: the Brillouin zone as a wireframe, with the k-points as lit spheres sized and colored by their weight, translucent (`Opacity`, 0.6 by default) so that those behind show through. `Hide below` leaves out those weighing less than a share of the largest (5 % by default). Drag to rotate, as the 3D view of the wave function; the axes gizmo shows the Cartesian axes and the reciprocal lattice vectors.
 - `Plane`: the k-points of one plane of the grid perpendicular to c (`0` goes through Γ), on the section of the zone by that plane; or `Sum`, all the planes added up (with the special points and Q-path of the plane through Γ).
 
-`Export image…` saves what the tab shows as an image.
+`Export image…` saves what the tab shows as an image. `Export figure…` draws it as a [publication figure](spectra.md#publication-figures) with Matplotlib (as PDF, SVG, PNG... or a script that recreates it): the plane map with its tiles, zones (and neighbours), special points and Q-path, and, for bulk crystals, the zone in 3D seen from the direction of the 3D view, with the k-points sized and colored by their weight. The colormap, scale, particle, plane and threshold are those shown.
 
 ## Transitions
 

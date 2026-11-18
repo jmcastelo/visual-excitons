@@ -177,6 +177,10 @@ class MainWindow(QMainWindow):
         self.compositionPanel.compositionNeeded.connect(self.updateComposition)
         self.compositionPanel.exportDataRequested.connect(self.exportComposition)
         self.compositionPanel.exportImageRequested.connect(self.exportCompositionImage)
+        self.compositionPanel.exportFigureRequested.connect(lambda: self.exportFigure(
+            ['kspace3d' if self.compositionPanel.viewComboBox.currentIndex() == 0 else 'kspace']))
+        self.wavefunction.analysisWidget.exportFigureRequested.connect(lambda: self.exportFigure(
+            ['planeCut' if self.wavefunction.analysisWidget.currentIndex() == 0 else 'distance']))
         # Symmetry and spin (on request), kept on disk between sessions: the representation matrices
         self.calculations.diskCacheFolder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
         self.compositionPanel.characterRequested.connect(self.calculations.computeCharacter)
@@ -292,9 +296,9 @@ class MainWindow(QMainWindow):
         exportImageAction.triggered.connect(self.exportImage)
         fileMenu.addAction(exportImageAction)
 
-        exportFigureAction = QAction('Export 2D &figure…', self)
+        exportFigureAction = QAction('Export &figure…', self)
         exportFigureAction.setShortcut(QKeySequence('Ctrl+Shift+F'))
-        exportFigureAction.setStatusTip('The 2D plots as a publication figure, or a script that recreates it with Matplotlib')
+        exportFigureAction.setStatusTip('The plots as a publication figure, or a script that recreates it with Matplotlib')
         exportFigureAction.triggered.connect(self.exportFigure)
         fileMenu.addAction(exportFigureAction)
 
@@ -1178,15 +1182,21 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f'Image ({width} × {height}) saved to {filename}', 6000)
 
     @Slot()
-    def exportFigure(self):
-        data = figureData(self.calculations)
+    def exportFigure(self, panels=None):
+        """The figure export dialog; `panels`: those to check at first (the panel's own, from its button)."""
+        data = figureData(self.calculations, self.compositionPanel.figureData(),
+                          self.wavefunction.analysisWidget.figureData())
         if not figures.availablePanels(data):
-            QMessageBox.information(self, 'Export 2D figure',
-                                    'Nothing to export yet: compute a dispersion, absorption spectra or a band structure.')
+            QMessageBox.information(self, 'Export figure',
+                                    'Nothing to export yet: compute a dispersion, absorption spectra, a band '
+                                    "structure, an exciton's composition or a wave function's analysis.")
             return
+        if panels:
+            panels = [p for p in panels if p in figures.availablePanels(data)] or None
         styles = figureStyles(self.dispersionStyle, self.absorptionStyle, self.bandStructureStyle)
         name = datasetName(self.dataset or {}) or 'figure'
-        dialog = FigureExportDialog(data, styles, defaultName=f'{name}_figure', programVersion=__version__, parent=self)
+        dialog = FigureExportDialog(data, styles, defaultName=f'{name}_figure', programVersion=__version__, parent=self,
+                                    panels=panels)
         dialog.exec()
         self.modifiedTimer.start()          # its choices are part of the session
         if getattr(dialog, 'savedFile', None):

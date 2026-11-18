@@ -2,7 +2,7 @@
 
 Visual Excitons is a graphical program to explore the excitons computed with [Yambo](https://www.yambo-code.eu/), reading its databases through [YamboPy](https://github.com/yambo-code/yambopy). It plots the excitonic dispersion along a path of the Brillouin zone, the absorption spectra at each Q-point and the excitonic band structure at any Q-point, and shows where an exciton lives in reciprocal space and what it is made of. It also computes and draws the wave function of a chosen exciton in real space, as isosurfaces or a volume, together with the crystal structure, and analyses its size.
 
-Its panels can be arranged freely, or by layouts for each step of the work. Calculations run in the background, and whole setups can be saved as session files. The 2D plots can be exported as publication figures, or as Matplotlib scripts that recreate them, and the 3D view as images or density files for VESTA and similar programs.
+Its panels can be arranged freely, or by layouts for each step of the work. Calculations run in the background, and whole setups can be saved as session files. The 2D plots, the k-space plots of an exciton and the analysis of its wave function can be exported as publication figures, or as Matplotlib scripts that recreate them, and the 3D view as images or density files for VESTA and similar programs.
 
 **Under development.**
 

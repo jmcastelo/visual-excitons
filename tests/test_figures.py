@@ -204,3 +204,88 @@ def test_styles_from_the_app(qapp):
     style = penStyle(pen, 'star', 10)
     assert style['color'] == '#123456' and style['dash'] == '--' and style['marker'] == '*'
     assert style['width'] == pytest.approx(1.6) and style['markerSize'] == pytest.approx(5.5)
+
+
+# The Composition and Analysis panels' plots
+
+def hexagon(radius, angle=0.0):
+    a = angle + np.arange(6) * np.pi / 3
+    return np.column_stack([np.cos(a), np.sin(a)]) * radius
+
+
+def panelData():
+    """Data of the k-space, plane cut and distance panels, as the Composition and Analysis panels give them."""
+    lookup = np.linspace(0, 255, 256)[:, None] * np.array([[1.0, 0.5, 0.2]])
+    grid = np.array([(i, j) for i in range(-3, 4) for j in range(-3, 4)], dtype=float) * 0.2
+    values = np.exp(-np.sum(grid ** 2, axis=1) / 0.1)
+    zones = [{'points': grid + shift, 'values': values, 'outline': hexagon(0.7, np.pi / 6) + shift}
+             for shift in [np.zeros(2), *hexagon(0.7 * np.sqrt(3))]]
+    r = np.linspace(0, 30, 120)
+    probability = r * np.exp(-r / 5) / 25
+    corners = hexagon(1.0)
+    edges = np.array([[(*a, z), (*b, z)] for z in (-0.5, 0.5) for a, b in zip(corners, np.roll(corners, -1, axis=0))]
+                     + [[(*a, -0.5), (*a, 0.5)] for a in corners])           # a hexagonal prism
+    return {
+        'kspace': {'zones': zones, 'tile': hexagon(0.115), 'labels': [(0.0, 0.0, 'Γ'), (0.7, 0.0, 'K')],
+                   'path': np.array([[0, 0], [0.7, 0], [np.nan, np.nan], [0, 0.3], [0, 0.6]]), 'scale': 'log',
+                   'colormap': lookup, 'title': 'Exciton 1 at Q1, electron'},
+        'kspace3d': {'edges': edges, 'points': np.column_stack([grid, 0 * grid[:, 0]]), 'values': values,
+                     'sizes': values, 'labels': [(0.0, 0.0, 0.0, 'Γ')], 'path': None, 'scale': 'linear',
+                     'colormap': lookup, 'opacity': 0.7, 'view': (30.0, -45.0)},
+        'planeCut': {'values': np.outer(np.hanning(40), np.hanning(50)), 'extent': [-10.0, 10.0, -8.0, 8.0],
+                     'levels': [0.0, 1.0], 'atoms': [{'x': 1.0, 'y': 2.0, 'radius': 0.7, 'color': [0.5, 0.2, 0.6],
+                                                      'alpha': 0.8, 'symbol': 'Bi'}],
+                     'particle': True, 'particleLabel': 'hole', 'colormap': lookup},
+        'distance': {'r': r, 'probability': probability, 'cumulative': np.cumsum(probability) * (r[1] - r[0]),
+                     'mean': 10.0, 'r90': 19.5, 'particle': 'hole', 'other': 'electron'},
+    }
+
+
+PANEL_KINDS = ['kspace', 'kspace3d', 'planeCut', 'distance']
+
+
+def test_panels_of_the_composition_and_analysis():
+    data = panelData()
+    assert availablePanels(data) == PANEL_KINDS
+    for panel in PANEL_KINDS:
+        figure = buildFigure(data, {}, {'panels': [panel], 'panelLabels': False})
+        ax = figure.axes[0]
+        assert ax.collections or ax.images or ax.lines, panel
+        assert ax.child_axes or len(figure.axes) >= 2, panel        # a colorbar (beside it), or the cumulative axis
+    zone3d = buildFigure(data, {}, {'panels': ['kspace3d']}).axes[0]
+    assert zone3d.name == '3d' and (zone3d.elev, zone3d.azim) == (30.0, -45.0)
+    tiles = buildFigure(data, {}, {'panels': ['kspace']}).axes[0].collections
+    assert len(tiles) == 7 and all(t.get_clip_path() is not None for t in tiles)     # each clipped to its zone
+    # With the spectra, in one figure
+    both = buildFigure({**sampleData(), **data}, STYLES, {'panels': ['dispersion', 'kspace', 'distance']})
+    assert len(both.axes) >= 3
+
+
+def test_panel_data_round_trip_and_script(tmp_path):
+    data = panelData()
+    saveData(tmp_path / 'd.npz', data, {}, figures.DEFAULT_OPTIONS)
+    loaded, _, _ = loadData(tmp_path / 'd.npz')
+    np.testing.assert_array_equal(loaded['kspace']['zones'][3]['points'], data['kspace']['zones'][3]['points'])
+    assert loaded['kspace']['labels'][1] == [0.7, 0.0, 'K'] and loaded['kspace3d']['path'] is None
+    assert loaded['planeCut']['atoms'][0]['symbol'] == 'Bi' and loaded['distance']['r90'] == 19.5
+    script, _ = writeFigureScript(tmp_path / 'panels.py', data, {}, {'panels': PANEL_KINDS, 'arrangement': 'column'},
+                                  figureFormat='png')
+    result = subprocess.run([sys.executable, '-I', str(script)], cwd=tmp_path.parent, capture_output=True, text=True,
+                            timeout=180)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / 'panels.png').stat().st_size > 10_000
+
+
+def test_dialog_checks_the_panel_asked_for(qtbot):
+    from PySide6.QtCore import QSettings, Qt
+    from visual_excitons.gui import figure_export
+    QSettings('VisualExcitons', 'VisualExcitons').remove('figureExport')
+    data = {**sampleData(), **panelData()}
+    del data['planeCut']
+    dialog = figure_export.FigureExportDialog(data, STYLES, panels=['distance'])
+    qtbot.addWidget(dialog)
+    assert dialog.options()['panels'] == ['distance']
+    items = {dialog.panelList.item(i).data(Qt.ItemDataRole.UserRole): dialog.panelList.item(i)
+             for i in range(dialog.panelList.count())}
+    assert not (items['planeCut'].flags() & Qt.ItemFlag.ItemIsEnabled)
+    assert not dialog.preview.pixmap().isNull()

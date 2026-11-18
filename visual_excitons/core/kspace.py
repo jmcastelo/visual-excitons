@@ -39,7 +39,7 @@ def planeIndices(grid, axis):
     return list(range(-((n - 1) // 2), n // 2 + 1))
 
 
-def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None):
+def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None, replicas=0):
     """
     A map of `values` (one per k-point) on a plane perpendicular to lattice
     vector `axis`: the plane k_axis = plane/N, or, if `plane` is None, the
@@ -48,7 +48,10 @@ def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None):
     Returns a dict with 'points' (m, 2) and 'values' (m,) of the tiles'
     centres, 'tile' (t, 2) (the shape of each tile, around its centre),
     'outline' (o, 2) (the zone, or its section) and 'red' (m, 3) (the reduced
-    coordinates of each point), lengths in Å⁻¹, in the plane basis (e1, e2).
+    coordinates of each point), lengths in Å⁻¹, in the plane basis (e1, e2),
+    for the zone; and 'zones': the zone and `replicas` rings of its periodic
+    replicas around it (the zone first, then the nearest), each a dict with
+    the same keys and its 'shift' (2,), the zones of the plane tiling it.
     """
     lat, rlat = np.asarray(lat, dtype=float), np.asarray(rlat, dtype=float)
     red = np.asarray(red_kpoints, dtype=float)
@@ -56,6 +59,13 @@ def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None):
     grid = [int(n) for n in grid]
     normal, e1, e2 = planeBasis(lat, axis)
     others = [i for i in range(3) if i != axis]
+
+    def project(points):
+        points = np.asarray(points, dtype=float).reshape(-1, 3)
+        return np.column_stack([points @ e1, points @ e2]) * TO_INVERSE_ANGSTROM
+
+    # The tile of each point: the 2D Voronoi cell of the grid in the plane
+    tile = wigner_seitz_polygon(project([rlat[i] / grid[i] for i in others]))
 
     if plane is None or grid[axis] == 1:
         # The planes summed: a 2D grid of the other two reciprocal vectors (in the plane),
@@ -69,9 +79,11 @@ def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None):
         prism[axis] = normal * 10 * np.max(np.linalg.norm(rlat, axis=1))
         cell = wigner_seitz_cell(prism)
         kpoints, indices = fill_wigner_seitz(red2, prism, cell)
-        outline = plane_section(cell, np.zeros(3), normal)
-        pointValues = summed[indices]
-        pointRed = red2[indices]
+        central = {'points': project(kpoints), 'values': summed[indices], 'red': red2[indices],
+                   'outline': project(plane_section(cell, np.zeros(3), normal))}
+        # The replicas tile the plane: copies shifted by the in-plane reciprocal vectors
+        zones = [dict(central, points=central['points'] + shift, outline=central['outline'] + shift, shift=shift)
+                 for shift in zoneShifts(project([rlat[i] for i in others]), replicas)]
     else:
         cell = wigner_seitz_cell(rlat)
         # Points up to a tile outside the zone too: their tiles fill the edges of the section
@@ -80,21 +92,67 @@ def planeMap(red_kpoints, values, lat, rlat, grid, axis, plane=None):
         margin = 1.5 * step / np.min(np.linalg.norm(cell['face_vectors'], axis=1))
         kpoints, indices = fill_wigner_seitz(red, rlat, cell, tol=margin)
         copies = kpoints @ np.linalg.inv(rlat)
-        on = np.isclose(copies[:, axis], plane / grid[axis], atol=1e-6)
-        kpoints, indices = kpoints[on], indices[on]
-        point = plane / grid[axis] * lat[axis] / (lat[axis] @ lat[axis])
-        outline = plane_section(cell, point, normal)
-        pointValues = values[indices]
-        pointRed = copies[on]
 
-    def project(points):
-        points = np.asarray(points, dtype=float).reshape(-1, 3)
-        return np.column_stack([points @ e1, points @ e2]) * TO_INVERSE_ANGSTROM
+        def section(level):
+            """The points of the zone on the plane k_axis = level (reduced), and its outline there."""
+            on = np.isclose(copies[:, axis], level, atol=1e-6)
+            point = level * lat[axis] / (lat[axis] @ lat[axis])
+            return {'points': project(kpoints[on]), 'values': values[indices[on]], 'red': copies[on],
+                    'outline': project(plane_section(cell, point, normal))}
+        level = plane / grid[axis]
+        central = section(level)
+        # The replicas: the zones displaced by G = i b1 + j b2 + l b3 (in the reduced basis of
+        # the other axes and `axis`) that this plane crosses. Their points are those of the
+        # central zone on the plane k_axis = level - l, displaced by G; with l != 0 they fill
+        # the gaps that in-plane copies of the central section would leave.
+        zones = [dict(central, shift=np.zeros(2))]
+        if replicas > 0:
+            inPlane = project([rlat[i] for i in others])
+            radius = replicas * np.sqrt(2) * np.min(np.linalg.norm(inPlane, axis=1)) * (1 + 1e-6)
+            span = 4 * replicas + 2
+            sections = {}
+            for i in range(-span, span + 1):
+                for j in range(-span, span + 1):
+                    for l in range(-2, 3):
+                        if i == j == l == 0:
+                            continue
+                        g = np.zeros(3)
+                        g[others[0]], g[others[1]], g[axis] = i, j, l
+                        g = g @ rlat
+                        shift = project(g)[0]
+                        if np.linalg.norm(shift) > radius:
+                            continue
+                        if l not in sections:
+                            sections[l] = section(level - l)
+                        zone = sections[l]
+                        if len(zone['outline']) < 3:
+                            continue                        # the plane misses this zone
+                        zones.append(dict(zone, points=zone['points'] + shift, outline=zone['outline'] + shift,
+                                          shift=shift))
+            # Nearest first (as zoneShifts)
+            zones[1:] = sorted(zones[1:], key=lambda z: (round(float(np.linalg.norm(z['shift'])), 9),
+                                                         float(np.arctan2(z['shift'][1], z['shift'][0]))))
+    return dict(central, tile=tile, zones=zones)
 
-    # The tile of each point: the 2D Voronoi cell of the grid in the plane
-    steps = project([rlat[i] / grid[i] for i in others])
-    return {'points': project(kpoints), 'values': pointValues, 'red': pointRed,
-            'tile': wigner_seitz_polygon(steps), 'outline': project(outline)}
+
+def zoneShifts(vectors, rings):
+    """
+    The displacements of the zone and of `rings` rings of its periodic replicas,
+    combinations of the two in-plane reciprocal vectors `vectors` (2D), the zone
+    itself first. Ring n: the zones whose centres are within n·√2 of the
+    shortest vector, so that the first ring is the 6 neighbours of a hexagonal
+    zone and the 8 of a square one.
+    """
+    vectors = np.asarray(vectors, dtype=float)
+    if rings <= 0:
+        return np.zeros((1, 2))
+    radius = rings * np.sqrt(2) * np.min(np.linalg.norm(vectors, axis=1)) * (1 + 1e-6)
+    span = 4 * rings + 2
+    combos = np.array([(i, j) for i in range(-span, span + 1) for j in range(-span, span + 1)], dtype=float)
+    shifts = combos @ vectors
+    shifts = shifts[np.linalg.norm(shifts, axis=1) <= radius]
+    order = np.lexsort((np.arctan2(shifts[:, 1], shifts[:, 0]), np.round(np.linalg.norm(shifts, axis=1), 9)))
+    return shifts[order]
 
 
 def zonePoints(red_kpoints, values, rlat):

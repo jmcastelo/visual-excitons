@@ -17,6 +17,21 @@ Data (`data`, a dict; lengths of the Q-path in its own units, energies in eV):
   'brightIndices', 'brightIntensities', 'darkEnergy'}, ...]
 - 'bands': {'k': (n,), 'bands': (bands, n), 'weights': (bands, n), 'ticks', 'labels'}
 - 'selected': {'dispersion': [(x, y), ...], 'absorption': [(energy, absorption), ...]}
+- 'kspace': the weights of an exciton's k-points on a plane of the Brillouin
+  zone (lengths in 1/Å): {'zones': [{'points': (m, 2), 'values': (m,) relative
+  to the largest, 'outline': (o, 2)}, ...] (the zone first, then its
+  replicas), 'tile': (t, 2) (the shape of a k-point's tile), 'labels':
+  [(x, y, text)], 'path': (n, 2) with NaN gaps or None, 'scale': 'linear' or
+  'log', 'colormap': (256, 3) RGB (0-255), 'title'}
+- 'kspace3d': the same in the zone in 3D: {'edges': (n, 2, 3), 'points': (m, 3),
+  'values': (m,), 'sizes': (m,) 0-1, 'labels': [(x, y, z, text)], 'path':
+  (n, 3) or None, 'scale', 'colormap', 'opacity', 'view': (elevation, azimuth)}
+- 'planeCut': a plane cut of the wave function's density: {'values': (t, s),
+  'extent': [s0, s1, t0, t1] (Å), 'levels': [low, high], 'atoms': [{'x', 'y',
+  'radius', 'color', 'alpha', 'symbol'}], 'particle' (the fixed particle at the
+  origin), 'particleLabel', 'colormap'}
+- 'distance': the distance of the other particle from the fixed one: {'r' (Å),
+  'probability' (1/Å), 'cumulative', 'mean', 'r90', 'particle', 'other'}
 
 Styles (`styles`, a dict per plot): {'curves': [{'color', 'width', 'dash',
 'marker', 'markerSize'}, ...]}, and for 'bands' also 'fill' (color).
@@ -32,7 +47,7 @@ from matplotlib.figure import Figure
 import numpy as np
 
 DEFAULT_OPTIONS = {
-    'panels': ['dispersion', 'absorption'],   # in order; any of 'dispersion', 'absorption', 'bands'
+    'panels': ['dispersion', 'absorption'],   # in order; any of PANELS
     'arrangement': 'row',                     # 'row' or 'column'
     'shareEnergy': False,       # dispersion and absorption on one energy axis (absorption rotated)
     'width': 8.6,               # cm (8.6: one column of a two-column journal; 17.8: two columns)
@@ -59,7 +74,13 @@ FONTS = {
 }
 
 TITLES = {'dispersion': 'Excitonic dispersion', 'absorption': 'Excitonic absorption',
-          'bands': 'Excitonic band structure'}
+          'bands': 'Excitonic band structure', 'kspace': 'Exciton in k-space',
+          'kspace3d': 'Exciton in the Brillouin zone', 'planeCut': 'Plane cut of the wave function',
+          'distance': 'Electron-hole distance'}
+PANELS = list(TITLES)
+
+# Smallest weight shown on a logarithmic scale (relative to the largest)
+LOG_FLOOR = 1e-3
 
 ENERGY_LABEL = 'Energy (eV)'
 ABSORPTION_LABEL = 'Absorption (arb. units)'
@@ -271,7 +292,159 @@ def availablePanels(data):
         panels.append('absorption')
     if data.get('bands') and len(data['bands'].get('k', [])):
         panels.append('bands')
+    for panel in ('kspace', 'kspace3d', 'planeCut', 'distance'):
+        if data.get(panel):
+            panels.append(panel)
     return panels
+
+
+def colormapOf(lookup):
+    """A Matplotlib colormap from a table of RGB colors (0-255)."""
+    from matplotlib.colors import ListedColormap
+    if lookup is None or not len(lookup):
+        return matplotlib.colormaps['viridis']
+    return ListedColormap(np.asarray(lookup, dtype=float) / 255.0)
+
+
+def scaledWeights(values, scale):
+    """Weights relative to the largest, as colors take them: linear, or logarithmic down to LOG_FLOOR."""
+    values = np.asarray(values, dtype=float)
+    if scale == 'log':
+        return (np.log10(np.clip(values, LOG_FLOOR, 1.0)) - np.log10(LOG_FLOOR)) / -np.log10(LOG_FLOOR)
+    return np.clip(values, 0.0, 1.0)
+
+
+def colorbar(figure, ax, mappable, label, shrink=1.0):
+    """
+    A colorbar beside `ax`, as a child of it (it follows the axes, so that a
+    panel of fixed aspect stays centred in its place; a colorbar of the
+    figure's own would pull it to the side of the colorbar).
+    """
+    cax = ax.inset_axes([1.04, (1 - shrink) / 2, 0.045, shrink])
+    return figure.colorbar(mappable, cax=cax, label=label)
+
+
+def weightColorbar(figure, ax, cmap, scale, shrink=1.0):
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    if scale == 'log':
+        norm, label = Normalize(np.log10(LOG_FLOOR), 0.0), r'$\log_{10}$ weight (relative)'
+    else:
+        norm, label = Normalize(0.0, 1.0), 'Weight (relative)'
+    return colorbar(figure, ax, ScalarMappable(norm=norm, cmap=cmap), label, shrink)
+
+
+def drawKSpace(ax, kspace, options, figure):
+    """The weights of an exciton's k-points on a plane: a tile per k-point, clipped to its zone."""
+    from matplotlib.collections import PolyCollection
+    from matplotlib.patches import Polygon
+    cmap = colormapOf(kspace.get('colormap'))
+    tile = np.asarray(kspace['tile'], dtype=float)
+    corners = []
+    for i, zone in enumerate(kspace['zones']):
+        points = np.asarray(zone['points'], dtype=float).reshape(-1, 2)
+        outline = np.asarray(zone['outline'], dtype=float).reshape(-1, 2)
+        if len(points):
+            tiles = PolyCollection(points[:, None, :] + tile[None, :, :], cmap=cmap, edgecolors='face',
+                                   linewidths=0.15, zorder=1)
+            tiles.set_array(scaledWeights(zone['values'], kspace.get('scale', 'linear')))
+            tiles.set_clim(0.0, 1.0)
+            if len(outline) >= 3:
+                tiles.set_clip_path(Polygon(outline, closed=True, transform=ax.transData))
+            ax.add_collection(tiles)
+        if len(outline) >= 3:
+            corners.append(outline)
+            closed = np.vstack([outline, outline[:1]])
+            ax.plot(closed[:, 0], closed[:, 1], color='black' if i == 0 else '0.55',
+                    linewidth=0.8 if i == 0 else 0.5, zorder=3)
+    path = kspace.get('path')
+    if path is not None and len(path):
+        path = np.asarray(path, dtype=float)
+        ax.plot(path[:, 0], path[:, 1], color='black', linewidth=0.8, linestyle='--', zorder=4)
+    for x, y, text in kspace.get('labels', []):
+        ax.plot([x], [y], 'o', color='black', markersize=2, zorder=5)
+        ax.annotate(text, (x, y), xytext=(2, 2), textcoords='offset points', zorder=5)
+    if corners:
+        every = np.vstack(corners)
+        low, high = every.min(axis=0), every.max(axis=0)
+        margin = 0.04 * (high - low).max()
+        ax.set_xlim(low[0] - margin, high[0] + margin)
+        ax.set_ylim(low[1] - margin, high[1] + margin)
+    ax.set_aspect('equal')
+    ax.set_xlabel(r'$k_1$ (Å$^{-1}$)')
+    ax.set_ylabel(r'$k_2$ (Å$^{-1}$)')
+    weightColorbar(figure, ax, cmap, kspace.get('scale', 'linear'))
+
+
+def drawKSpace3D(ax, zone, options, figure):
+    """An exciton's k-points in the Brillouin zone in 3D: sized and colored by their weight."""
+    from mpl_toolkits.mplot3d.art3d import Line3DCollection
+    cmap = colormapOf(zone.get('colormap'))
+    edges = np.asarray(zone['edges'], dtype=float)
+    ax.add_collection3d(Line3DCollection(edges, colors='black', linewidths=0.6))
+    points = np.asarray(zone['points'], dtype=float).reshape(-1, 3)
+    if len(points):
+        sizes = np.asarray(zone['sizes'], dtype=float)
+        ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=6 + 90 * sizes,
+                   c=scaledWeights(zone['values'], zone.get('scale', 'linear')), cmap=cmap, vmin=0.0, vmax=1.0,
+                   alpha=zone.get('opacity', 0.8), edgecolors='none', depthshade=True)
+    path = zone.get('path')
+    if path is not None and len(path):
+        path = np.asarray(path, dtype=float)
+        ax.plot(path[:, 0], path[:, 1], path[:, 2], color='black', linewidth=0.8, linestyle='--')
+    for x, y, z, text in zone.get('labels', []):
+        ax.text(x, y, z, text)
+    every = edges.reshape(-1, 3)
+    centre, half = every.mean(axis=0), (every.max(axis=0) - every.min(axis=0)).max() / 2
+    for setter, c in zip((ax.set_xlim, ax.set_ylim, ax.set_zlim), centre):
+        setter(c - half, c + half)
+    ax.set_box_aspect((1, 1, 1))
+    ax.set_axis_off()
+    elevation, azimuth = zone.get('view', (20.0, -60.0))
+    ax.view_init(elev=elevation, azim=azimuth)
+    weightColorbar(figure, ax, cmap, zone.get('scale', 'linear'), shrink=0.7)
+
+
+def drawPlaneCut(ax, cut, options, figure):
+    """The density of the wave function on a plane, with the atoms near it and the fixed particle."""
+    from matplotlib.patches import Circle
+    cmap = colormapOf(cut.get('colormap'))
+    low, high = cut.get('levels', (0.0, 1.0))
+    image = ax.imshow(np.asarray(cut['values'], dtype=float), extent=cut['extent'], origin='lower', cmap=cmap,
+                      vmin=low, vmax=high, interpolation='nearest', zorder=1)
+    for atom in cut.get('atoms', []):
+        color = list(atom['color'])
+        ax.add_patch(Circle((atom['x'], atom['y']), atom['radius'], facecolor=color, edgecolor='black',
+                            linewidth=0.4, alpha=atom.get('alpha', 1.0), zorder=3))
+        ax.annotate(atom['symbol'], (atom['x'], atom['y']), ha='center', va='center', color='white',
+                    fontsize=0.75 * options['fontSize'], alpha=atom.get('alpha', 1.0), zorder=4)
+    if cut.get('particle'):
+        ax.plot([0.0], [0.0], marker='*', color='white', markeredgecolor='black', markeredgewidth=0.5,
+                markersize=8, zorder=5)
+    ax.set_xlim(cut['extent'][0], cut['extent'][1])
+    ax.set_ylim(cut['extent'][2], cut['extent'][3])
+    ax.set_aspect('equal')
+    ax.set_xlabel('along u (Å)')
+    ax.set_ylabel('along v (Å)')
+    colorbar(figure, ax, image, 'Density (relative)')
+
+
+def drawDistance(ax, distance, options):
+    """The probability of the distance between the particles, and its cumulative on a second axis."""
+    r = np.asarray(distance['r'], dtype=float)
+    ax.plot(r, np.asarray(distance['probability'], dtype=float), color='#4682e6', linewidth=1.2)
+    for value, label, color in ((distance['mean'], 'mean', '#e6781e'), (distance['r90'], '90%', '0.5')):
+        ax.axvline(value, color=color, linewidth=0.8, linestyle=':')
+        ax.annotate(label, (value, 1.0), xycoords=('data', 'axes fraction'), xytext=(2, -8),
+                    textcoords='offset points', color=color, fontsize=0.85 * options['fontSize'])
+    ax.set_xlim(0.0, r.max() if len(r) else 1.0)
+    ax.set_ylim(bottom=0.0)
+    ax.set_xlabel(f'Distance from the {distance.get("particle", "fixed particle")} (Å)')
+    ax.set_ylabel(r'Probability (Å$^{-1}$)')
+    cumulative = ax.twinx()
+    cumulative.plot(r, np.asarray(distance['cumulative'], dtype=float), color='black', linewidth=0.8, linestyle='--')
+    cumulative.set_ylim(0.0, 1.02)
+    cumulative.set_ylabel('Cumulative')
 
 
 def buildFigure(data, styles, options=None):
@@ -279,7 +452,8 @@ def buildFigure(data, styles, options=None):
     options = {**DEFAULT_OPTIONS, **(options or {})}
     panels = [panel for panel in options['panels'] if panel in availablePanels(data)]
     if not panels:
-        raise ValueError('Nothing to draw: compute a dispersion, absorption spectra or a band structure first')
+        raise ValueError('Nothing to draw: compute a dispersion, absorption spectra, a band structure, an '
+                         "exciton's composition or a wave function first")
 
     with matplotlib.rc_context(rcParameters(options)):
         figure = Figure(figsize=(options['width'] / 2.54, options['height'] / 2.54), dpi=100, layout='constrained')
@@ -314,6 +488,9 @@ def buildFigure(data, styles, options=None):
         axes = {}
         for p in panels:
             cell = cells[p] if (bars and p == 'absorption') else spans[p]
+            if p == 'kspace3d':
+                axes[p] = figure.add_subplot(cell, projection='3d')
+                continue
             sharey = axes.get('dispersion') if (share and p == 'absorption') else None
             axes[p] = figure.add_subplot(cell, sharey=sharey)
         barsAx = figure.add_subplot(barCell, sharex=axes['absorption']) if bars else None
@@ -335,8 +512,16 @@ def buildFigure(data, styles, options=None):
                     shown = [s['absorption'][(s['energy'] >= low) & (s['energy'] <= high)] for s in data['absorption']]
                     top = max((v.max() for v in shown if len(v)), default=1.0)
                     ax.set_xlim(0, 1.08 * top)
-            else:
+            elif p == 'bands':
                 drawBands(ax, data['bands'], styles.get('bands', {}), options)
+            elif p == 'kspace':
+                drawKSpace(ax, data['kspace'], options, figure)
+            elif p == 'kspace3d':
+                drawKSpace3D(ax, data['kspace3d'], options, figure)
+            elif p == 'planeCut':
+                drawPlaneCut(ax, data['planeCut'], options, figure)
+            elif p == 'distance':
+                drawDistance(ax, data['distance'], options)
             if options['titles'] and not (options['panelLabels'] and len(panels) > 1):
                 ax.set_title(TITLES[p], loc='left', pad=3)
 
@@ -364,14 +549,14 @@ def saveData(filename, data, styles, options):
     def store(value, name):
         if isinstance(value, dict):
             return {key: store(item, f'{name}.{key}') for key, item in value.items()}
-        if isinstance(value, (list, tuple)) and value and not isinstance(value[0], (str, int, float)):
+        if isinstance(value, (list, tuple)):
             return [store(item, f'{name}.{i}') for i, item in enumerate(value)]
         if isinstance(value, np.ndarray):
             arrays[name] = value
             return f'array:{name}'
         if isinstance(value, np.generic):
             return value.item()
-        return list(value) if isinstance(value, tuple) else value
+        return value
 
     content = {'data': store(data, 'data'), 'styles': store(styles, 'styles'), 'options': store(options, 'options')}
     np.savez_compressed(filename, content=json.dumps(content), **arrays)

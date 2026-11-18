@@ -5,8 +5,8 @@ distribution of distances from the fixed particle. Lengths shown in angstrom.
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QRectF, QSize
-from PySide6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame
+from PySide6.QtCore import Qt, QRectF, QSize, Signal
+from PySide6.QtWidgets import QTabWidget, QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame, QPushButton
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM, chemical_symbols, jmol_colors, covalent_radii
 from .theme import PLOT_COLORS
@@ -55,9 +55,16 @@ def scrollableTab(plot, *labels):
 
 
 class AnalysisWidget(QTabWidget):
+    exportFigureRequested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDocumentMode(True)
+        self.exportFigureButton = QPushButton('Export figure…')
+        self.exportFigureButton.setToolTip('The plot of this tab, as a Matplotlib figure or script')
+        self.exportFigureButton.setFlat(True)
+        self.exportFigureButton.clicked.connect(self.exportFigureRequested)
+        self.setCornerWidget(self.exportFigureButton, Qt.Corner.TopRightCorner)
         self.dark = False
         self.plots = []
 
@@ -129,6 +136,7 @@ class AnalysisWidget(QTabWidget):
     # Content
 
     def clear(self, message='Compute a wave function to analyse it.'):
+        self.lastCut = self.lastRadial = None
         self.image.clear()
         self.atomsItem.clear()
         self.particleItem.clear()
@@ -142,9 +150,11 @@ class AnalysisWidget(QTabWidget):
         self.warning.hide()
 
     def setColormap(self, colormap):
+        self.colormap = colormap
         self.colorBar.setColorMap(colormap)
 
     def showCut(self, cut, atoms, particleLabel, offset):
+        self.lastCut = (cut, atoms, particleLabel, offset)
         """
         `cut` from analysis.planeCut; `atoms`: (numbers, in-plane positions,
         distances to the plane) from analysis.atomsNearPlane, lengths in Bohr.
@@ -190,6 +200,7 @@ class AnalysisWidget(QTabWidget):
         self.cutPlot.getPlotItem().enableAutoRange()
 
     def showRadial(self, result, particleLabel):
+        self.lastRadial = (result, particleLabel)
         """`result` from analysis.radialDistribution (lengths in Bohr)."""
         r = result['r'] * BOHR_TO_ANGSTROM
         self.radialCurve.setData(r, result['probability'] / BOHR_TO_ANGSTROM, stepMode=None)
@@ -212,6 +223,41 @@ class AnalysisWidget(QTabWidget):
             self.warning.show()
         else:
             self.warning.hide()
+
+    # Matplotlib figures
+
+    def figureData(self):
+        """The plane cut and the distance distribution shown, as data for core.figures ({} if none)."""
+        data = {}
+        if self.lastCut is not None:
+            cut, (numbers, positions, distances), particleLabel, offset = self.lastCut
+            s, t = cut['s'] * BOHR_TO_ANGSTROM, cut['t'] * BOHR_TO_ANGSTROM
+            step = (s[1] - s[0]) if len(s) > 1 else 1.0
+            values = np.asarray(cut['values'], dtype=float)
+            maximum = float(np.nanmax(values)) if np.isfinite(values).any() else 1.0
+            tolerance = max(np.abs(distances).max(), 1e-9) if len(distances) else 1.0
+            atoms = []
+            for z, (x, y), d in zip(numbers, np.asarray(positions) * BOHR_TO_ANGSTROM, distances):
+                atoms.append({'x': float(x), 'y': float(y), 'radius': float(covalent_radii[z]) / 2,
+                              'color': [float(c) for c in jmol_colors[z]], 'alpha': float(1.0 - 0.6 * abs(d) / tolerance),
+                              'symbol': chemical_symbols[z]})
+            colormap = getattr(self, 'colormap', None) or pg.colormap.get('viridis')
+            data['planeCut'] = {
+                'values': values, 'extent': [float(s[0] - step / 2), float(s[-1] + step / 2),
+                                             float(t[0] - step / 2), float(t[-1] + step / 2)],
+                'levels': [0.0, maximum if maximum > 0 else 1.0], 'atoms': atoms,
+                'particle': abs(offset) < 1e-9, 'particleLabel': particleLabel,
+                'colormap': np.asarray(colormap.getLookupTable(0.0, 1.0, 256, alpha=False), dtype=float)[:, :3]}
+        if self.lastRadial is not None:
+            result, particleLabel = self.lastRadial
+            a = BOHR_TO_ANGSTROM
+            other = 'electron' if particleLabel == 'hole' else 'hole'
+            data['distance'] = {'r': np.asarray(result['r'], dtype=float) * a,
+                                'probability': np.asarray(result['probability'], dtype=float) / a,
+                                'cumulative': np.asarray(result['cumulative'], dtype=float),
+                                'mean': float(result['mean'] * a), 'r90': float(result['r90'] * a),
+                                'particle': particleLabel, 'other': other}
+        return data
 
     # Theme
 

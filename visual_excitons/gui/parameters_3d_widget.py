@@ -219,19 +219,35 @@ class Parameters3DWidget(Inspector):
             supercellLayout.addWidget(spinBox)
         supercellLayout.addStretch(1)
 
-        self.wfCutoffSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10000.0, singleStep=1.0, decimals=1, suffix=' Ry')
+        # Three decimals: shells of G-vectors can be a few meV apart
+        self.wfCutoffSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10000.0, singleStep=1.0, decimals=3, suffix=' Ry')
         self.wfCutoffSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.wfCutoffSpinBox.setValue(self.options.wfCutoffRy)
         self.wfCutoffSpinBox.setToolTip('Plane-wave cutoff of the wave function: higher values give a finer real-space grid')
         self.wfCutoffSpinBox.valueChanged.connect(self.options.setWfCutoff)
+        # The same cutoff as a count of reciprocal lattice vectors (Yambo's RL), linked to it
+        self.gShells = None
+        self.lastRl = 0
+        self.wfCutoffRlSpinBox = QSpinBox(minimum=1, maximum=1)
+        self.wfCutoffRlSpinBox.setSuffix(' RL')
+        self.wfCutoffRlSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.wfCutoffRlSpinBox.setToolTip('The cutoff as a number of reciprocal lattice vectors (G-vectors), as Yambo '
+                                          'counts them (RL): the plane waves\nat Γ. Rounded to complete shells of '
+                                          'G-vectors of the same length; the arrows go from shell to shell')
+        self.wfCutoffRlSpinBox.setEnabled(False)
+        self.wfCutoffSpinBox.valueChanged.connect(self.cutoffRyChanged)
+        self.wfCutoffRlSpinBox.valueChanged.connect(self.cutoffRlChanged)
 
         self.fullCutoffCheckBox = QCheckBox('All plane waves')
         self.fullCutoffCheckBox.setToolTip('No cutoff: all the plane waves of the wave functions in the SAVE database,\n'
                                            'the finest grid possible (and the most memory)')
         self.fullCutoffCheckBox.toggled.connect(self.wfCutoffSpinBox.setDisabled)
+        self.fullCutoffCheckBox.toggled.connect(lambda full: self.wfCutoffRlSpinBox.setEnabled(
+            not full and self.gShells is not None))
 
         cutoffLayout = QHBoxLayout()
         cutoffLayout.addWidget(self.wfCutoffSpinBox)
+        cutoffLayout.addWidget(self.wfCutoffRlSpinBox)
         cutoffLayout.addWidget(self.fullCutoffCheckBox)
         cutoffLayout.addStretch(1)
 
@@ -865,6 +881,56 @@ class Parameters3DWidget(Inspector):
         else:
             self.excitonNote.setText('Click a bright exciton in an absorption spectrum to select it here.')
 
+    # The cutoff in Ry and in RL
+
+    def setGVectorShells(self, found):
+        """The G-vectors of the dataset, to give the cutoff in RL too (none without a dataset)."""
+        self.gShells = None
+        if found and self.options.saveDir:
+            from visual_excitons.core.memory import GVectorShells
+            from visual_excitons.core.tasks import databaseAccess
+            from yambopy import YamboLatticeDB
+            try:
+                with databaseAccess():
+                    lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1', Expand=False)
+                    self.gShells = GVectorShells(self.options.saveDir, lattice)
+            except (OSError, KeyError, ValueError):
+                self.gShells = None
+        box = self.wfCutoffRlSpinBox
+        box.blockSignals(True)
+        if self.gShells is not None:
+            box.setRange(1, self.gShells.count)
+            self.lastRl = self.gShells.rl(self.wfCutoffSpinBox.value())
+            box.setValue(max(self.lastRl, 1))
+            box.setSpecialValueText('')
+        else:
+            box.setRange(0, 0)
+            box.setSpecialValueText('– RL')
+        box.blockSignals(False)
+        box.setEnabled(self.gShells is not None and not self.fullCutoffCheckBox.isChecked())
+
+    @Slot(float)
+    def cutoffRyChanged(self, cutoff):
+        """The cutoff typed in Ry: its count of G-vectors in RL."""
+        if self.gShells is None:
+            return
+        self.lastRl = self.gShells.rl(cutoff)
+        self.wfCutoffRlSpinBox.blockSignals(True)
+        self.wfCutoffRlSpinBox.setValue(max(self.lastRl, 1))
+        self.wfCutoffRlSpinBox.blockSignals(False)
+
+    @Slot(int)
+    def cutoffRlChanged(self, rl):
+        """A count of G-vectors: rounded to complete shells (down when it went down), and its cutoff in Ry."""
+        if self.gShells is None:
+            return
+        complete, _ = self.gShells.shell(rl, down=rl < self.lastRl)
+        self.lastRl = complete
+        self.wfCutoffRlSpinBox.blockSignals(True)
+        self.wfCutoffRlSpinBox.setValue(complete)
+        self.wfCutoffRlSpinBox.blockSignals(False)
+        self.wfCutoffSpinBox.setValue(self.gShells.cutoffRy(complete))
+
     @Slot()
     def updateWfStatesNote(self, *args):
         """The states of the wave function shown, and a warning when computed with the other setting."""
@@ -1234,6 +1300,7 @@ class Parameters3DWidget(Inspector):
     @Slot(bool)
     def onDatabaseFound(self, found: bool):
         self.setLatticeBasesEnabled(found)
+        self.setGVectorShells(found)
         # A new cell changes what lattice directions mean in Cartesian space
         if found and self.viewBasis() != 'Cartesian':
             self.applyView()

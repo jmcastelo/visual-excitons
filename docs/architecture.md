@@ -54,7 +54,7 @@ visual_excitons/
 │   ├── tasks.py            TaskRunner: worker thread, progress, cancellation, DB lock
 │   ├── dataset.py          Finding SAVE / BSE / GW directories in a folder
 │   ├── session.py          Session files: format, reading/writing, dataset fingerprint
-│   ├── figures.py          Publication figures of the 2D plots (Matplotlib; self-contained)
+│   ├── figures.py          Publication figures of the plots (Matplotlib; self-contained)
 │   ├── figure_script.py    Export of a figure as a standalone script with its data
 │   ├── bonds.py            Bond detection in periodic crystals
 │   ├── analysis.py         Plane cuts, distance distribution, upsampling
@@ -64,7 +64,7 @@ visual_excitons/
 │   ├── cellshift.py        Cell origin: layers detected and centred, atoms and density shifted
 │   ├── lattice_info.py     The crystal described in the System panel: lattice, space group, formula, k-grid
 │   ├── kspace.py           What the Composition panel draws: plane maps, zone points, special points, CSV
-│   ├── memory.py           Real-space grid and memory estimates
+│   ├── memory.py           Real-space grid, memory estimates, G-vector shells (cutoff in RL)
 │   ├── atomic_data.py      Symbols, covalent radii, Jmol colors, Bohr/Å constants
 │   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend); state() / setState()
 ├── gui/                    Widgets and rendering
@@ -214,14 +214,14 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `bonds.py` | `findBonds(lattice, positions, numbers, tolerance)`, `halfBonds(...)` | Covalent-radius criterion with periodic images; each atom draws its half of each bond |
 | `analysis.py` | `planeCut`, `planeAxes`, `planeSupercellPolygon`, `atomsNearPlane`, `radialDistribution`, `upsampleDensity`, `voxelVectors`, `gridPositions` | Trilinear interpolation (SciPy), truncation indicator `boundary` |
 | `export.py` | `writeCube`, `writeXsf`, `writeDensity`, `supercellAtoms` | Vectorized writers; scientific notation |
-| `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory` | Grid as yambopy computes it; memory from array shapes |
+| `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory`, `GVectorShells` | Grid as yambopy computes it; memory from array shapes; Ry ↔ RL |
 | `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only |
 | `figures.py` | `buildFigure(data, styles, options)`, `saveFigure`, `saveData`, `loadData` | **Self-contained** (NumPy, Matplotlib): copied whole into exported scripts, so no imports from the program |
 | `figure_script.py` | `writeFigureScript` | The script is `figures.py` plus a main part loading the data file |
 | `session.py` | `writeSession`, `readSession`, `datasetFingerprint` | See section 9 |
 | `atomic_data.py` | `chemical_symbols`, `covalent_radii` (Å), `jmol_colors`, `BOHR_TO_ANGSTROM`, `ANGSTROM_TO_BOHR` | From ASE |
 | `style.py` | `DispersionStyle`, `AbsorptionStyle`, `BandStructureStyle` | State of the 2D plot styles; edited by `appearance_panel.py` |
-| `kspace.py` | `planeMap`, `zonePoints`, `nearestSpecialPoint`, `compositionCSV` | What the Composition panel draws, in Å⁻¹ (with 2π); built on `yambopy_ext` |
+| `kspace.py` | `planeMap` (with replicas), `zoneShifts`, `zonePoints`, `nearestSpecialPoint`, `compositionCSV` | What the Composition panel draws, in Å⁻¹ (with 2π); built on `yambopy_ext` |
 
 **Code meant for YamboPy (`yambopy_ext/`).** Modules that would belong in YamboPy, as a replacement or an enhancement of its own, are written to move there unchanged: YamboPy's layout (`bz`, `bse`), its conventions (snake_case, NumPy-style docstrings, `lattice.red_kpoints` / `lattice.rlat` in Bohr⁻¹ without 2π, 1-based bands and states as in yambo's tables), NumPy, SciPy and YamboPy only (no Qt, nothing from the rest of the program), and their tests in `tests/yambopy_ext` (no Qt, synthetic data). Each module's docstring says what in YamboPy it would replace. The program uses them through `core/` (e.g. `computeComposition`, `kspace.py`).
 
@@ -441,11 +441,19 @@ flowchart LR
 
 `AxisGizmo` is a small transparent `GLViewWidget` child, synced to the main view's rotation. Arrow sets (Cartesian, lattice, reciprocal) are each scaled to fit. It clears to **transparent black**. Labels are `GLTextItem`s.
 
-### Publication figures of the 2D plots (`core/figures.py`, `gui/figure_export.py`)
+### Publication figures (`core/figures.py`, `gui/figure_export.py`)
 
-The 2D plots stay interactive with PyQtGraph; figures for papers are drawn separately with Matplotlib from the same data and styles. `figure_export.figureData()` and `figureStyles()` translate the results of `Calculations` and the PyQtGraph styles (Qt pens, symbols) into plain values; `figures.buildFigure()` draws a `matplotlib.figure.Figure` (not pyplot: no GUI backend, safe anywhere) under `rc_context` options (fonts, sizes); the dialog previews it through the Agg canvas.
+The plots stay interactive with PyQtGraph; figures for papers are drawn separately with Matplotlib from the same data and styles. `figure_export.figureData(calculations, *extra)` and `figureStyles()` translate the results of `Calculations` and the PyQtGraph styles (Qt pens, symbols) into plain values; `extra` are the panels' own data, `CompositionPanel.figureData()` (`kspace`, and `kspace3d` for bulk crystals) and `AnalysisWidget.figureData()` (`planeCut`, `distance`, from the last `showCut` / `showRadial`), so that each comes with the settings shown (the module docstring of `figures.py` lists every panel's keys). The panels compute what they draw in one place for both (`planeFigure`, `zoneFigure`), so the figure matches the screen. Colormaps go as 256-color lookup tables (the CET maps are not in Matplotlib); the 3D zone uses `mplot3d` with `view_init` from the 3D view's camera (`viewAngles`). Colorbars are inset axes of their panel (`figures.colorbar`): a figure colorbar under constrained layout anchors a fixed-aspect panel against it, off centre. A panel's `Export figure…` button calls `MainWindow.exportFigure(panels)`, which checks those panels first; `figures.buildFigure()` draws a `matplotlib.figure.Figure` (not pyplot: no GUI backend, safe anywhere) under `rc_context` options (fonts, sizes); the dialog previews it through the Agg canvas.
 
 `figures.py` must stay **self-contained** (NumPy and Matplotlib only): `figure_script.writeFigureScript()` copies it whole into the exported scripts, which must run without the program (`test_figures.py` runs one with `python -I` from another folder). Text drawn by Matplotlib must exist in every font offered: write symbols missing from some fonts as math text (e.g. `$\Gamma$`: Computer Modern has no Γ text glyph); the tests fail on missing glyphs. Path labels come as yambopy writes them (plain grammar of `yambopy.bz.labels`: `G`, `Sigma1`, `K'`, merged `K — U`); `figures.pathLabels` parses that grammar itself (no yambopy in exported scripts) and typesets them, while the 2D plots use yambopy's own Unicode rendering (`options.tickLabels`, falling back to the plain label, e.g. from an older session).
+
+### Cutoff in RL (`memory.GVectorShells`)
+
+Yambo counts plane waves in RL: the G-vectors of `ns.db1` (`G-VECTORS`, in Cartesian units of 2π/alat, sorted by length), the first N of them. `GVectorShells` turns them into energies |G|² in Ry (Bohr⁻¹ with 2π: Miller indices from `lat`, Cartesian from `rlat`), sorted, and groups them into shells (gaps above 5·10⁻⁴ Ry; the database's order is off by at most 10⁻⁴ Ry). `rl(cutoff)` counts those below a cutoff; `shell(rl, down)` rounds a count to whole shells; `cutoffRy(rl)` gives a cutoff just above the last shell (rounded to the spin box's 3 decimals, at the midpoint if the next shell is closer). `Parameters3DWidget` links the Ry and RL spin boxes (`setGVectorShells` on each dataset; the RL box snaps down when its value decreases).
+
+### k-space replicas (`kspace.planeMap(replicas=n)`)
+
+`zones` holds the zone and n rings of replicas (`zoneShifts`: centres within n·√2 of the shortest in-plane vector, nearest first). For a layer, or the sum over planes, the replicas are in-plane copies. For a plane k₃ = l₀ of a bulk crystal, the zones it crosses are displaced by G = i b₁ + j b₂ + l b₃; their section is the central zone's section at level l₀ − l, shifted by the projection of G. With l = 0 only, in-plane copies would leave gaps off Γ (`test_replicas_tile_the_plane` checks the areas). The Composition panel draws every zone's tiles clipped to its own outline (`TileMapItem`).
 
 ### Image export (`image_export.py`)
 

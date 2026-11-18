@@ -155,3 +155,65 @@ def estimateMemory(planeWaves, fftBox, supercell, nstates, nbandsUsed, nkBZ, wav
         'points': points,
         'pointsPerCell': pointsPerCell,
     }
+
+
+class GVectorShells:
+    """
+    The G-vectors of a SAVE database by length, to give a cutoff in Ry or in
+    RL, Yambo's count of reciprocal lattice vectors (the first n G-vectors of
+    ns.db1, which lists them by increasing length, as in FFTGvecs = 3000 RL).
+
+    RL counts plane waves at Γ: the wave-function cutoff applies to |k+G|, so
+    elsewhere it is a close guide. A count is rounded to complete shells (all
+    the G-vectors of the same length), which a cutoff cannot split without
+    breaking the symmetry of the crystal.
+    """
+
+    # G-vectors of one shell have the same energy within rounding (1e-4 Ry seen in ns.db1)
+    SHELL_TOLERANCE = 5e-4
+
+    def __init__(self, saveDir, lattice):
+        """`lattice`: a YamboLatticeDB of the database (with or without expanded k-points)."""
+        from netCDF4 import Dataset
+
+        with Dataset(f'{saveDir}/ns.db1', 'r') as database:
+            gVectors = np.asarray(database.variables['G-VECTORS'][:]).T
+        alat = np.asarray(lattice.alat, dtype=float)
+        miller = np.rint((gVectors / alat[None, :]) @ np.asarray(lattice.lat, dtype=float).T)
+        cartesian = 2 * np.pi * miller @ np.asarray(lattice.rlat, dtype=float)       # Bohr⁻¹
+        self.energies = np.sort(np.sum(cartesian ** 2, axis=1))                        # Ry (ħ²/2m = 1)
+        # The counts at the end of each shell (complete shells)
+        gaps = np.nonzero(np.diff(self.energies) > self.SHELL_TOLERANCE)[0] + 1
+        self.shellEnds = np.append(gaps, len(self.energies))
+
+    @property
+    def count(self):
+        return len(self.energies)
+
+    def rl(self, cutoffRy):
+        """The G-vectors below `cutoffRy` (complete shells, by construction)."""
+        return int(np.searchsorted(self.energies, float(cutoffRy), side='left'))
+
+    def shell(self, rl, down=False):
+        """
+        `rl` rounded to complete shells, up (or `down`): (the count, the energy
+        of its last shell, Ry).
+        """
+        ends = self.shellEnds
+        if down:
+            complete = int(ends[max(int(np.searchsorted(ends, int(rl), side='right')) - 1, 0)])
+        else:
+            complete = int(ends[min(int(np.searchsorted(ends, int(rl), side='left')), len(ends) - 1)])
+        return complete, float(self.energies[complete - 1])
+
+    def cutoffRy(self, rl, decimals=3):
+        """
+        A cutoff (Ry, with `decimals`) that keeps exactly the complete shells of
+        `rl`: just above the energy of its last shell, below the next one.
+        """
+        complete, energy = self.shell(rl)
+        step = 10.0 ** -decimals
+        cutoff = np.ceil((energy + self.SHELL_TOLERANCE) / step) * step
+        if complete < self.count and cutoff >= self.energies[complete]:
+            cutoff = (energy + self.energies[complete]) / 2                    # shells closer than the step
+        return float(round(cutoff, decimals + 3))

@@ -41,25 +41,34 @@ class TileMapItem(pg.GraphicsObject):
         self.picture = QPicture()
         self.bounds = QRectF()
 
-    def setData(self, points, tile, colors, clip=None):
-        """`clip`: a polygon (the zone) outside which nothing is drawn."""
+    def setData(self, tile, zones):
+        """
+        `zones`: (points, colors, clip) of each zone drawn: the tiles centred on
+        `points` (the shape `tile`) in `colors`, clipped to the polygon `clip`
+        (the zone's outline; nothing outside it is drawn).
+        """
+        from PySide6.QtGui import QPainterPath
         self.picture = QPicture()
         painter = QPainter(self.picture)
         painter.setPen(Qt.PenStyle.NoPen)
-        if clip is not None and len(clip) >= 3:
-            from PySide6.QtGui import QPainterPath
-            path = QPainterPath()
-            path.addPolygon(QPolygonF([QPointF(float(x), float(y)) for x, y in clip]))
-            path.closeSubpath()
-            painter.setClipPath(path)
         shape = [QPointF(float(x), float(y)) for x, y in tile]
-        for (x, y), color in zip(points, colors):
-            painter.setBrush(QBrush(QColor(int(color[0]), int(color[1]), int(color[2]))))
-            painter.drawPolygon(QPolygonF([QPointF(p.x() + x, p.y() + y) for p in shape]))
+        corners = []
+        for points, colors, clip in zones:
+            painter.save()
+            if clip is not None and len(clip) >= 3:
+                path = QPainterPath()
+                path.addPolygon(QPolygonF([QPointF(float(x), float(y)) for x, y in clip]))
+                path.closeSubpath()
+                painter.setClipPath(path)
+                corners.append(np.asarray(clip, dtype=float))
+            for (x, y), color in zip(points, colors):
+                painter.setBrush(QBrush(QColor(int(color[0]), int(color[1]), int(color[2]))))
+                painter.drawPolygon(QPolygonF([QPointF(p.x() + x, p.y() + y) for p in shape]))
+            painter.restore()
         painter.end()
-        if len(points):
-            extent = np.abs(np.asarray(tile)).max()
-            low, high = np.min(points, axis=0) - extent, np.max(points, axis=0) + extent
+        if corners:
+            every = np.vstack(corners)
+            low, high = every.min(axis=0), every.max(axis=0)
             self.bounds = QRectF(low[0], low[1], high[0] - low[0], high[1] - low[1])
         else:
             self.bounds = QRectF()
@@ -184,6 +193,7 @@ class CompositionPanel(QWidget):
     compositionNeeded = Signal()
     exportDataRequested = Signal()
     exportImageRequested = Signal()
+    exportFigureRequested = Signal()
     # The symmetry and spin of the selected exciton, along an axis ('z', 'x', 'y' or 'c')
     characterRequested = Signal(str)
 
@@ -227,6 +237,7 @@ class CompositionPanel(QWidget):
         p.remember('threshold', self.thresholdSpinBox)
         p.remember('opacity', self.opacitySpinBox)
         p.remember('spinAxis', self.spinAxisComboBox)
+        p.remember('replicas', self.replicasSpinBox)
         p.remember('qPath', self.qPathCheckBox)
         p.remember('plane', self.planeSpinBox, DATASET)
         # The 3D camera: None until the zone is fitted or the camera moved, so
@@ -277,11 +288,22 @@ class CompositionPanel(QWidget):
         self.opacitySpinBox.setValue(0.6)
         self.opacitySpinBox.setToolTip('Opacity of the spheres of the k-points in 3D: translucent, those behind '
                                        'show through')
+        self.replicasLabel = QLabel('Neighbours:')
+        self.replicasSpinBox = QSpinBox(minimum=0, maximum=3)
+        self.replicasSpinBox.setSpecialValueText('None')
+        self.replicasSpinBox.setSuffix(' ring')
+        self.replicasSpinBox.setToolTip('Periodic replicas of the zone around it, in rings: 1 shows its neighbours '
+                                        '(6 for a hexagonal zone, 8 for a square one)')
+        self.replicasSpinBox.valueChanged.connect(lambda n: self.replicasSpinBox.setSuffix(' ring' if n == 1 else ' rings'))
+        self.replicasSpinBox.valueChanged.connect(self.redraw)
         self.qPathCheckBox = QCheckBox('Q-path')
         self.qPathCheckBox.setToolTip('The Q-path of the dispersion, where it lies in what is shown')
         self.exportImageButton = QPushButton('Export image…')
         self.exportImageButton.setToolTip('What the k-space tab shows, as an image')
         self.exportImageButton.clicked.connect(self.exportImageRequested)
+        self.exportFigureButton = QPushButton('Export figure…')
+        self.exportFigureButton.setToolTip('What the k-space tab shows, as a Matplotlib figure or script')
+        self.exportFigureButton.clicked.connect(self.exportFigureRequested)
 
         for widget in (self.particleComboBox, self.scaleComboBox, self.colormapComboBox, self.viewComboBox):
             widget.currentIndexChanged.connect(self.redraw)
@@ -300,10 +322,12 @@ class CompositionPanel(QWidget):
         row2 = QHBoxLayout()
         self.viewLabel = QLabel('View:')
         for widget in (self.viewLabel, self.viewComboBox, self.planeLabel, self.planeSpinBox, self.thresholdLabel,
-                       self.thresholdSpinBox, self.opacityLabel, self.opacitySpinBox, self.qPathCheckBox):
+                       self.thresholdSpinBox, self.opacityLabel, self.opacitySpinBox, self.replicasLabel,
+                       self.replicasSpinBox, self.qPathCheckBox):
             row2.addWidget(widget)
         row2.addStretch(1)
         row2.addWidget(self.exportImageButton)
+        row2.addWidget(self.exportFigureButton)
 
         # The plane map
         self.mapPlot = pg.PlotWidget()
@@ -316,6 +340,8 @@ class CompositionPanel(QWidget):
         self.mapPlot.addItem(self.tiles)
         self.outline = pg.PlotDataItem()
         self.mapPlot.addItem(self.outline)
+        self.replicaOutlines = pg.PlotDataItem()
+        self.mapPlot.addItem(self.replicaOutlines)
         self.pathItem = pg.PlotDataItem(connect='finite')
         self.mapPlot.addItem(self.pathItem)
         self.specialItem = pg.ScatterPlotItem(size=6)
@@ -540,6 +566,8 @@ class CompositionPanel(QWidget):
             widget.setVisible(plane)
         for widget in (self.thresholdLabel, self.thresholdSpinBox, self.opacityLabel, self.opacitySpinBox):
             widget.setVisible(bulk and not plane)
+        for widget in (self.replicasLabel, self.replicasSpinBox):
+            widget.setVisible(self.crystal is not None and not self.is3D())
         # At Γ the electron and the hole are at the same k-points: nothing to choose
         gamma = self.atGamma()
         self.particleComboBox.setEnabled(not gamma)
@@ -603,8 +631,8 @@ class CompositionPanel(QWidget):
         self.specialLabels = []
         self.view3D.clearItems()
         if self.composition is None or self.crystal is None:
-            self.tiles.setData([], [], [])
-            for item in (self.outline, self.pathItem):
+            self.tiles.setData([], [])
+            for item in (self.outline, self.replicaOutlines, self.pathItem):
                 item.setData([], [])
             self.specialItem.setData([], [])
             self.kspaceNote.setText('')
@@ -616,21 +644,23 @@ class CompositionPanel(QWidget):
         else:
             self.drawPlane(values / top)
 
-    def drawPlane(self, values):
+    def planeFigure(self, values):
+        """
+        What the plane map shows, as data (for the plot and the Matplotlib figure):
+        'zones' (each 'points', 'values' relative to the largest, 'outline'),
+        'tile', 'outline' (the zone), 'labels' ((x, y, text) of the special points
+        on the plane), 'path' ((n, 2), NaN off the plane, or None), 'hidden'
+        (parts of the path off the plane), 'what' (which plane), lengths in Å⁻¹.
+        """
         k = self.crystal
         axis = self.axis()
         plane = None if self.isLayer() or self.planeSpinBox.value() < self.planeSpinBox.minimum() + 1 \
             else self.planeSpinBox.value()
-        data = planeMap(k['red'], values, k['lat'], k['rlat'], k['grid'], axis, plane)
-        shown = data['values'] / (data['values'].max() or 1.0)
-        rgba, colormap, barRange, label = self.colors(shown)
-        self.tiles.setData(data['points'], data['tile'], rgba, clip=data['outline'])
-        outline = np.vstack([data['outline'], data['outline'][:1]]) if len(data['outline']) else np.empty((0, 2))
-        foreground = PLOT_COLORS[self.dark]['foreground']
-        self.outline.setData(outline[:, 0], outline[:, 1], pen=pg.mkPen(foreground, width=1.5))
-        self.colorBar.setColorMap(colormap)
-        self.colorBar.setLevels(barRange)
-        self.colorBar.getAxis('left').setLabel(label)
+        data = planeMap(k['red'], values, k['lat'], k['rlat'], k['grid'], axis, plane,
+                        replicas=self.replicasSpinBox.value())
+        # Relative to the largest weight shown (a replica may hold another plane's points)
+        top = max((float(z['values'].max()) for z in data['zones'] if len(z['values'])), default=1.0) or 1.0
+        zones = [{'points': z['points'], 'values': z['values'] / top, 'outline': z['outline']} for z in data['zones']]
 
         normal, e1, e2 = planeBasis(k['lat'], axis)
         # Overlays on the plane shown; when the planes are summed (or for a layer), the plane through Γ
@@ -652,78 +682,158 @@ class CompositionPanel(QWidget):
             inside = Polygon(data['outline']).contains_points(positions, radius=1e-6 * np.abs(data['outline']).max())
             positions = [p for p, i in zip(positions, inside) if i]
             names = [n for n, i in zip(names, inside) if i]
-        self.specialItem.setData([p[0] for p in positions], [p[1] for p in positions],
+        labels = [(float(x), float(y), text) for (x, y), text in zip(positions, tickLabels(names))]
+
+        path, hidden = None, False
+        if self.qPathCheckBox.isChecked() and k['path'] is not None and len(k['path']):
+            on = np.array([onPlane(p) for p in k['path']])
+            path = np.column_stack([k['path'] @ e1, k['path'] @ e2]) * TO_INVERSE_ANGSTROM
+            path[~on] = np.nan
+            hidden = not on.all()
+        what = 'all the planes summed (with the special points and Q-path of the plane through Γ)' \
+            if plane is None and not self.isLayer() else \
+            ('the plane through Γ' if plane in (None, 0) else f'the plane k{"₁₂₃"[axis]} = {plane}/{k["grid"][axis]}')
+        return {'zones': zones, 'tile': data['tile'], 'outline': data['outline'], 'labels': labels, 'path': path,
+                'hidden': hidden, 'what': what}
+
+    def drawPlane(self, values):
+        f = self.planeFigure(values)
+        drawn = []
+        for zone in f['zones']:
+            rgba, colormap, barRange, label = self.colors(zone['values'])
+            drawn.append((zone['points'], rgba, zone['outline']))
+        self.tiles.setData(f['tile'], drawn)
+
+        def closed(polygon):
+            return np.vstack([polygon, polygon[:1]]) if len(polygon) else np.empty((0, 2))
+        outline = closed(f['outline'])
+        foreground = PLOT_COLORS[self.dark]['foreground']
+        self.outline.setData(outline[:, 0], outline[:, 1], pen=pg.mkPen(foreground, width=1.5))
+        # The replicas' outlines, lighter (one item: separated by NaN)
+        lighter = pg.mkColor(foreground)
+        lighter.setAlpha(110)
+        pieces = [np.vstack([closed(z['outline']), [[np.nan, np.nan]]]) for z in f['zones'][1:] if len(z['outline'])]
+        replicas = np.vstack(pieces) if pieces else np.empty((0, 2))
+        self.replicaOutlines.setData(replicas[:, 0], replicas[:, 1], connect='finite', pen=pg.mkPen(lighter, width=1))
+        self.colorBar.setColorMap(colormap)
+        self.colorBar.setLevels(barRange)
+        self.colorBar.getAxis('left').setLabel(label)
+
+        self.specialItem.setData([x for x, y, _ in f['labels']], [y for x, y, _ in f['labels']],
                                  brush=pg.mkBrush(foreground), pen=None)
-        for (x, y), text in zip(positions, tickLabels(names)):
+        for x, y, text in f['labels']:
             label = pg.TextItem(text, color=foreground, anchor=(-0.15, 1.1))
             label.setPos(x, y)
             self.mapPlot.addItem(label, ignoreBounds=True)
             self.specialLabels.append(label)
-
-        path = k['path']
-        if self.qPathCheckBox.isChecked() and path is not None and len(path):
-            on = np.array([onPlane(p) for p in path])
-            xy = np.column_stack([path @ e1, path @ e2]) * TO_INVERSE_ANGSTROM
-            xy[~on] = np.nan
-            self.pathItem.setData(xy[:, 0], xy[:, 1], pen=pg.mkPen(foreground, width=1.5, style=Qt.PenStyle.DashLine))
-            hidden = not on.all()
+        if f['path'] is not None:
+            self.pathItem.setData(f['path'][:, 0], f['path'][:, 1],
+                                  pen=pg.mkPen(foreground, width=1.5, style=Qt.PenStyle.DashLine))
         else:
             self.pathItem.setData([], [])
-            hidden = False
-        what = 'all the planes summed (with the special points and Q-path of the plane through Γ)' \
-            if plane is None and not self.isLayer() else \
-            ('the plane through Γ' if plane in (None, 0) else f'the plane k{"₁₂₃"[axis]} = {plane}/{k["grid"][axis]}')
-        self.kspaceNote.setText(f'{self.particleName()}, {what}' +
-                                (' (the parts of the Q-path off it are not drawn)' if hidden else '') + '.')
-        # The zone in view (the tiles outside it are clipped)
-        if len(data['outline']):
-            low, high = data['outline'].min(axis=0), data['outline'].max(axis=0)
+        self.kspaceNote.setText(f'{self.particleName()}, {f["what"]}' +
+                                (' (the parts of the Q-path off it are not drawn)' if f['hidden'] else '') + '.')
+        # The zone and its replicas in view (the tiles outside them are clipped)
+        outlines = [z['outline'] for z in f['zones'] if len(z['outline'])]
+        if outlines:
+            every = np.vstack(outlines)
+            low, high = every.min(axis=0), every.max(axis=0)
             self.mapPlot.setRange(xRange=(low[0], high[0]), yRange=(low[1], high[1]), padding=0.06)
         else:
             self.mapPlot.getPlotItem().enableAutoRange()
 
-    def draw3D(self, values):
+    def zoneFigure(self, values):
+        """
+        What the 3D view shows, as data: 'edges' ((n, 2, 3) segments of the
+        zone), 'points', 'values' (relative to the largest) and 'sizes' (0-1) of
+        the k-points above the threshold, 'total' (all of them), 'labels'
+        ((x, y, z, text)), 'path' ((n, 3) or None), 'step' (the grid spacing),
+        lengths in Å⁻¹.
+        """
         k = self.crystal
         points, pointValues, zone = zonePoints(k['red'], values, k['rlat'])
+        edges = zone['vertices'][np.asarray(zone['edges'])]
+        threshold = self.thresholdSpinBox.value() / 100
+        shown = pointValues >= max(threshold, 1e-12)
+        labels = []
+        for name, text in zip(k['special'], tickLabels(list(k['special']))):
+            x, y, z = np.asarray(k['special'][name], dtype=float) @ k['rlat'] * TO_INVERSE_ANGSTROM
+            labels.append((float(x), float(y), float(z), text))
+        path = (k['path'] * TO_INVERSE_ANGSTROM if self.qPathCheckBox.isChecked() and k['path'] is not None
+                and len(k['path']) else None)
+        step = min(np.linalg.norm(k['rlat'][i] / k['grid'][i]) for i in range(3)) * TO_INVERSE_ANGSTROM
+        return {'edges': edges, 'points': points[shown], 'values': pointValues[shown], 'sizes': pointValues[shown],
+                'total': len(shown), 'labels': labels, 'path': path, 'step': float(step)}
+
+    def draw3D(self, values):
+        f = self.zoneFigure(values)
         foreground = PLOT_COLORS[self.dark]['foreground']
         color = pg.mkColor(foreground).getRgbF()
-
-        edges = zone['vertices'][np.asarray(zone['edges']).ravel()]
-        lines = gl.GLLinePlotItem(pos=edges, mode='lines', color=color, width=1.5, antialias=True)
+        lines = gl.GLLinePlotItem(pos=f['edges'].reshape(-1, 3), mode='lines', color=color, width=1.5, antialias=True)
         lines.setGLOptions(OPAQUE_GL_OPTIONS)
         lines.setDepthValue(OPAQUE_STAGE)
         self.view3D.addItem3D(lines)
 
         # The k-points as lit spheres, translucent, drawn back to front (as the
         # wave function's surfaces) so that those behind show through
-        threshold = self.thresholdSpinBox.value() / 100
-        shown = pointValues >= max(threshold, 1e-12)
-        rgba, _, _, _ = self.colors(pointValues[shown])
+        rgba, _, _, _ = self.colors(f['values'])
         colors = rgba / 255.0
         colors[:, 3] = self.opacitySpinBox.value()
-        step = min(np.linalg.norm(k['rlat'][i] / k['grid'][i]) for i in range(3)) * TO_INVERSE_ANGSTROM
-        radii = step * (0.18 + 0.32 * pointValues[shown])
-        self.spheresShown = int(shown.sum())
-        if shown.any():
-            spheres = SortedMeshItem(meshdata=spheresMeshData(points[shown], radii, colors, rows=12, cols=16),
+        radii = f['step'] * (0.18 + 0.32 * f['sizes'])
+        self.spheresShown = len(f['points'])
+        if len(f['points']):
+            spheres = SortedMeshItem(meshdata=spheresMeshData(f['points'], radii, colors, rows=12, cols=16),
                                      shader=headlightShader, smooth=True)
             spheres.setGLOptions(TRANSLUCENT_GL_OPTIONS)
             spheres.setDepthValue(TRANSLUCENT_STAGE)
             self.view3D.addItem3D(spheres)
-
-        for name, text in zip(k['special'], tickLabels(list(k['special']))):
-            car = np.asarray(k['special'][name], dtype=float) @ k['rlat'] * TO_INVERSE_ANGSTROM
-            label = gl.GLTextItem(pos=car, text=text, color=pg.mkColor(foreground))
+        for x, y, z, text in f['labels']:
+            label = gl.GLTextItem(pos=(x, y, z), text=text, color=pg.mkColor(foreground))
             label.setDepthValue(LABEL_STAGE)
             self.view3D.addItem3D(label)
-        if self.qPathCheckBox.isChecked() and k['path'] is not None and len(k['path']):
-            path = gl.GLLinePlotItem(pos=k['path'] * TO_INVERSE_ANGSTROM, color=color, width=2, antialias=True)
+        if f['path'] is not None:
+            path = gl.GLLinePlotItem(pos=f['path'], color=color, width=2, antialias=True)
             path.setGLOptions(OPAQUE_GL_OPTIONS)
             path.setDepthValue(OPAQUE_STAGE)
             self.view3D.addItem3D(path)
-        self.kspaceNote.setText(f'{self.particleName()}: {int(shown.sum())} of {len(shown)} k-points '
+        self.kspaceNote.setText(f'{self.particleName()}: {len(f["points"])} of {f["total"]} k-points '
                                 f'of the zone drawn (those of {self.thresholdSpinBox.value():g} % of the largest '
                                 'weight or more), sized and colored by their weight.')
+
+    def figureData(self):
+        """
+        The k-space plots as data for core.figures ('kspace', and 'kspace3d' for
+        bulk crystals), with the settings shown; {} without a composition.
+        """
+        if self.composition is None or self.crystal is None:
+            return {}
+        values = self.weights()
+        values = values / (values.max() or 1.0)
+        lookup = makeColormap(self.colormapComboBox.currentText()).getLookupTable(0.0, 1.0, 256, alpha=False)
+        common = {'scale': 'log' if self.scaleComboBox.currentIndex() == 1 else 'linear',
+                  'colormap': np.asarray(lookup, dtype=float)[:, :3], 'title': self.figureTitle()}
+        plane = self.planeFigure(values)
+        data = {'kspace': dict(common, zones=plane['zones'], tile=np.asarray(plane['tile']),
+                               outline=np.asarray(plane['outline']), labels=plane['labels'], path=plane['path'],
+                               what=plane['what'])}
+        if not self.isLayer():
+            zone = self.zoneFigure(values)
+            data['kspace3d'] = dict(common, edges=zone['edges'], points=zone['points'], values=zone['values'],
+                                    sizes=zone['sizes'], labels=zone['labels'], path=zone['path'],
+                                    opacity=self.opacitySpinBox.value(), view=self.viewAngles())
+        return data
+
+    def figureTitle(self):
+        c = self.composition
+        return f'Exciton {c["excIndex"]} at Q{c["qIndex"] + 1}, {self.particleName().lower()}'
+
+    def viewAngles(self):
+        """The 3D view's direction as Matplotlib's (elevation, azimuth), degrees."""
+        camToWorld = self.view3D.opts['rotation'].conjugated()
+        from PySide6.QtGui import QVector3D
+        toViewer = camToWorld.rotatedVector(QVector3D(0.0, 0.0, 1.0))
+        x, y, z = toViewer.x(), toViewer.y(), toViewer.z()
+        return float(np.degrees(np.arcsin(max(-1.0, min(1.0, z))))), float(np.degrees(np.arctan2(y, x)))
 
     def fitView3D(self):
         if self.crystal is None:

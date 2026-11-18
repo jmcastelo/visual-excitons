@@ -1,5 +1,6 @@
 """
-Export of the 2D plots as publication figures, drawn with Matplotlib (see
+Export of the plots as publication figures (the spectra's 2D plots, the
+Composition panel's k-space plots and the Analysis panel's), drawn with Matplotlib (see
 core/figures.py): the data and styles of the plots on screen, translated to
 plain values; a dialog with the options and a live preview; figure files and
 standalone scripts.
@@ -20,7 +21,9 @@ from visual_excitons.core.figure_script import writeFigureScript
 from .inspector import NoteLabel
 
 FIGURE_FILTERS = ('PDF (*.pdf);;SVG (*.svg);;EPS (*.eps);;PNG image (*.png);;TIFF image (*.tif *.tiff)')
-PANEL_NAMES = {'dispersion': 'Dispersion', 'absorption': 'Absorption', 'bands': 'Band structure'}
+PANEL_NAMES = {'dispersion': 'Dispersion', 'absorption': 'Absorption', 'bands': 'Band structure',
+               'kspace': 'k-space map (Composition)', 'kspace3d': 'k-space zone in 3D (Composition)',
+               'planeCut': 'Plane cut (Analysis)', 'distance': 'Electron-hole distance (Analysis)'}
 
 # Journal column widths (cm)
 WIDTH_PRESETS = [('One column (8.6 cm)', 8.6), ('One and a half columns (12.9 cm)', 12.9),
@@ -55,10 +58,12 @@ def figureStyles(dispersionStyle, absorptionStyle, bandStructureStyle):
                       'fill': bandStructureStyle.brush.color().name()}}
 
 
-def figureData(calculations):
-    """The results on screen, as data for core.figures."""
+def figureData(calculations, *extra):
+    """The results on screen, as data for core.figures; `extra`: more panels' data (dicts), merged in."""
     calc = calculations
     data = {}
+    for more in extra:
+        data.update(more or {})
     axes = getattr(calc, 'dispersionAxes', {}) or {}
     ticks, labels = list(axes.get('specialPoints', [])), list(axes.get('labels', []))
     if len(calc.dispPoints):
@@ -97,9 +102,10 @@ def figureImage(figure):
 class FigureExportDialog(QDialog):
     """Options of the figure, with a live preview; saves figures and scripts."""
 
-    def __init__(self, data, styles, defaultName='figure', programVersion='', parent=None):
+    def __init__(self, data, styles, defaultName='figure', programVersion='', parent=None, panels=None):
+        """`panels`: those to check at first (of those with data), instead of the last ones chosen."""
         super().__init__(parent)
-        self.setWindowTitle('Export 2D figure')
+        self.setWindowTitle('Export figure')
         self.data, self.styles = data, styles
         self.defaultName, self.programVersion = defaultName, programVersion
         self.settings = QSettings('VisualExcitons', 'VisualExcitons')
@@ -108,9 +114,11 @@ class FigureExportDialog(QDialog):
         # Panels: checkable, in the order of the list (drag to reorder)
         self.panelList = QListWidget()
         self.panelList.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.panelList.setMaximumHeight(90)
+        self.panelList.setMaximumHeight(150)
         self.panelList.setToolTip('The panels of the figure, in this order (drag to reorder)')
         saved = self.loadOptions()
+        if panels:
+            saved['panels'] = [p for p in saved['panels'] if p in panels] + [p for p in panels if p not in saved['panels']]
         order = [p for p in saved['panels'] if p in PANEL_NAMES] + [p for p in PANEL_NAMES if p not in saved['panels']]
         for panel in order:
             item = QListWidgetItem(PANEL_NAMES[panel])

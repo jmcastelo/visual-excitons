@@ -121,6 +121,15 @@ def test_composition_panel(window, qtbot, tmp_path):
     panel.planeSpinBox.setValue(panel.planeSpinBox.minimum())
     assert panel.planeSpinBox.text() == 'Sum'
     assert 'summed' in panel.kspaceNote.text()
+    # As Matplotlib figures: the plane (with its neighbours) and the zone in 3D
+    from visual_excitons.core.figures import availablePanels, buildFigure
+    panel.planeSpinBox.setValue(0)
+    panel.replicasSpinBox.setValue(1)
+    data = panel.figureData()
+    assert availablePanels(data) == ['kspace', 'kspace3d'] and len(data['kspace']['zones']) > 1
+    for kind in ('kspace', 'kspace3d'):
+        assert buildFigure(data, {}, {'panels': [kind]}).axes
+    panel.replicasSpinBox.setValue(0)
 
     # Another exciton of the same Q-point: from the database already read
     cached = dict(calc.compositionCache)
@@ -176,3 +185,37 @@ def test_problems_are_said_in_the_panel(window, qtbot, tmp_path):
     select(window, 1, 1)                                    # Q2: there
     qtbot.waitUntil(lambda: window.calculations.composition is not None, timeout=60000)
     assert 'Q2' in window.compositionPanel.infoLabel.text()
+
+
+def polygonArea(polygon):
+    polygon = np.asarray(polygon)
+    return 0.5 * abs(np.dot(polygon[:, 0], np.roll(polygon[:, 1], 1)) - np.dot(polygon[:, 1], np.roll(polygon[:, 0], 1)))
+
+
+def test_replicas_tile_the_plane():
+    """A layer: the zone and its 6 neighbours, copies. A bulk plane off Γ: sections of zones displaced out of
+    the plane too, which with the zone's own make up one in-plane cell of the reciprocal lattice."""
+    from visual_excitons.core.kspace import planeMap
+    from visual_excitons.yambopy_ext.bz.wigner_seitz import wigner_seitz_cell, plane_section
+    from visual_excitons.core.kspace import planeBasis, TO_INVERSE_ANGSTROM
+    # Hexagonal layer, 6 x 6 grid
+    lat = np.array([[3.0, 0, 0], [-1.5, 1.5 * np.sqrt(3), 0], [0, 0, 20.0]])
+    rlat = np.linalg.inv(lat).T
+    red = np.array([[i / 6, j / 6, 0] for i in range(6) for j in range(6)])
+    values = np.random.default_rng(0).random(36)
+    data = planeMap(red, values, lat, rlat, [6, 6, 1], 2, replicas=1)
+    assert len(data['zones']) == 7
+    assert all(np.allclose(z['values'], data['values']) for z in data['zones'])
+    # Rhombohedral bulk (BiI3-like), 8 x 8 x 8: the plane k3 = 3/8
+    a, alpha = 7.0, np.radians(55)
+    c = np.cos(alpha)
+    lat = a * np.array([[1, 0, 0], [c, np.sin(alpha), 0],
+                        [c, (c - c * c) / np.sin(alpha), np.sqrt(1 - c * c - ((c - c * c) / np.sin(alpha)) ** 2)]])
+    rlat = np.linalg.inv(lat).T
+    red = np.array([[i / 8, j / 8, k / 8] for i in range(8) for j in range(8) for k in range(8)])
+    data = planeMap(red, np.ones(512), lat, rlat, [8, 8, 8], 2, plane=3, replicas=1)
+    normal, e1, e2 = planeBasis(lat, 2)
+    v1, v2 = (np.array([b @ e1, b @ e2]) * TO_INVERSE_ANGSTROM for b in rlat[:2])
+    cellArea = abs(v1[0] * v2[1] - v1[1] * v2[0])
+    areas = sorted({round(polygonArea(z['outline']), 9) for z in data['zones']})
+    assert len(areas) == 2 and sum(areas) == pytest.approx(cellArea, rel=1e-6)     # two kinds of section
