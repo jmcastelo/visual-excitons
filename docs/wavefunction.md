@@ -31,7 +31,7 @@ The `Placing the fixed particle` section of the Wave function controls computes 
 - Below it, the density **at the position of the fixed particle**, as a share of its largest value, and where the largest value is (the distance to the nearest atom). It follows the position as it is edited. When the exciton, the fixed particle, the cutoff or the degenerate setting change, it says that the density is out of date.
 - `Place at the maximum` moves the fixed particle where its density is largest. That is a point of the real-space grid of the wave function at this cutoff, so the calculation keeps it as it is.
 
-The density is computed on the same grid, with the same plane waves, as the wave function at that cutoff: it is the one that applies to it (the cutoff changes its details, not only its sharpness). It is exact up to the 0.1% of its weight left out to make it faster (see [Placing the fixed particle](architecture.md#placing-the-fixed-particle-particle-densities) in the developer guide). It is kept in session files with the other results.
+The density is computed on the same grid, with the same plane waves, as the wave function at that cutoff: it is the one that applies to it (the cutoff changes its details, not only its sharpness). It is exact up to the 0.1% of its weight left out to make it faster (the physics, the formulas and the checks are in [Where the particles of an exciton are](exciton-densities.md)). It is kept in session files with the other results.
 
 ## Plot types and rendering
 
