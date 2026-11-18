@@ -3,7 +3,8 @@ Shared test setup.
 
 Qt runs on its offscreen platform (no display needed) unless QT_QPA_PLATFORM
 is set, and the application settings are written to a temporary directory so
-the tests never touch the user's own. Tests using the datasets in data/ (not
+the tests never touch the user's own (also when this module is merely imported, e.g. by a
+script). Tests using the datasets in data/ (not
 in the repository) are skipped when these are missing.
 """
 
@@ -34,6 +35,14 @@ from PySide6.QtCore import QSettings, QCoreApplication, Qt, QEvent
 
 # As in main.py, before the application is created
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
+# The settings in a temporary folder as soon as this module is imported, not only in the
+# isolatedSettings fixture: a script that imports it (e.g. to make a test file) must never
+# read or write the user's own settings
+import tempfile as _tempfile
+_IMPORT_SETTINGS = _tempfile.mkdtemp(prefix='visual-excitons-settings-')
+for _fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
+    QSettings.setPath(_fmt, QSettings.Scope.UserScope, _IMPORT_SETTINGS)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
