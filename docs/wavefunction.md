@@ -19,6 +19,20 @@ Currently under active development, the Wave function panel plots 3D visualizati
     Part of the calculation runs over blocks of k-points, whose buffer can take gigabytes for fine grids and many degenerate states. The block size is reduced automatically to keep it within a quarter of the available memory: the result is the same (the sum over k-points is only split differently) and the time barely changes. For BiI3, exciton 10 (10 degenerate states) at the full cutoff needs about 3.5 GB instead of 8.8 GB. The memory available is read with [psutil](https://github.com/giampaolo/psutil) on Linux, Windows and macOS; without psutil, the estimate is shown without it.
   - Press `Compute wave function`. The wave functions of the dataset are loaded the first time only: later calculations on the same dataset, for other excitons, positions, supercells or cutoffs, skip that step and are several times faster.
 
+The caption in the top-right corner of the 3D view says what it shows: the density of which particle, of which exciton (or group of degenerate excitons) and Q-point, with the other particle fixed where. With the hole fixed, the view shows where the **electron** is, and the other way round.
+
+## Placing the fixed particle
+
+Where the fixed particle is matters. The wave function of an exciton depends on the positions of both particles, and what is computed is the density of one of them with the other one fixed. How much of the exciton that shows depends on where the fixed one is: the density of the electron computed with the hole fixed at a point adds up to the **hole density** there, the probability of finding the hole at that point wherever the electron is (and the other way round with the electron fixed). Where it is small, the density computed is weak, and mostly what the calculation leaves out (plane waves beyond the cutoff, the edges of the supercell); since it is shown relative to its own maximum, it looks just as strong. For bands of p or d character the hole or electron density vanishes on the atoms themselves: in BiI3, whose valence band is mostly iodine 5p, the hole density on an iodine atom is 10⁻⁴ of its largest value, which lies about 0.8–0.9 Å from it. Fixing the particle on an atom, a common choice, can thus be a poor one.
+
+The `Placing the fixed particle` section of the Wave function controls computes that density:
+
+- `Compute the hole density` (or `electron density`, for the fixed particle chosen) computes it, in the background, for the exciton, the cutoff and the `Sum degenerate states` setting of the calculation. It takes a second or two at 10 Ry (BiI3 8×8×8, WSe2 72×72×1) once the wave functions of the dataset are loaded (shared with the wave function: computing the density first does not make the wave function slower), and longer with all the plane waves (15 s for BiI3).
+- Below it, the density **at the position of the fixed particle**, as a share of its largest value, and where the largest value is (the distance to the nearest atom). It follows the position as it is edited. When the exciton, the fixed particle, the cutoff or the degenerate setting change, it says that the density is out of date.
+- `Place at the maximum` moves the fixed particle where its density is largest. That is a point of the real-space grid of the wave function at this cutoff, so the calculation keeps it as it is.
+
+The density is computed on the same grid, with the same plane waves, as the wave function at that cutoff: it is the one that applies to it (the cutoff changes its details, not only its sharpness). It is exact up to the 0.1% of its weight left out to make it faster (see [Placing the fixed particle](architecture.md#placing-the-fixed-particle-particle-densities) in the developer guide). It is kept in session files with the other results.
+
 ## Plot types and rendering
 
 The `Display` section of the Wave function controls controls how the probability density is displayed. Choose the display mode with `Plot type`; only the controls of the selected mode are shown:
@@ -144,6 +158,7 @@ All of this can be toggled from the `Axes` section of the Wave function controls
 - `Reciprocal vectors a*, b*, c*`
 - `Axis labels`
 - `Cell parameters`
+- `Caption`: what the view shows, in the top-right corner (see [Computing the wave function](#computing-the-wave-function))
 
 ## Analysis
 
@@ -163,7 +178,7 @@ The analysis settings are remembered between sessions.
 
 The `Export` section of the Wave function controls, or the `File` menu, saves what is in the Wave function panel:
 
-- **Image…** (`Ctrl+E`): the 3D view as a PNG, JPEG or TIFF image, at 1 to 4 times the size of the view on screen or at a custom width (the height keeps the proportions of the view). It shows exactly what the view shows, rendered again at the chosen size: surfaces, atoms and labels are sharp, and lines are widened in proportion. The axes gizmo and the cell parameters can be included. With `Transparent background` (PNG and TIFF), only the scene is drawn, ready to be placed on slides or figures.
+- **Image…** (`Ctrl+E`): the 3D view as a PNG, JPEG or TIFF image, at 1 to 4 times the size of the view on screen or at a custom width (the height keeps the proportions of the view). It shows exactly what the view shows, rendered again at the chosen size: surfaces, atoms and labels are sharp, and lines are widened in proportion. The axes gizmo, the cell parameters and the caption can be included. With `Transparent background` (PNG and TIFF), only the scene is drawn, ready to be placed on slides or figures.
 - **Density…** (`Ctrl+Shift+E`): the probability density of the last wave function computed, on its real-space grid, with the atoms of the supercell (as shown, with the cell origin and the layer centring applied, or, unticking `Density as shown`, in the cell of the calculation), as:
   - a Gaussian cube file (`.cube`, lengths in Bohr), or
   - an XCrySDen XSF file (`.xsf`, lengths in Å),

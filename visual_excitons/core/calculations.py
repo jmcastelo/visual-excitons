@@ -15,6 +15,7 @@ from .atomic_data import BOHR_TO_ANGSTROM
 from visual_excitons.yambopy_ext.bse.exciton_kspace import exciton_kspace
 from visual_excitons.yambopy_ext.bse.exciton_bands import interpolate_exciton_bands, band_energies_ibz
 from visual_excitons.yambopy_ext.dbs.qp_energies import qp_energies
+from visual_excitons.yambopy_ext.bse.exciton_particle_density import exciton_particle_density, density_maxima
 
 # States within this energy (eV) of an exciton are degenerate with it (summed with it when
 # Calculations.sumDegenerate: wave function, composition, band structure)
@@ -446,6 +447,43 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
     }
 
 
+# The NTO weight kept for the particle densities (the density dropped integrates to the rest)
+PARTICLE_DENSITY_WEIGHT = 0.999
+# Local maxima of a particle density reported: at least this share of the largest
+PARTICLE_MAXIMA_THRESHOLD = 0.1
+
+
+def computeParticleDensity(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, particle, cutoff_ry,
+                           degenerate=True, cache=None):
+    """
+    The own density of the hole or of the electron (`particle`, 'h' or 'e') of
+    exciton `excIndex` (1-based, with its degenerate states if `degenerate`)
+    at Q-point `qIndex` (0-based), on the unit-cell grid the wave function
+    uses at `cutoff_ry` (-1: all plane waves): see
+    yambopy_ext.bse.exciton_particle_density. `cache` is the wave functions'
+    (see loadWavefunctionDB).
+    """
+    if lattice is None:
+        context.stage('Loading the lattice')
+        lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
+    context.stage('Loading the exciton')
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=excIndex + 20)
+    if excIndex > len(excitonDB.eigenvalues):
+        raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
+    wavefunctionDB = loadWavefunctionDB(cache, saveDir, lattice, excitonDB)
+    states = excitonDB.get_degenerate(excIndex, eps=DEGENERACY_EV) if degenerate else [excIndex]
+    Akcv = excitonDB.get_Akcv()[np.array(states) - 1]
+    Qpt = wavefunctionDB.ydb.lat @ excitonDB.car_qpoint
+    bands = [int(np.min(excitonDB.table[:, 1])), int(np.max(excitonDB.table[:, 2]))]
+    name = 'hole' if particle == 'h' else 'electron'
+    context.stage(f'Computing the {name} density', Akcv.shape[3])
+    density, info = exciton_particle_density(Akcv, Qpt, wavefunctionDB, bands, particle, cutoff_ry,
+                                             PARTICLE_DENSITY_WEIGHT, progress=context.advance)
+    indices, values = density_maxima(density, PARTICLE_MAXIMA_THRESHOLD)
+    return {'lattice': lattice, 'density': density.astype(np.float32), 'particle': particle, 'qIndex': qIndex,
+            'excIndex': excIndex, 'states': [int(x) for x in states], 'degenerate': bool(degenerate),
+            'cutoff': float(cutoff_ry), 'maxima': indices.tolist(), 'weightKept': info['weight_kept'] / info['weight']}
+
 
 class Calculations(QObject):
     # The results changed: computed, restored, cleared...
@@ -483,6 +521,8 @@ class Calculations(QObject):
     compositionFailed = Signal(str)
     # The symmetry and spin of an exciton (a dict, see computeCharacter), or None
     characterReady = Signal(object)
+    # The own density of the fixed particle (see computeParticleDensity), or None when cleared
+    particleDensityReady = Signal(object)
 
     # Progress and errors of the background calculations (see tasks.py)
     busyStarted = Signal(str)          # a task starts: its message
@@ -547,6 +587,8 @@ class Calculations(QObject):
         # The symmetry and spin of an exciton (see computeCharacter), and the crystal's
         # symmetries and representation matrices computed for it (kept for other Q-points)
         self.character = None
+        # The own density of a particle (a dict, see computeParticleDensity), or None
+        self.particleDensity = None
         self.symmetryCache = {}
         # Where the representation matrices are kept between sessions (None: not kept)
         self.diskCacheFolder = None
@@ -636,6 +678,9 @@ class Calculations(QObject):
         if self.character is not None:
             self.character = None
             self.characterReady.emit(None)
+        if self.particleDensity is not None:
+            self.particleDensity = None
+            self.particleDensityReady.emit(None)
         # A new dict: a task still running on the old dataset keeps the old one
         self.wavefunctionCache = {}
         self.planeWaves = None
@@ -709,6 +754,36 @@ class Calculations(QObject):
             self.lattice = result['lattice']
         self.character = {key: value for key, value in result.items() if key != 'lattice'}
         self.characterReady.emit(self.character)
+
+    # The own density of the fixed particle (on request: it needs the wave functions)
+
+    def computeParticleDensity(self, qIndex, excIndex, particle, cutoff):
+        """
+        The density of the hole or of the electron (`particle`) of exciton
+        `excIndex` (1-based) at Q-point `qIndex` (0-based), at the wave
+        function's `cutoff` (Ry, -1: all plane waves), with the degenerate
+        states if sumDegenerate; in the background (particleDensityReady).
+        """
+        name = 'hole' if particle == 'h' else 'electron'
+        message = f'Computing the {name} density…'
+        if not self.dataset.saveDir or not self.dataset.diagoDir:
+            return self._reject(message, 'Open a dataset with its BSE databases first.')
+        missing = self.dataset.missingQPoint(qIndex)
+        if missing:
+            return self._reject(message, missing)
+        o = self.dataset
+        arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
+                         qIndex=qIndex, excIndex=excIndex, particle=particle, cutoff_ry=cutoff,
+                         degenerate=self.sumDegenerate, cache=self.wavefunctionCache)
+        self.tasks.submit(message, lambda context: computeParticleDensity(context, **arguments),
+                          self._applyParticleDensity, key='particle-density')
+
+    def _applyParticleDensity(self, result):
+        self.markResultsChanged()
+        if self.lattice is None:
+            self.lattice = result['lattice']
+        self.particleDensity = {key: value for key, value in result.items() if key != 'lattice'}
+        self.particleDensityReady.emit(self.particleDensity)
 
     def _failComposition(self, reason):
         if self.composition is not None:
@@ -1087,6 +1162,12 @@ class Calculations(QObject):
         if self.character is not None:
             meta['character'] = jsonableCharacter(self.character)
 
+        if self.particleDensity is not None:
+            d = self.particleDensity
+            arrays['particleDensity/density'] = np.asarray(d['density'], dtype=np.float32)
+            meta['particleDensity'] = {key: d[key] for key in ('particle', 'qIndex', 'excIndex', 'states',
+                                                                'degenerate', 'cutoff', 'maxima', 'weightKept')}
+
         if self.composition is not None:
             c = self.composition
             arrays['composition/electron'] = np.asarray(c['electron'], dtype=float)
@@ -1172,6 +1253,10 @@ class Calculations(QObject):
 
         if 'character' in meta and isinstance(meta['character'], dict):
             self._applyCharacter(dict(meta['character'], lattice=lattice))
+
+        if 'particleDensity' in meta and 'particleDensity/density' in arrays:
+            self._applyParticleDensity(dict(meta['particleDensity'], lattice=lattice,
+                                            density=arrays['particleDensity/density']))
 
         # Before the selected exciton, so that it is not computed again for it
         if 'composition' in meta:

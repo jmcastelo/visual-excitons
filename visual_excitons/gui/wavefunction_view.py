@@ -78,6 +78,12 @@ class WavefunctionView(gl.GLViewWidget):
         self.cellInfoLabel = QLabel(self)
         self.cellInfoLabel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.cellInfoLabel.setTextFormat(Qt.TextFormat.RichText)
+        # What the view shows (top-right corner): the density of which particle, the other fixed where
+        self.showCaption = True
+        self.captionLabel = QLabel(self)
+        self.captionLabel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.captionLabel.setTextFormat(Qt.TextFormat.RichText)
+        self.captionLabel.hide()
         self.setDarkTheme(False)
         self.cellInfoLabel.move(10, 10)
         self.cellInfoLabel.hide()
@@ -294,6 +300,7 @@ class WavefunctionView(gl.GLViewWidget):
             self.setBackgroundColor((255, 255, 255, 255))
             style = 'background-color: rgba(255, 255, 255, 210); color: #222; border: 1px solid #bbb;'
         self.cellInfoLabel.setStyleSheet(f'QLabel {{ {style} border-radius: 4px; padding: 4px; }}')
+        self.captionLabel.setStyleSheet(f'QLabel {{ {style} border-radius: 4px; padding: 4px; }}')
         if self.gizmo is not None:
             self.gizmo.setDarkTheme(dark)
 
@@ -465,6 +472,22 @@ class WavefunctionView(gl.GLViewWidget):
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
         self._reposition_gizmo()
+        self._repositionCaption()
+
+    def setCaption(self, text):
+        """What the view shows, in the top-right corner ('' or None: nothing)."""
+        self.captionLabel.setText(text or '')
+        self.captionLabel.adjustSize()
+        self._repositionCaption()
+        self.captionLabel.setVisible(bool(text) and self.showCaption)
+
+    @Slot(bool)
+    def setShowCaption(self, show: bool):
+        self.showCaption = bool(show)
+        self.captionLabel.setVisible(self.showCaption and bool(self.captionLabel.text()))
+
+    def _repositionCaption(self):
+        self.captionLabel.move(max(10, self.width() - self.captionLabel.width() - 10), 10)
 
     def mouseMoveEvent(self, ev):
         super().mouseMoveEvent(ev)

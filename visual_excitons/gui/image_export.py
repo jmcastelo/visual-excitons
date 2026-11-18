@@ -62,7 +62,7 @@ def gizmoImage(view, scale):
     return image
 
 
-def composeImage(view, width, height, transparent=False, gizmo=True, cellInfo=True):
+def composeImage(view, width, height, transparent=False, gizmo=True, cellInfo=True, caption=True):
     """The 3D view as a `width` x `height` image, with its overlays if requested (and shown)."""
     image = view.renderImage(width, height, transparent).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
     scale = height / max(view.height(), 1)
@@ -81,6 +81,14 @@ def composeImage(view, width, height, transparent=False, gizmo=True, cellInfo=Tr
             painter.translate(label.x() * scale, label.y() * scale)
             painter.scale(scale, scale)
             label.render(painter, QPoint(0, 0))   # vector text: sharp at any scale
+            painter.resetTransform()
+        if caption and view.captionLabel.isVisible():
+            label = view.captionLabel
+            # Kept in the top-right corner: placed from the right edge of the image
+            right = (view.width() - label.x() - label.width()) * scale
+            painter.translate(width - right - label.width() * scale, label.y() * scale)
+            painter.scale(scale, scale)
+            label.render(painter, QPoint(0, 0))
     finally:
         painter.end()
     return image
@@ -127,12 +135,16 @@ class ImageExportDialog(QDialog):
         self.transparentCheckBox = QCheckBox('Transparent background (PNG, TIFF)')
         self.gizmoCheckBox = QCheckBox('Axes')
         self.cellInfoCheckBox = QCheckBox('Cell parameters')
+        self.captionCheckBox = QCheckBox('Caption')
+        self.captionCheckBox.setToolTip('What the view shows: the density of which particle, the other fixed where')
+        self.captionCheckBox.setEnabled(view.captionLabel.isVisible())
         self.gizmoCheckBox.setEnabled(view.gizmo is not None and view.gizmo.isVisible())
         self.cellInfoCheckBox.setEnabled(view.cellInfoLabel.isVisible())
 
         overlays = QHBoxLayout()
         overlays.addWidget(self.gizmoCheckBox)
         overlays.addWidget(self.cellInfoCheckBox)
+        overlays.addWidget(self.captionCheckBox)
         overlays.addStretch(1)
 
         form = QFormLayout()
@@ -162,6 +174,7 @@ class ImageExportDialog(QDialog):
         self.transparentCheckBox.setChecked(self.settings.value('imageExport/transparent', False, type=bool))
         self.gizmoCheckBox.setChecked(self.settings.value('imageExport/gizmo', True, type=bool))
         self.cellInfoCheckBox.setChecked(self.settings.value('imageExport/cellInfo', False, type=bool))
+        self.captionCheckBox.setChecked(self.settings.value('imageExport/caption', True, type=bool))
 
     def isCustom(self):
         return self.scaleComboBox.currentIndex() >= len(self.SCALES)
@@ -186,10 +199,12 @@ class ImageExportDialog(QDialog):
         self.settings.setValue('imageExport/transparent', self.transparentCheckBox.isChecked())
         self.settings.setValue('imageExport/gizmo', self.gizmoCheckBox.isChecked())
         self.settings.setValue('imageExport/cellInfo', self.cellInfoCheckBox.isChecked())
+        self.settings.setValue('imageExport/caption', self.captionCheckBox.isChecked())
         super().accept()
 
     def composedImage(self):
         width, height = self.imageSize()
         return composeImage(self.view, width, height, self.transparentCheckBox.isChecked(),
                             self.gizmoCheckBox.isChecked() and self.gizmoCheckBox.isEnabled(),
-                            self.cellInfoCheckBox.isChecked() and self.cellInfoCheckBox.isEnabled())
+                            self.cellInfoCheckBox.isChecked() and self.cellInfoCheckBox.isEnabled(),
+                            self.captionCheckBox.isChecked() and self.captionCheckBox.isEnabled())

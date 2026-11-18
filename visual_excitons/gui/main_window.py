@@ -1135,7 +1135,7 @@ class MainWindow(QMainWindow):
 
     # The export dialogs' choices, as kept in the settings (see the dialogs)
 
-    IMAGE_EXPORT_KEYS = {'scale': int, 'width': int, 'transparent': bool, 'gizmo': bool, 'cellInfo': bool}
+    IMAGE_EXPORT_KEYS = {'scale': int, 'width': int, 'transparent': bool, 'gizmo': bool, 'cellInfo': bool, 'caption': bool}
 
     def figureExportState(self):
         try:

@@ -615,7 +615,9 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     # Not part of a setup: files and checks, calculations and exports (their results are, see the other tests)
     notSetup = {'Browse…', 'Details…', 'Check all BSE', 'Compute dispersion', 'Add spectrum',
                 'Compute its wave function', 'Compute wave function', 'Export figure…', 'Image…', 'Density…',
-                'Show its composition', 'Export data…', 'Export image…', 'Analyse'}
+                'Show its composition', 'Export data…', 'Export image…', 'Analyse', 'Compute the hole density',
+                # Disabled here (no particle density): it sets the position fields, covered by the control sweep
+                'Place at the maximum'}
     # Something for each button to change
     before = {'Set Q-path': lambda: w.system.qPathLineEdit.setText('GLZ'),
               'Apply': lambda: [edit.setText(text) for edit, text in zip(p3.viewDirLineEdits, ('1', '0', '0'))],

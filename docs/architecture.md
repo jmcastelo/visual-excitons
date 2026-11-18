@@ -65,6 +65,7 @@ visual_excitons/
 │   ├── lattice_info.py     The crystal described in the System panel: lattice, space group, formula, k-grid
 │   ├── kspace.py           What the Composition panel draws: plane maps, zone points, special points, CSV
 │   ├── memory.py           Real-space grid, memory estimates, G-vector shells (cutoff in RL)
+│   ├── placement.py        Placing the fixed particle: its density at a position, nearest atoms
 │   ├── atomic_data.py      Symbols, covalent radii, Jmol colors, Bohr/Å constants
 │   └── style.py            Style objects of the 2D plots (pens, symbols, axes, legend); state() / setState()
 ├── gui/                    Widgets and rendering
@@ -103,6 +104,7 @@ visual_excitons/
 │   ├── bse/exciton_bands.py   Excitonic band structure at any Q: weights per band, interpolation along a path
 │   ├── bse/exciton_symmetry.py  Irreducible representations of exciton groups (little group of Q), returned
 │   ├── bse/exciton_spin.py      Exciton spin along any axis; spin matrix elements with low memory
+│   ├── bse/exciton_particle_density.py  The hole's or electron's own density, through NTOs per k-point
 │   └── dbs/qp_energies.py     QP energies read by content (any file name, split databases too)
 tests/                      pytest suite (see Testing); tests/yambopy_ext: those of yambopy_ext, no Qt
 docs/                       User and developer documentation (this document: architecture.md)
@@ -189,6 +191,7 @@ Every Yambo-based calculation, as **compute functions** (module level, pure: the
 | `recomputeAbsorptionSpectra()` | `computeAbsorption` (each curve) | `excitonAbsorptionReady` |
 | `getExcitonBandStructure(points, _)` | `computeBandStructure` | `excitonBandStructureNumCurvesChanged/Init/Ready` |
 | `computeExcitonWaveFunction(...)` | `computeWaveFunction` | `wfComputed` |
+| `computeParticleDensity(q, exc, particle, cutoff)` | `computeParticleDensity` | `particleDensityReady` |
 | `exportDensity(filename)` | `export.writeDensity` | `densityExported(str)` |
 
 Other responsibilities:
@@ -209,6 +212,7 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `analysis.py` | `planeCut`, `planeAxes`, `planeSupercellPolygon`, `atomsNearPlane`, `radialDistribution`, `upsampleDensity`, `voxelVectors`, `gridPositions` | Trilinear interpolation (SciPy), truncation indicator `boundary` |
 | `export.py` | `writeCube`, `writeXsf`, `writeDensity`, `supercellAtoms` | Vectorized writers; scientific notation |
 | `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory`, `GVectorShells` | Grid as yambopy computes it; memory from array shapes; Ry ↔ RL |
+| `placement.py` | `gridIndex`, `gridPosition`, `densityShare`, `nearestAtom` | The fixed particle on the grid of its density (as `ex_wf2Real` snaps it) |
 | `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only (and the `Dataset` class, above) |
 | `databases.py` | `identify`, `qpDatabases`, `bseFiles`, `computedQPoints`, `qPointNames` | Databases by their content (see above) |
 | `consistency.py` | `checkDataset`, `summary` | Findings with a level, an area and a text |
@@ -227,8 +231,15 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 - `bz/wigner_seitz.py`: the zone from scipy's Voronoi construction (all lattices, oblique and 3D included), unlike `yambopy.plot.plotting.BZ_Wigner_Seitz`.
 - `bse/exciton_bands.py`: the excitonic band structure at any Q (see the next section). It replaces `YamboExcitonDB.interpolate` and its QP band range bug: it takes the QP energies from the first columns of the QP database whatever its range, so with BiI3's `ndb.QP` (bands 140-157) for a BSE on bands 139-152 every band is one too high (`test_band_structure.py` documents it).
 - `bse/exciton_symmetry.py`: the analysis of `yambopy.bse.exciton_irreps.compute_exc_rep`, rebuilt on its YamboPy pieces (`rotate_exc_wf`, `get_pg_info`, `decompose_rep2irrep`, `Crystal_Symmetries`, `YamboWFDB.Dmat`), but returning its results, writing no files, raising exceptions instead of `exit()`, analysing only the groups asked, computing the representation matrices of the little group of Q only and taking those of earlier calls (a dict, symmetry index → matrices). It works around `get_pg_info`'s 1D character table for C1 (issue 19 of [yambopy-issues.md](yambopy-issues.md)).
+- `bse/exciton_particle_density.py`: the density of the hole or of the electron (next section). Nothing in YamboPy computes it (issue 21).
 - `bse/exciton_spin.py`: `spin_matrix_elements` sums over the plane waves first, on the irreducible k-points (2×2 spinor matrices per band pair), and applies the operator, rotated with the SU(2) matrices of each k-point's symmetry, afterwards: the same as `YamboWFDB.get_spin_m_e_BZ` (to 1e-15) with memory proportional to the irreducible k-points (issue 18). `exciton_spin` diagonalises the total S·n within each degenerate group and gives the electron's and hole's parts in that basis, so they add up per state (YamboPy diagonalises them separately).
 - `dbs/qp_energies.py`: QP energies from `QP_table`, `QP_E` and `QP_Eo`. `YamboQPDB` recognises QP databases by file name, so it cannot read a renamed one, nor the split ones (`ndb.QP_140_146`), which have the same variables.
+
+### Placing the fixed particle: particle densities
+
+The wave function `ex_wf2Real` computes is Ψ(r_e, r_h) = Σ_kcv A_kcv ψ_ck(r_e) ψ*_v,k−Q(r_h) with one particle fixed. The density of the hole, ρ_h(r_h) = ∫ |Ψ|² dr_e = Σ_k Σ_c |Σ_v A_kcv ψ*_v,k−Q(r_h)|² (the electron: c and v swapped), is exact by orthonormality, periodic with the lattice, and equal to the total weight of the wave function computed with the hole at r_h. `yambopy_ext/bse/exciton_particle_density.py` computes it through natural transition orbitals per k-point: the eigenvectors of M_k = Σ_states A_k⁺A_k (v × v; for the electron conj(A_k)A_kᵀ, c × c), at most min(n_c, n_v) per state instead of n_v bands, exact for degenerate groups summed. Its weights add up to the number of states, and dropping the smallest (`select_nto`, `PARTICLE_DENSITY_WEIGHT` = 0.999 kept) drops a density that integrates to exactly what was dropped. The density is computed on the grid of `ex_wf2Real` at the wave function's cutoff (`wavefunction_grid` repeats its choice of plane waves and FFT box; same k−Q pairing via `wfcdb.ktree`, same rotations and conjugation), so that its maxima are fixed positions used as they are (`ex_wf2Real` snaps the fixed particle to that grid) and the density is the one consistent with that cutoff (it changes its details: for the BiI3 hole, the bismuth peak is on the nucleus at 10 Ry, a 0.31 Å shell at full cutoff). Checked against `ex_wf2Real` over one Born–von Kármán period (`test_density_is_the_weight_of_the_wave_function_computed`; issue 20: `ex_wf2Real` turns an even supercell into an odd one, one slab more than a period) and against the definition on synthetic data (`tests/yambopy_ext`). Timings: 1–2 s at 10 Ry for BiI3 8×8×8 and WSe2 72×72×1, 15 s at full cutoff for BiI3, once the wave functions are loaded (`loadWavefunctionDB`, cached and shared with the wave function and the symmetry analysis). Newton's method on the exact plane-wave sums was tried for the maxima and dropped: slower than the grid, and its precision is lost to the grid snapping.
+
+`Calculations.computeParticleDensity` runs it (key `particle-density`) and keeps the result in `particleDensity` (with `maxima`, grid indices of the local maxima above 10%; in session results, cleared by `resetDataset`). `WavefunctionControls.buildPlacementSection` compares it with what it would be computed for now (`densityRequest`: Q-point, exciton, particle, cutoff, degenerate setting) to say it is out of date, reads it at the position (`placement.densityShare`) and places at its largest maximum through the position fields (`placeAtMaximum`). The caption (`WavefunctionView.setCaption`, from `WavefunctionPanels.updateCaption` on `wfComputed`) says which density the view shows.
 
 ### Cutoff in RL (`memory.GVectorShells`)
 
@@ -614,7 +625,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - `noUnexpectedDialogs` (autouse) makes the `QMessageBox` static functions fail the test: offscreen, a message box would wait forever for an answer. Tests that expect one replace it with `monkeypatch`.
 - `deleteWindows` (autouse) deletes the top-level widgets each test leaves. Closed windows stay alive through their signal connections, and every theme change repolishes all of them: without it, the GUI tests get slower and slower as they run (several times slower in total).
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_cutoff` (Ry and RL), `test_core` (datasets, parameters, selection, absorption curves), `test_databases` (databases by content, QP chooser, consistency checks), `test_sparse_q_points`, `test_band_structure`, `test_composition` (k-space maps, replicas), `test_character` (symmetry and spin), `test_cell_shift`, `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip, sessions of earlier versions in `tests/sessions`), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data); `tests/yambopy_ext` for `yambopy_ext`.
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_cutoff` (Ry and RL), `test_core` (datasets, parameters, selection, absorption curves), `test_databases` (databases by content, QP chooser, consistency checks), `test_sparse_q_points`, `test_band_structure`, `test_composition` (k-space maps, replicas), `test_character` (symmetry and spin), `test_particle_density` (hole and electron densities, placing the fixed particle, the caption), `test_cell_shift`, `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip, sessions of earlier versions in `tests/sessions`), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data); `tests/yambopy_ext` for `yambopy_ext`.
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 

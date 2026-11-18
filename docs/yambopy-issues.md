@@ -27,6 +27,8 @@ Each section starts with a hidden comment (`<!-- ... -->`) with its status, when
 | 17 | `compute_exc_rep` only prints, writes caches into the data folders and calls `exit()` | Not filed |
 | 18 | `YamboWFDB.get_spin_m_e_BZ` copies the wave functions to the whole Brillouin zone | Not filed |
 | 19 | `compute_exc_rep` fails at Q-points whose little group is trivial (C1) | Not filed |
+| 20 | `ex_wf2Real` silently enlarges even supercells, so the Born–von Kármán supercell cannot be used | Not filed |
+| 21 | No density of the hole or of the electron of an exciton | Not filed (enhancement) |
 
 ---
 
@@ -365,3 +367,40 @@ ValueError: Einstein sum subscript j does not contain the correct number of indi
 so `compute_exc_rep` cannot analyse excitons at such Q-points (e.g. Q12 = (0, 1/8, −1/8) of a BiI3 bulk calculation, where every exciton is simply A).
 
 **Suggested fix:** return the table as a 2D array (irreps × classes) in `get_pg_info` for every group, or reshape it in `decompose_rep2irrep`: `char_table = np.asarray(char_table).reshape(len(irrep_labels), len(class_order))`.
+
+---
+
+<!-- Status: not filed. Found 2026-11-18 (BiI3 bulk 8x8x8, checking the hole density of yambopy_ext.bse.exciton_particle_density against ex_wf2Real). Check: whether an even supercell is ever needed by other users, and what the docstring should promise. -->
+## 20. `ex_wf2Real` silently enlarges even supercells, so the Born–von Kármán supercell cannot be used
+
+`ex_wf2Real_kernel` (`yambopy/bse/realSpace_excitonwf.py`) increases every even supercell size by one, so that the fixed particle can sit in the central cell:
+
+```python
+for i in range(3):
+    if supercell[i]%2 == 0:
+        print('Warning : Even supercell given, so increasing'
+              + ' supercell size along %d direction by 1'%(i+1))
+        supercell[i] = supercell[i] +1
+```
+
+It also modifies the caller's list in place. Only a printed warning tells, and printed output is easily lost (e.g. in a GUI or a notebook with output captured).
+
+This matters when the supercell is meant to be the Born–von Kármán supercell (the k-point grid, e.g. 8 × 8 × 8), over which the exciton wave function is exactly periodic: asking for it gives 9 × 9 × 9 cells, one more period slab of the exciton. For example, the total weight of the wave function over the supercell is then not the density of the fixed particle at its position (it is, over exactly one period), off by about 1 % for an exciton of BiI3.
+
+**Suggested fix:** do not modify the argument (copy it), and either allow even supercells (placing the fixed particle in the cell `supercell // 2`, not necessarily central) or raise a `ValueError` that says why sizes must be odd; return the supercell used (already in `supercell_latvecs`, but not as sizes).
+
+---
+
+<!-- Status: not filed (enhancement). Found 2026-11-18. Code to contribute: visual_excitons/yambopy_ext/bse/exciton_particle_density.py, with tests in tests/yambopy_ext/test_exciton_particle_density.py. -->
+## 21. No density of the hole or of the electron of an exciton
+
+`ex_wf2Real` computes the exciton wave function with one particle fixed, but nothing in YamboPy tells where to fix it. The natural guide is the density of that particle, wherever the other one is: for the hole
+
+    ρ_h(r_h) = ∫ |Ψ(r_e, r_h)|² dr_e = Σ_k Σ_c | Σ_v A_kcv ψ*_v,k−Q(r_h) |²
+
+(and for the electron the same with c and v swapped), exact by the orthonormality of the Bloch functions. The total weight of the wave function computed with the hole at r₀ is ρ_h(r₀), so fixing the hole where ρ_h is small gives a weak, noisy electron density; for bands of p or d character ρ_h vanishes at the nuclei (10⁻⁴ of its maximum on the iodine atoms of BiI3, whose maxima are 0.8–0.9 Å away), so the common choice of fixing the hole on an atom can be poor.
+
+With natural transition orbitals per k-point (the eigenvectors of Σ_states A_k⁺A_k), it takes at most min(n_c, n_v) orbitals per k and a second or two on the grid `ex_wf2Real` uses at 10 Ry (BiI3 8×8×8, WSe2 72×72×1), exactly for groups of degenerate states.
+
+**Proposal:** add `exciton_particle_density` (the density on the grid of `ex_wf2Real` at a given cutoff, so that its maxima are fixed positions used as they are), `particle_nto` and `density_maxima` to `yambopy.bse`, e.g. next to `realSpace_excitonwf`; an implementation following YamboPy's conventions is in Visual Excitons (`yambopy_ext/bse/exciton_particle_density.py`).
+

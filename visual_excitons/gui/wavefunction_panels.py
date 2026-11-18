@@ -92,6 +92,8 @@ class WavefunctionPanels(QObject):
         self.controls.showReciprocalVectorsChanged.connect(self.view.setShowReciprocalVectors)
         self.controls.showAxisLabelsChanged.connect(gizmo.setShowLabels)
         self.controls.showCellInfoChanged.connect(self.view.setShowCellInfo)
+        self.controls.showCaptionChanged.connect(self.view.setShowCaption)
+        self.calculations.wfComputed.connect(self.updateCaption)
 
         # Initial view from the view widgets' default state
         self.controls.applyView()
@@ -176,10 +178,24 @@ class WavefunctionPanels(QObject):
         self.view.setCutPlane(polygon)
 
     @Slot(bool)
+    def updateCaption(self):
+        """Say in the view what it shows: the density of which particle, of which exciton, the other fixed where."""
+        calc = self.calculations
+        if calc.waveFunction is None:
+            self.view.setCaption(None)
+            return
+        fixed, free = ('hole', 'Electron') if calc.wfFixedParticle == 'h' else ('electron', 'Hole')
+        q, exc = calc.wfExciton
+        states = calc.wfStates or [exc]
+        which = f'exciton {exc}' if len(states) == 1 else f'excitons {states[0]}–{states[-1]}'
+        position = ', '.join(f'{float(x) % 1.0 + 0.0:.4f}' for x in calc.wfFixedPosition)
+        self.view.setCaption(f'{free} density of {which} at Q{q + 1}<br>{fixed} fixed at ({position})')
+
     def onDatasetChanged(self, found: bool):
         """Drop the wave function of the previous dataset and draw the new lattice."""
         self.view.clearWfItems()
         self.view.setCutPlane(None)
+        self.view.setCaption(None)
         self.radialResult = None
         self.displayCache.clear()
         self.analysis.clear()

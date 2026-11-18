@@ -14,6 +14,8 @@ from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormap
 from visual_excitons.core.cellshift import wrapShift
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 from visual_excitons.core.memory import availableMemory, formatBytes
+from visual_excitons.core.placement import densityShare, nearestAtom, gridPosition
+from visual_excitons.core.atomic_data import chemical_symbols
 
 # Warn when a calculation would use more than this fraction of the available memory
 MEMORY_WARNING_FRACTION = 0.9
@@ -92,6 +94,7 @@ class WavefunctionControls(Inspector):
     showReciprocalVectorsChanged = Signal(bool)
     showAxisLabelsChanged = Signal(bool)
     showCellInfoChanged = Signal(bool)
+    showCaptionChanged = Signal(bool)
     isoSetStyleChanged = Signal(int)
     exportImageRequested = Signal()
     colormapChanged = Signal(object)   # pyqtgraph ColorMap
@@ -112,6 +115,7 @@ class WavefunctionControls(Inspector):
 
         self.buildExcitonSection()
         self.buildCalculationSection()
+        self.buildPlacementSection()
         self.buildDisplaySection()
         self.buildViewSection()
         self.buildStructureSection()
@@ -305,6 +309,101 @@ class WavefunctionControls(Inspector):
         self.cellShiftChanged.connect(self.updateShownPosition)
         self.fixedParticlePosChanged.connect(self.updateShownPosition)
         self.updateShownPosition()
+
+    def buildPlacementSection(self):
+        """The own density of the fixed particle: how good its position is, and where it is largest."""
+        self.computeDensityButton = QPushButton()
+        self.computeDensityButton.clicked.connect(self.computeParticleDensity)
+        self.placeAtMaximumButton = QPushButton('Place at the maximum')
+        self.placeAtMaximumButton.setToolTip('Put the fixed particle where its own density is largest (a point of the '
+                                             'grid of the wave function at this cutoff)')
+        self.placeAtMaximumButton.clicked.connect(self.placeAtMaximum)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(self.computeDensityButton)
+        buttons.addWidget(self.placeAtMaximumButton)
+        buttons.addStretch(1)
+        self.densityExplanation = NoteLabel()
+        self.densityReadout = NoteLabel()
+        form = formLayout()
+        form.addRow(self.densityExplanation)
+        form.addRow(buttons)
+        form.addRow(self.densityReadout)
+        self.addSection('Placing the fixed particle', form)
+        # Whatever changes the density asked for, or the position it is read at
+        for signal in (self.particleTypeComboBox.currentIndexChanged, self.qPointSpinBox.valueChanged,
+                       self.excitonIndexSpinBox.valueChanged, self.wfCutoffSpinBox.valueChanged,
+                       self.fullCutoffCheckBox.toggled, self.fixedParticlePosChanged,
+                       self.calculations.particleDensityReady, self.calculations.sumDegenerateChanged,
+                       self.calculations.wfComputed):
+            signal.connect(self.updateDensityReadout)
+        self.dataset.databaseFound.connect(self.updateDensityReadout)
+        self.updateDensityReadout()
+
+    def particleNames(self):
+        """The fixed particle and the other one: ('hole', 'electron') or ('electron', 'hole')."""
+        return ('hole', 'electron') if self.parameters.particle == 'h' else ('electron', 'hole')
+
+    def densityRequest(self):
+        """What the density would be computed for now: Q-point, exciton, particle, cutoff, degenerate states."""
+        return (self.qPointIndex(), self.excitonIndexSpinBox.value(), self.parameters.particle, float(self.cutoff()),
+                bool(self.calculations.sumDegenerate))
+
+    def currentDensity(self):
+        """The particle density computed, if it is the one asked for now; else None."""
+        d = self.calculations.particleDensity
+        if d is None:
+            return None
+        computed = (d['qIndex'], d['excIndex'], d['particle'], float(d['cutoff']), bool(d['degenerate']))
+        return d if computed == self.densityRequest() else None
+
+    @Slot()
+    def computeParticleDensity(self):
+        q, exc, particle, cutoff, _ = self.densityRequest()
+        self.calculations.computeParticleDensity(q, exc, particle, cutoff)
+
+    @Slot()
+    def updateDensityReadout(self, *args):
+        fixed, other = self.particleNames()
+        self.computeDensityButton.setText(f'Compute the {fixed} density')
+        self.computeDensityButton.setEnabled(bool(self.dataset.saveDir and self.dataset.diagoDir))
+        self.densityExplanation.setText(
+            f'The {fixed} density: where the {fixed} is, wherever the {other} is. Where it is small, the {other}\'s '
+            f'density computed is weak and noisy; for bands of p or d character it vanishes on the atoms.')
+        d = self.currentDensity()
+        self.placeAtMaximumButton.setEnabled(d is not None)
+        if d is None:
+            old = self.calculations.particleDensity
+            if old is None:
+                self.densityReadout.setText('Not computed yet.')
+            else:
+                name = 'hole' if old['particle'] == 'h' else 'electron'
+                cutoff = 'all plane waves' if old['cutoff'] < 0 else f'{old["cutoff"]:g} Ry'
+                self.densityReadout.setText(f'Out of date: computed for the {name} of exciton {old["excIndex"]} at '
+                                            f'Q{old["qIndex"] + 1} ({cutoff}{", degenerate states summed" if len(old["states"]) > 1 else ""}). '
+                                            'Compute it again for the settings of now.')
+            return
+        density = np.asarray(d['density'])
+        share = densityShare(density, self.parameters.position())
+        text = f'{fixed.capitalize()} density here: <b>{100 * share:.0f} %</b> of its largest'
+        if d['maxima'] and self.dataset.hasCell() and len(self.dataset.atomicNumbers):
+            maximum = gridPosition(d['maxima'][0], density.shape)
+            i, distance = nearestAtom(maximum, self.dataset.cell, self.dataset.atomicPositions)
+            text += f' (largest {distance:.2f} Å from {chemical_symbols[self.dataset.atomicNumbers[i]]})'
+        if len(d['states']) > 1:
+            text += f'; states {d["states"][0]}–{d["states"][-1]} summed'
+        self.densityReadout.setText(text + '.')
+
+    @Slot()
+    def placeAtMaximum(self):
+        d = self.currentDensity()
+        if d is None or not d['maxima']:
+            return
+        position = gridPosition(d['maxima'][0], np.asarray(d['density']).shape)
+        for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit),
+                                   position):
+            lineEdit.setText(f'{value + 0.0:.4f}')
+        self.particlePositionChanged()
 
     def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
@@ -709,6 +808,8 @@ class WavefunctionControls(Inspector):
             ('Reciprocal a*, b*, c*', self.showReciprocalVectorsChanged, False, 'Light red, green and blue arrows in the axes gizmo'),
             ('Axis labels', self.showAxisLabelsChanged, True, 'Labels at the tips of the gizmo arrows'),
             ('Cell parameters', self.showCellInfoChanged, True, 'Lattice constants and angles in the top-left corner'),
+            ('Caption', self.showCaptionChanged, True, 'What the view shows, in the top-right corner: the density of '
+             'which particle, the other one fixed where'),
         ]):
             box = QCheckBox(text)
             box.setToolTip(tooltip)
