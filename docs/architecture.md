@@ -5,7 +5,7 @@ This document explains how Visual Excitons is built: where things live, how data
 Contents:
 
 1. [Overview](#1-overview)
-2. [Repository layout and names](#2-repository-layout-and-names)
+2. [Repository layout](#2-repository-layout)
 3. [Architecture at a glance](#3-architecture-at-a-glance)
 4. [Core layer](#4-core-layer)
 5. [Background calculations](#5-background-calculations)
@@ -41,7 +41,7 @@ It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__
 
 ---
 
-## 2. Repository layout and names
+## 2. Repository layout
 
 ```
 visual_excitons/
@@ -109,14 +109,7 @@ docs/                       User and developer documentation (this document: arc
 data/                       Test datasets (not in the repository)
 ```
 
-**Historical names.** Some classes kept their original names after the GUI was reorganized into panels. The mapping:
-
-| Class | File | What it is now |
-|---|---|---|
-| `SystemPanel` | `system_panel.py` | The **System** panel |
-| `SpectraControls` | `spectra_controls.py` | The **Spectra controls** panel (inspector) |
-| `WavefunctionControls` | `wavefunction_controls.py` | The **Wave function controls** panel |
-| `WavefunctionView` | `wavefunction_view.py` | The 3D view |
+GUI classes are named after what the user sees: a panel's contents after its title (`SystemPanel`, `SpectraControls`, `WavefunctionControls`, `AnalysisPanel`, `CompositionPanel`), a plot or a 3D view after what it shows (`DispersionPlot`, `WavefunctionView`), and the module after its class in snake case.
 
 ---
 
@@ -140,7 +133,7 @@ flowchart TB
         PAR["SpectraParameters,<br/>WavefunctionParameters"]
         CALC[Calculations]
         TASKS[TaskRunner]
-        PURE["Pure modules:<br/>bonds, analysis, export,<br/>memory, dataset"]
+        PURE["Pure modules:<br/>bonds, analysis, export,<br/>memory, kspace, lattice_info"]
     end
 
     SYS <--> DS
@@ -168,7 +161,7 @@ The rules behind this structure:
 
 ### `Dataset` (`core/dataset.py`) and the parameters (`core/parameters.py`)
 
-`Dataset` is the dataset open (`MainWindow.dataset`; `MainWindow.datasetRecord` is how it is remembered, a dict of its directories, Q-path and state for the recent list and sessions); `close()` forgets it. It holds:
+`Dataset` is the dataset open (`MainWindow.dataset`; `MainWindow.datasetRecord` is how it is remembered, a dict of its directories, Q-path and state for the recent list and sessions); `close()` forgets it. It holds the following (with the modules it relies on):
 
 - Data directories (`saveDir`, `diagoDir`, `qpDir`), calculation type (`gw`), number of Q-points (`nQpoints`).
 - Lattice: `cell` (lattice vectors, rows, Bohr), `latticeParameters`, `ibrav`, `variant`, high-symmetry points, the Q-path `qBZ` (a yambopy `BrillouinZone`) and extra points.
@@ -179,11 +172,11 @@ The rules behind this structure:
 
 The parameters set in the controls are plain dataclasses, without signals (the controls emit their own): `SpectraParameters` (exciton count, energy range and step, bright threshold; `setEnergyMin` / `setEnergyMax` / `setEnergyStep` keep the range consistent) and `WavefunctionParameters` (fixed particle and its positions, cutoff, supercell, iso levels, opacities, atom and bond sizes; `position(particle)`, `setPosition(position, particle)`, `positionCartesian(cell)`). Their ranges are those of the controls' widgets. Sessions keep them through the controls' `remember` keys, not by these names (`test_session_saved_before_options_was_split` opens a session saved before they replaced the former `Options` class). Whether the degenerate states are summed with the selected exciton is `Calculations.sumDegenerate` (`setSumDegenerate`, `sumDegenerateChanged`), with what it applies to. View directions (`VIEW_BASES`, `VIEW_PRESETS`, `viewVectorToCartesian(vector, basis, cell)`) and the lattice helpers (`cellParameters`, `tickLabels`, the symmetry tables) are in `core/lattice_info.py`; `computedQPoints` and `qPointNames` in `core/databases.py`.
 
-Key signals: `saveDirChanged`, `diagoDirChanged`, `qpDirChanged`, `databaseFound(bool)`, `numQPointsChanged(int)`, `gwChanged(bool)`, and `datasetAboutToChange`, emitted **before** a new SAVE directory is read (it cancels calculations on the old dataset).
+Key signals: `saveDirChanged`, `diagoDirChanged`, `qpDirChanged`, `qpDatabasesChanged`, `databaseFound(bool)`, `numQPointsChanged(int)`, `qPointsChanged(list)`, `gwChanged(bool)`, and `datasetAboutToChange`, emitted **before** a new SAVE directory is read (it cancels calculations on the old dataset).
 
 `setLatticeData()` clears the Q-path and extra points, which belong to the previous lattice.
 
-Setters clamp values (e.g. energies) rather than raising; widgets read the clamped value back.
+The energy setters of `SpectraParameters` adjust values that would break the range rather than raising; the Spectra controls read the adjusted values back.
 
 ### `Calculations` (`core/calculations.py`)
 
@@ -216,7 +209,11 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `analysis.py` | `planeCut`, `planeAxes`, `planeSupercellPolygon`, `atomsNearPlane`, `radialDistribution`, `upsampleDensity`, `voxelVectors`, `gridPositions` | Trilinear interpolation (SciPy), truncation indicator `boundary` |
 | `export.py` | `writeCube`, `writeXsf`, `writeDensity`, `supercellAtoms` | Vectorized writers; scientific notation |
 | `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory`, `GVectorShells` | Grid as yambopy computes it; memory from array shapes; Ry ↔ RL |
-| `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only |
+| `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only (and the `Dataset` class, above) |
+| `databases.py` | `identify`, `qpDatabases`, `bseFiles`, `computedQPoints`, `qPointNames` | Databases by their content (see above) |
+| `consistency.py` | `checkDataset`, `summary` | Findings with a level, an area and a text |
+| `lattice_info.py` | `latticeSummary`, `cellParameters`, `tickLabels`, `viewVectorToCartesian` | Space group (spglib), formula, k-grid, layer; lattice identification tables; view bases and presets |
+| `cellshift.py` | `detectLayer`, `kGrid`, `wrapShift`, `reducedPositions` | Cell origin and layers (section 9, Persistence) |
 | `figures.py` | `buildFigure(data, styles, options)`, `saveFigure`, `saveData`, `loadData` | **Self-contained** (NumPy, Matplotlib): copied whole into exported scripts, so no imports from the program |
 | `figure_script.py` | `writeFigureScript` | The script is `figures.py` plus a main part loading the data file |
 | `session.py` | `writeSession`, `readSession`, `datasetFingerprint` | See section 9 |
@@ -232,6 +229,10 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 - `bse/exciton_symmetry.py`: the analysis of `yambopy.bse.exciton_irreps.compute_exc_rep`, rebuilt on its YamboPy pieces (`rotate_exc_wf`, `get_pg_info`, `decompose_rep2irrep`, `Crystal_Symmetries`, `YamboWFDB.Dmat`), but returning its results, writing no files, raising exceptions instead of `exit()`, analysing only the groups asked, computing the representation matrices of the little group of Q only and taking those of earlier calls (a dict, symmetry index → matrices). It works around `get_pg_info`'s 1D character table for C1 (issue 19 of [yambopy-issues.md](yambopy-issues.md)).
 - `bse/exciton_spin.py`: `spin_matrix_elements` sums over the plane waves first, on the irreducible k-points (2×2 spinor matrices per band pair), and applies the operator, rotated with the SU(2) matrices of each k-point's symmetry, afterwards: the same as `YamboWFDB.get_spin_m_e_BZ` (to 1e-15) with memory proportional to the irreducible k-points (issue 18). `exciton_spin` diagonalises the total S·n within each degenerate group and gives the electron's and hole's parts in that basis, so they add up per state (YamboPy diagonalises them separately).
 - `dbs/qp_energies.py`: QP energies from `QP_table`, `QP_E` and `QP_Eo`. `YamboQPDB` recognises QP databases by file name, so it cannot read a renamed one, nor the split ones (`ndb.QP_140_146`), which have the same variables.
+
+### Cutoff in RL (`memory.GVectorShells`)
+
+Yambo counts plane waves in RL: the G-vectors of `ns.db1` (`G-VECTORS`, in Cartesian units of 2π/alat, sorted by length), the first N of them. `GVectorShells` turns them into energies |G|² in Ry (Bohr⁻¹ with 2π: Miller indices from `lat`, Cartesian from `rlat`), sorted, and groups them into shells (gaps above 5·10⁻⁴ Ry; the database's order is off by at most 10⁻⁴ Ry). `rl(cutoff)` counts those below a cutoff; `shell(rl, down)` rounds a count to whole shells; `cutoffRy(rl)` gives a cutoff just above the last shell (rounded to the spin box's 3 decimals, at the midpoint if the next shell is closer). `WavefunctionControls` links the Ry and RL spin boxes (`setGVectorShells` on each dataset; the RL box snaps down when its value decreases).
 
 ### Excitonic band structure: interpolation
 
@@ -284,7 +285,7 @@ Results go from the worker to the GUI through a `_Relay` QObject's signals (queu
 - **Generations**: `reset()` (new dataset) cancels everything and increments `generation`; results of tasks submitted before are discarded.
 - **Cancellation** is cooperative: `context.check()` raises `Cancelled` if requested. The progress hooks call it, so yambopy loops stop within a fraction of a second.
 - **Progress**: `context.stage(label, total)` and `context.advance()`, throttled to 20 signals per second.
-- **Synchronous mode**: `Calculations(options, synchronous=True)` runs tasks inline, for tests.
+- **Synchronous mode**: `Calculations(synchronous=True)` runs tasks inline, for tests (with a new `Dataset` and `SpectraParameters` unless given).
 
 ### Progress hooks into yambopy
 
@@ -327,7 +328,7 @@ sequenceDiagram
     MW->>MW: addRecentDataset()
 ```
 
-`MainWindow.openDataset()` merges what was saved for the same SAVE directory (Q-path, parameters) into the dataset, so opening a folder again through `Open dataset` also restores them.
+`MainWindow.openDataset()` merges what was saved for the same SAVE directory (Q-path, parameters) into the dataset's record (`datasetRecord`), so opening a folder again through `Open dataset` also restores them.
 
 ### From the dispersion to the wave function
 
@@ -428,7 +429,6 @@ flowchart LR
 
 - `wf_geometry.py` computes the geometry as pure functions: isosurfaces with **vectorized normals**, isosurface sets as a single mesh (so faces of all levels are sorted together), volume colors.
 - `WavefunctionPanels.prepareDisplay()` decides inline or background (`INLINE_DISPLAY_WORK`), caches the upsampled density (`displayCache`, one copy), and only shows the result of the **latest request** (`displayRequest`) for the current wave function. The shown plot stays until its replacement is ready.
-- `WavefunctionView.plotWf*()` remain as synchronous wrappers (compute + show).
 
 ### Volume (`volume_item.py`)
 
@@ -441,20 +441,6 @@ flowchart LR
 ### Axes gizmo (`axis_gizmo.py`)
 
 `AxisGizmo` is a small transparent `GLViewWidget` child, synced to the main view's rotation. Arrow sets (Cartesian, lattice, reciprocal) are each scaled to fit. It clears to **transparent black**. Labels are `GLTextItem`s.
-
-### Publication figures (`core/figures.py`, `gui/figure_export.py`)
-
-The plots stay interactive with PyQtGraph; figures for papers are drawn separately with Matplotlib from the same data and styles. `figure_export.figureData(calculations, *extra)` and `figureStyles()` translate the results of `Calculations` and the PyQtGraph styles (Qt pens, symbols) into plain values; `extra` are the panels' own data, `CompositionPanel.figureData()` (`kspace`, and `kspace3d` for bulk crystals) and `AnalysisPanel.figureData()` (`planeCut`, `distance`, from the last `showCut` / `showRadial`), so that each comes with the settings shown (the module docstring of `figures.py` lists every panel's keys). The panels compute what they draw in one place for both (`planeFigure`, `zoneFigure`), so the figure matches the screen. Colormaps go as 256-color lookup tables (the CET maps are not in Matplotlib); the 3D zone uses `mplot3d` with `view_init` from the 3D view's camera (`viewAngles`). Colorbars are inset axes of their panel (`figures.colorbar`): a figure colorbar under constrained layout anchors a fixed-aspect panel against it, off centre. A panel's `Export figure…` button calls `MainWindow.exportFigure(panels)`, which checks those panels first; `figures.buildFigure()` draws a `matplotlib.figure.Figure` (not pyplot: no GUI backend, safe anywhere) under `rc_context` options (fonts, sizes); the dialog previews it through the Agg canvas.
-
-`figures.py` must stay **self-contained** (NumPy and Matplotlib only): `figure_script.writeFigureScript()` copies it whole into the exported scripts, which must run without the program (`test_figures.py` runs one with `python -I` from another folder). Text drawn by Matplotlib must exist in every font offered: write symbols missing from some fonts as math text (e.g. `$\Gamma$`: Computer Modern has no Γ text glyph); the tests fail on missing glyphs. Path labels come as yambopy writes them (plain grammar of `yambopy.bz.labels`: `G`, `Sigma1`, `K'`, merged `K — U`); `figures.pathLabels` parses that grammar itself (no yambopy in exported scripts) and typesets them, while the 2D plots use yambopy's own Unicode rendering (`options.tickLabels`, falling back to the plain label, e.g. from an older session).
-
-### Cutoff in RL (`memory.GVectorShells`)
-
-Yambo counts plane waves in RL: the G-vectors of `ns.db1` (`G-VECTORS`, in Cartesian units of 2π/alat, sorted by length), the first N of them. `GVectorShells` turns them into energies |G|² in Ry (Bohr⁻¹ with 2π: Miller indices from `lat`, Cartesian from `rlat`), sorted, and groups them into shells (gaps above 5·10⁻⁴ Ry; the database's order is off by at most 10⁻⁴ Ry). `rl(cutoff)` counts those below a cutoff; `shell(rl, down)` rounds a count to whole shells; `cutoffRy(rl)` gives a cutoff just above the last shell (rounded to the spin box's 3 decimals, at the midpoint if the next shell is closer). `WavefunctionControls` links the Ry and RL spin boxes (`setGVectorShells` on each dataset; the RL box snaps down when its value decreases).
-
-### k-space replicas (`kspace.planeMap(replicas=n)`)
-
-`zones` holds the zone and n rings of replicas (`zoneShifts`: centres within n·√2 of the shortest in-plane vector, nearest first). For a layer, or the sum over planes, the replicas are in-plane copies. For a plane k₃ = l₀ of a bulk crystal, the zones it crosses are displaced by G = i b₁ + j b₂ + l b₃; their section is the central zone's section at level l₀ − l, shifted by the projection of G. With l = 0 only, in-plane copies would leave gaps off Γ (`test_replicas_tile_the_plane` checks the areas). The Composition panel draws every zone's tiles clipped to its own outline (`TileMapItem`).
 
 ### Image export (`image_export.py`)
 
@@ -521,7 +507,7 @@ Values kept between sessions are registered with a **scope**:
 - `GLOBAL`: user preferences (display, view, layout), saved in the settings as one JSON blob under `state`.
 - `DATASET`: parameters of a system (energy range, exciton, fixed particle positions, supercell, cutoff...), saved with each dataset in `recentDatasets`.
 
-Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, `appearance` for the 2D plot styles, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
+Each panel has a `PersistentState`; `MainWindow` collects them in a `StateRegistry` under prefixes (`spectra`, `wavefunction`, `appearance` for the 2D plot styles, `appearancePanel`, `composition`, `exports` for the export dialogs' choices, and `wavefunctionLayout` for the camera: a name from when it was kept with the page layout, unchanged so that earlier settings and sessions keep their camera). Values are restored **by setting the widgets**, in registration order, so they go through the same code as a user edit. `afterRestore` hooks apply what widgets don't apply by themselves. Values that must be restored together (e.g. the energy range, whose bounds clamp each other) are registered as one entry with custom `get`/`set`.
 
 The **2D plot styles** are one `GLOBAL` entry (`appearance/styles`): `appearance.appearanceState()` gathers `state()` of the three styles (common pen and symbol, the style of each curve, axes colors, fonts and width, legend, fill, weight factor) with the theme they were made on; `restoreAppearance()` maps the colors that were that theme's defaults to the current theme's, then calls `setState()`, and `AppearancePanel.refresh()` shows the values (with the widgets' signals blocked: showing a value must not apply it). The style of each curve only applies when there are as many curves as when saved: at startup there are none, so only the common style applies; `MainWindow.openSession` applies the session's again after `restoreResults`, which gives restored curves the common style.
 
@@ -539,11 +525,21 @@ The **camera** (`WavefunctionView.cameraState()` / `setCameraState()`) is a `DAT
 
 The panel draws a plane map (`TileMapItem`: one polygon per k-point, the 2D Voronoi cell of the grid, clipped to the zone's outline; points up to a tile outside the zone fill the edges of bulk sections) or, for bulk crystals, the zone in 3D (`KSpaceView`, a quaternion `GLViewWidget` with its own gizmo showing the reciprocal vectors; the k-points as one translucent `SortedMeshItem` of spheres, `spheresMeshData` with the headlight shader, drawn in the translucent stage as the wave function's surfaces). Layers (the vacuum axis of `Dataset.latticeSummary`) only have the plane map. Its settings are a `PersistentState` (`composition` in the registry): the plane and the 3D camera with the dataset; the camera is `None` until the zone is fitted or the camera restored, so that a dataset without a camera of its own gets the zone fitted (`cameraSet`, reset by `clear` on a new dataset).
 
+### k-space replicas (`kspace.planeMap(replicas=n)`)
+
+`zones` holds the zone and n rings of replicas (`zoneShifts`: centres within n·√2 of the shortest in-plane vector, nearest first). For a layer, or the sum over planes, the replicas are in-plane copies. For a plane k₃ = l₀ of a bulk crystal, the zones it crosses are displaced by G = i b₁ + j b₂ + l b₃; their section is the central zone's section at level l₀ − l, shifted by the projection of G. With l = 0 only, in-plane copies would leave gaps off Γ (`test_replicas_tile_the_plane` checks the areas). The Composition panel draws every zone's tiles clipped to its own outline (`TileMapItem`).
+
 ### Symmetry and spin (`computeCharacter`, Composition panel)
 
 `Calculations.computeCharacter(axis)` analyses the selected exciton on request (the Composition panel's Symmetry and spin tab, `characterRequested`): `computeCharacter` reads its BSE database (the states up to it plus 20, more if its degenerate group reaches the last one read), groups the states within `SYMMETRY_DEGENERACY_EV` (1 meV; the 10 meV of `DEGENERACY_EV` lumps nearby states into reducible groups), loads the wave functions with `loadWavefunctionDB` (the cache the wave function uses, so they are loaded once for both), then `exciton_irreps` and, with spinors, `exciton_spin`. Expected problems (coupling, projective representations, a group that does not decompose) are part of the result (`irrepsError`, `notes`), shown in the tab, not raised.
 
 The electronic representation matrices are the costly part (`DMAT_SECONDS_PER_KPOINT`, 0.02 s per k-point and symmetry: 12 s per symmetry for BiI3 8×8×8, 95 s for WSe2 72×72, which needs 12 at Γ). They do not depend on Q: `symmetryCache` keeps them with the spglib symmetries for the dataset and bands, and the disk cache (`diskCacheFolder/symmetry`, the `CacheLocation` of `QStandardPaths`; tests use Qt's test mode) keeps one `.npy` per symmetry, named by `symmetryCacheKey` (the SAVE files' paths, sizes and modification times, the bands and the rotations), so a dataset pays once. `MainWindow.onCharacterSelection` estimates the time before `Analyse` (k-points × symmetries of `latticeSummary`). The result (`character`) is stored in sessions (`jsonableCharacter`) and summarised in the Selected exciton section (`updateCharacterSummary`).
+
+### Publication figures (`core/figures.py`, `gui/figure_export.py`)
+
+The plots stay interactive with PyQtGraph; figures for papers are drawn separately with Matplotlib from the same data and styles. `figure_export.figureData(calculations, *extra)` and `figureStyles()` translate the results of `Calculations` and the PyQtGraph styles (Qt pens, symbols) into plain values; `extra` are the panels' own data, `CompositionPanel.figureData()` (`kspace`, and `kspace3d` for bulk crystals) and `AnalysisPanel.figureData()` (`planeCut`, `distance`, from the last `showCut` / `showRadial`), so that each comes with the settings shown (the module docstring of `figures.py` lists every panel's keys). The panels compute what they draw in one place for both (`planeFigure`, `zoneFigure`), so the figure matches the screen. Colormaps go as 256-color lookup tables (the CET maps are not in Matplotlib); the 3D zone uses `mplot3d` with `view_init` from the 3D view's camera (`viewAngles`). Colorbars are inset axes of their panel (`figures.colorbar`): a figure colorbar under constrained layout anchors a fixed-aspect panel against it, off centre. A panel's `Export figure…` button calls `MainWindow.exportFigure(panels)`, which checks those panels first; `figures.buildFigure()` draws a `matplotlib.figure.Figure` (not pyplot: no GUI backend, safe anywhere) under `rc_context` options (fonts, sizes); the dialog previews it through the Agg canvas.
+
+`figures.py` must stay **self-contained** (NumPy and Matplotlib only): `figure_script.writeFigureScript()` copies it whole into the exported scripts, which must run without the program (`test_figures.py` runs one with `python -I` from another folder). Text drawn by Matplotlib must exist in every font offered: write symbols missing from some fonts as math text (e.g. `$\Gamma$`: Computer Modern has no Γ text glyph); the tests fail on missing glyphs. Path labels come as yambopy writes them (plain grammar of `yambopy.bz.labels`: `G`, `Sigma1`, `K'`, merged `K — U`); `figures.pathLabels` parses that grammar itself (no yambopy in exported scripts) and typesets them, while the 2D plots use yambopy's own Unicode rendering (`lattice_info.tickLabels`, falling back to the plain label, e.g. from an older session).
 
 ### Sessions (`core/session.py`, `MainWindow`)
 
@@ -554,7 +550,7 @@ A session file is a zip with `session.json` (manifest) and `results.npz` (arrays
 - **Unsaved changes** (`*` in the title, through Qt's `[*]` placeholder and `setWindowModified`): `MainWindow.sessionSignature()` is what a session file would hold, as a JSON string: the state values (except open sections, `/section/`, and the Appearance panel's own settings), the dataset, and, when results are stored, `Calculations.resultsVersion` (increased by `markResultsChanged()` wherever results are applied or cleared, which also emits `resultsChanged`) with the selected exciton. `markSessionSaved()` keeps it when a session is saved or opened (again after a zero-delay timer, once what opening started has settled); `updateModified()` compares, 150 ms after each mouse, key or wheel release (application event filter) and each change of the results. `maybeSaveSession(action)` asks Save / Discard / Cancel before closing (`closeEvent`) and before opening another dataset or session from the menus (not in `openDataset` / `openSession` themselves, which tests and sessions call).
 - **Untitled sessions** (`sessionPath` is `None`, a dataset open): no signature; `updateModified()` marks them only when they have results (`Calculations.hasResults()`) and results are stored in sessions, since their parameters are kept with the dataset anyway. Save in `maybeSaveSession` then goes through `saveSessionAs`. Tests leave windows with results: a teardown hook in `conftest.py` replaces their `maybeSaveSession`, so that closing them does not ask.
 - **Directories chosen by hand**: `SystemPanel` only emits `directoryChosen(kind, path)`; `MainWindow.onDirectoryChosen` checks the databases are there, opens another dataset for a SAVE directory (through `maybeSaveSession` and `openDataset`), or applies a BSE or GW directory to `self.dataset` and to `self.datasetRecord` (so it is remembered and in sessions), clearing what it outdates (`Calculations.resetDataset`, or `resetSpectra` for QP changes, also from `onQPDatabaseChosen` and `onGWChanged`).
-- **New session and the start page**: the program starts with no dataset. `MainWindow.newSession()` stores the dataset's values, then `Dataset.close()` resets the directories, lattice and Q-path and emits the usual signals with nothing found (`databaseFound(False)` resets the calculations, the System panel and the 3D view). `StartPage` (`start_page.py`) is a child of the main window placed over its central widget (the dock manager), not inside it, so the docking layout is untouched; it is shown while `dataset` is `None` and refilled with the recent sessions and datasets whenever their menus are. Widgets with `WA_AlwaysStackOnTop` (the axes gizmo, an OpenGL widget over the 3D view) are drawn over every sibling, the start page included: `MainWindow.setStartPageShown` hides the gizmo while it is shown.
+- **New session and the start page**: the program starts with no dataset. `MainWindow.newSession()` stores the dataset's values, then `Dataset.close()` resets the directories, lattice and Q-path and emits the usual signals with nothing found (`databaseFound(False)` resets the calculations, the System panel and the 3D view). `StartPage` (`start_page.py`) is a child of the main window placed over its central widget (the dock manager), not inside it, so the docking layout is untouched; it is shown while `datasetRecord` is `None` and refilled with the recent sessions and datasets whenever their menus are. Widgets with `WA_AlwaysStackOnTop` (the axes gizmo, an OpenGL widget over the 3D view) are drawn over every sibling, the start page included: `MainWindow.setStartPageShown` hides the gizmo while it is shown.
 - **The export dialogs' choices** (`figureExport/options`, `imageExport/*` in the settings, where the dialogs read and write them) are GLOBAL entries of `exports` in the registry (`figureExportState` / `imageExportState`), so sessions save and restore them.
 - `test_every_control_is_part_of_the_session` changes every control of the panels, and `test_every_button_is_part_of_the_session` clicks every button (answering the color and font dialogs), and both check the session is marked modified; a new control or button whose effect is left out of the persistence registry fails them, unless added to their exclusions (with the reason).
 - Anything new worth keeping in sessions: parameters go through the persistence registry (section 9) and are included automatically; results need `resultsSnapshot` / `restoreResults` (store arrays in `arrays`, everything else JSON-able in `meta`).
@@ -570,7 +566,7 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 | `recentSessions`, `sessionDir` | Recent session files, last session folder |
 | `sessionResults` | Whether results are stored in session files |
 | `exportDir` | Last export folder |
-| `imageExport/*` | Last image export choices |
+| `figureExport/options`, `imageExport/*` | Last figure and image export choices |
 
 ---
 
@@ -587,7 +583,7 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 
 1. Write a compute function at module level in `calculations.py` (or a pure module), taking a `context` and plain arguments; report `context.stage(...)` / `context.advance()` in loops.
 2. Add a method in `Calculations` that validates (and calls `self._reject(message, reason)` on bad input), snapshots its inputs, and submits with an `apply` method that stores results and emits signals. Give it a `key` if repeated requests should replace each other.
-3. Test it with `Calculations(options, synchronous=True)` and fakes (see `test_core.py`), and end to end in `test_workflow.py` if it needs real data.
+3. Test it with `Calculations(synchronous=True)` and fakes (see `test_core.py`), and end to end in `test_workflow.py` if it needs real data.
 
 ### Add something to the 3D scene
 
@@ -602,7 +598,7 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 ## 11. Testing
 
 ```
-pytest                    # fast tests (about 20 s), no display needed
+pytest                    # fast tests (about a minute), no display needed
 pytest -m slow            # end-to-end calculations on data/BiI3_Bulk_8x8x8
 pytest -m "slow or not slow"
 ```
@@ -618,7 +614,7 @@ Configuration in `pyproject.toml`; shared setup in `tests/conftest.py`:
 - `noUnexpectedDialogs` (autouse) makes the `QMessageBox` static functions fail the test: offscreen, a message box would wait forever for an answer. Tests that expect one replace it with `monkeypatch`.
 - `deleteWindows` (autouse) deletes the top-level widgets each test leaves. Closed windows stay alive through their signal connections, and every theme change repolishes all of them: without it, the GUI tests get slower and slower as they run (several times slower in total).
 
-Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_core` (datasets, options, selection, absorption curves), `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data).
+Files: `test_bonds`, `test_rendering` (meshes, normals, volume opacity, cell parameters, colormaps), `test_analysis`, `test_memory`, `test_cutoff` (Ry and RL), `test_core` (datasets, parameters, selection, absorption curves), `test_databases` (databases by content, QP chooser, consistency checks), `test_sparse_q_points`, `test_band_structure`, `test_composition` (k-space maps, replicas), `test_character` (symmetry and spin), `test_cell_shift`, `test_tasks` (threading, hooks), `test_export`, `test_environment` (processes and threads of the test run), `test_persistence`, `test_appearance` (2D plot styles), `test_session` (session files, results round trip, sessions of earlier versions in `tests/sessions`), `test_figures` (publication figures, exported scripts run in a separate process), `test_gui` (the window, offscreen), `test_workflow` (slow, real data); `tests/yambopy_ext` for `yambopy_ext`.
 
 **OpenGL rendering cannot be tested offscreen**: Qt's offscreen platform has no OpenGL, and showing an OpenGL widget there crashes the process. Rendering checks live in `tests/render_checks.py`, run by `test_export.py` in a **separate process on the display** (Wayland or X11, matching the session), and are skipped without one.
 
@@ -678,6 +674,5 @@ Tips:
 
 - Results are kept in session files, not when the program is simply closed and reopened (only parameters and the camera are). A disk cache of results keyed by dataset and parameters would make that automatic.
 - Switching the theme resets the axes colors and the legend text of the 2D plots to the theme's; curves keep their colors unless still at the default.
-- The excitonic band structure is only available at Γ.
 - Boundary atoms (atoms just outside the supercell) and a per-species bond-length table are not implemented.
 - Plain `print` output from yambopy goes to the console.
