@@ -5,7 +5,9 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDouble
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
+from visual_excitons.core.parameters import WavefunctionParameters
+from visual_excitons.core.lattice_info import VIEW_BASES, VIEW_PRESETS, viewVectorToCartesian
 from .inspector import Inspector, formLayout, ValueSlider, NoteLabel
 from .persistence import DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
@@ -98,10 +100,12 @@ class WavefunctionControls(Inspector):
     planeFromViewRequested = Signal()
     exportDensityRequested = Signal()
 
-    def __init__(self, options: Options, calculations: Calculations):
+    def __init__(self, dataset: Dataset, parameters: WavefunctionParameters, calculations: Calculations):
+        """The controls of the wave function of `dataset`, setting `parameters`."""
         Inspector.__init__(self)
 
-        self.options = options
+        self.dataset = dataset
+        self.parameters = parameters
         self.calculations = calculations
         self.calculations.wfComputed.connect(self.onWfComputed)
         self.calculations.excitonSelected.connect(self.onExcitonSelected)
@@ -129,15 +133,15 @@ class WavefunctionControls(Inspector):
     # Sections
 
     def buildExcitonSection(self):
-        self.qPointSpinBox = ChoiceSpinBox(minimum=1, maximum=max(1, self.options.nQpoints))
+        self.qPointSpinBox = ChoiceSpinBox(minimum=1, maximum=max(1, self.dataset.nQpoints))
         self.qPointSpinBox.setToolTip('Q-point of the exciton: the file ndb.BS_diago_Q<n> of the BSE directory '
                                       '(only those computed)')
-        self.options.numQPointsChanged.connect(
+        self.dataset.numQPointsChanged.connect(
             lambda n: self.qPointSpinBox.choices is None and self.qPointSpinBox.setMaximum(max(1, n)))
         # Only the Q-points computed, which may be some of them (e.g. Q1, Q5, Q30)
-        self.options.qPointsChanged.connect(lambda qPoints: self.qPointSpinBox.setChoices([q + 1 for q in qPoints]))
-        if self.options.qPoints:
-            self.qPointSpinBox.setChoices([q + 1 for q in self.options.qPoints])
+        self.dataset.qPointsChanged.connect(lambda qPoints: self.qPointSpinBox.setChoices([q + 1 for q in qPoints]))
+        if self.dataset.qPoints:
+            self.qPointSpinBox.setChoices([q + 1 for q in self.dataset.qPoints])
 
         self.excitonIndexSpinBox = QSpinBox(minimum=1, maximum=99999)
         self.excitonIndexSpinBox.setToolTip('Index of the exciton at that Q-point, in increasing energy')
@@ -147,19 +151,19 @@ class WavefunctionControls(Inspector):
             spinBox.valueChanged.connect(self.updateExcitonNote)
 
         self.excitonNote = NoteLabel()
-        # A copy of the Selected exciton section's checkbox, linked to it (Options.sumDegenerate;
+        # A copy of the Selected exciton section's checkbox, linked to it (Calculations.sumDegenerate;
         # remembered there): it decides which states a wave function sums
         from .spectra_controls import DEGENERATE_TIP
         self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
-        self.sumDegenerateCheckBox.setChecked(self.options.sumDegenerate)
+        self.sumDegenerateCheckBox.setChecked(self.calculations.sumDegenerate)
         self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)
-        self.sumDegenerateCheckBox.toggled.connect(self.options.setSumDegenerate)
-        self.options.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
+        self.sumDegenerateCheckBox.toggled.connect(self.calculations.setSumDegenerate)
+        self.calculations.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
         # The states the wave function shown sums, and whether it is with the setting of now
         self.wfStatesNote = NoteLabel()
         self.wfStatesNote.hide()
         self.calculations.wfComputed.connect(self.updateWfStatesNote)
-        self.options.sumDegenerateChanged.connect(self.updateWfStatesNote)
+        self.calculations.sumDegenerateChanged.connect(self.updateWfStatesNote)
 
         form = formLayout()
         form.addRow('Q-point:', self.qPointSpinBox)
@@ -222,9 +226,9 @@ class WavefunctionControls(Inspector):
         # Three decimals: shells of G-vectors can be a few meV apart
         self.wfCutoffSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10000.0, singleStep=1.0, decimals=3, suffix=' Ry')
         self.wfCutoffSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.wfCutoffSpinBox.setValue(self.options.wfCutoffRy)
+        self.wfCutoffSpinBox.setValue(self.parameters.cutoff)
         self.wfCutoffSpinBox.setToolTip('Plane-wave cutoff of the wave function: higher values give a finer real-space grid')
-        self.wfCutoffSpinBox.valueChanged.connect(self.options.setWfCutoff)
+        self.wfCutoffSpinBox.valueChanged.connect(lambda cutoff: setattr(self.parameters, 'cutoff', cutoff))
         # The same cutoff as a count of reciprocal lattice vectors (Yambo's RL), linked to it
         self.gShells = None
         self.lastRl = 0
@@ -264,7 +268,7 @@ class WavefunctionControls(Inspector):
                        self.xSupercellSpinBox.valueChanged, self.ySupercellSpinBox.valueChanged,
                        self.zSupercellSpinBox.valueChanged, self.calculations.wfComputed,
                        self.particleTypeComboBox.currentIndexChanged,   # named in the selected exciton's estimate
-                       self.options.databaseFound, self.options.diagoDirChanged):
+                       self.dataset.databaseFound, self.dataset.diagoDirChanged):
             signal.connect(self.requestEstimate)
         # The databases may be busy while a calculation runs: estimate once it ends
         self.calculations.busyChanged.connect(lambda busy: None if busy else self.requestEstimate())
@@ -291,9 +295,9 @@ class WavefunctionControls(Inspector):
 
         # Both positions, before the particle type that shows one of them
         def positionSetter(particle):
-            return lambda value: self.options.setParticlePositionOf(particle, [float(x) for x in value][:3])
-        self.remember('holePosition', scope=DATASET, get=lambda: list(self.options.holePos), set=positionSetter('h'))
-        self.remember('electronPosition', scope=DATASET, get=lambda: list(self.options.electronPos), set=positionSetter('e'))
+            return lambda value: self.parameters.setPosition([float(x) for x in value][:3], particle)
+        self.remember('holePosition', scope=DATASET, get=lambda: list(self.parameters.holePosition), set=positionSetter('h'))
+        self.remember('electronPosition', scope=DATASET, get=lambda: list(self.parameters.electronPosition), set=positionSetter('e'))
         self.remember('fixedParticle', self.particleTypeComboBox, DATASET)
         self.remember('supercell', scope=DATASET, get=self.supercell, set=self.setSupercell)
         self.remember('cutoff', self.wfCutoffSpinBox, DATASET)
@@ -314,13 +318,13 @@ class WavefunctionControls(Inspector):
         def fraction(tickMax):
             return lambda tick: f'{tick / tickMax:.2f}'
 
-        isoLevelSlider = ValueSlider(0, self.isoLevelTickMax, round(self.options.isoLevel() * self.isoLevelTickMax), fraction(self.isoLevelTickMax))
+        isoLevelSlider = ValueSlider(0, self.isoLevelTickMax, round(self.parameters.isoLevel * self.isoLevelTickMax), fraction(self.isoLevelTickMax))
         isoLevelSlider.setToolTip('Probability density of the isosurface, relative to its maximum')
         isoLevelSlider.valueChanged.connect(self.setIsoLevel)
 
         numIsoLevelsSpinBox = QSpinBox(minimum=1, maximum=999)
         numIsoLevelsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        numIsoLevelsSpinBox.setValue(self.options.numIsoLevels())
+        numIsoLevelsSpinBox.setValue(self.parameters.numIsoLevels)
         numIsoLevelsSpinBox.valueChanged.connect(self.setNumIsoLevels)
 
         isoSetStyleComboBox = QComboBox()
@@ -329,19 +333,19 @@ class WavefunctionControls(Inspector):
         isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
         isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
 
-        isoOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.isoOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
+        isoOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.isoOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
         isoOpacitySlider.valueChanged.connect(self.setIsoOpacity)
 
-        isoSetOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.isoSetOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
+        isoSetOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.isoSetOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
         isoSetOpacitySlider.valueChanged.connect(self.setIsoSetOpacity)
 
-        volumeOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.options.volumeOpacity() * self.opacityTickMax), fraction(self.opacityTickMax))
+        volumeOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.volumeOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
         volumeOpacitySlider.setToolTip('Opacity along the densest line of sight through the density')
         volumeOpacitySlider.valueChanged.connect(self.setVolumeOpacity)
 
         volumeContrastSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10.0, singleStep=0.1, decimals=2)
         volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        volumeContrastSpinBox.setValue(self.options.volumeContrast())
+        volumeContrastSpinBox.setValue(self.parameters.volumeContrast)
         volumeContrastSpinBox.setToolTip('Power applied to the density for the opacity:\n'
                                          'above 1 fades low densities so the core stands out,\n'
                                          'below 1 brings out the low-density tails')
@@ -349,7 +353,7 @@ class WavefunctionControls(Inspector):
 
         sliceDensitySpinBox = QSpinBox(minimum=1, maximum=999)
         sliceDensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        sliceDensitySpinBox.setValue(self.options.sliceDensity())
+        sliceDensitySpinBox.setValue(self.parameters.sliceDensity)
         sliceDensitySpinBox.setToolTip('Rendering quality: more slices give a smoother volume')
         sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
 
@@ -445,7 +449,7 @@ class WavefunctionControls(Inspector):
         # View direction: basis, presets and custom direction / up vectors
         self.viewBasisComboBox = QComboBox()
         self.viewBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.viewBasisComboBox.addItems(self.options.viewBases)
+        self.viewBasisComboBox.addItems(VIEW_BASES)
         self.viewBasisComboBox.setToolTip('Basis of the direction and up vectors:\n'
                                           'Cartesian: x, y, z\n'
                                           'Lattice [uvw]: u a + v b + w c\n'
@@ -506,8 +510,8 @@ class WavefunctionControls(Inspector):
         form.addRow(projectionCheckBox)
 
         # Lattice bases need the cell from the SAVE database
-        self.setLatticeBasesEnabled(self.options.hasCell())
-        self.options.databaseFound.connect(self.onDatabaseFound)
+        self.setLatticeBasesEnabled(self.dataset.hasCell())
+        self.dataset.databaseFound.connect(self.onDatabaseFound)
 
         self.populateViewPresets()
         self.viewPresetComboBox.setCurrentText('x + y + z')
@@ -545,24 +549,24 @@ class WavefunctionControls(Inspector):
             self.remember(f'show/{text}', box)
 
         atomScaleSpinBox = QDoubleSpinBox(minimum=0.05, maximum=1.5, singleStep=0.05, decimals=2)
-        atomScaleSpinBox.setValue(self.options.atomScale())
+        atomScaleSpinBox.setValue(self.parameters.atomScale)
         atomScaleSpinBox.setToolTip('Atom radius as a fraction of its covalent radius\n'
                                     '(1: atoms bonded at their covalent radii touch)')
         atomScaleSpinBox.valueChanged.connect(self.setAtomScale)
 
         bondToleranceSpinBox = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2)
-        bondToleranceSpinBox.setValue(self.options.bondTolerance())
+        bondToleranceSpinBox.setValue(self.parameters.bondTolerance)
         bondToleranceSpinBox.setToolTip('Atoms are bonded when closer than this factor\n'
                                         'times the sum of their covalent radii')
         bondToleranceSpinBox.valueChanged.connect(self.setBondTolerance)
 
         bondRadiusSpinBox = QDoubleSpinBox(minimum=0.01, maximum=0.5, singleStep=0.01, decimals=2, suffix=' Å')
-        bondRadiusSpinBox.setValue(self.options.bondRadius())
+        bondRadiusSpinBox.setValue(self.parameters.bondRadius)
         bondRadiusSpinBox.valueChanged.connect(self.setBondRadius)
 
         bondColorComboBox = QComboBox()
         bondColorComboBox.addItems(['Atom colors', 'Uniform grey'])
-        bondColorComboBox.setCurrentIndex(self.options.bondColoring())
+        bondColorComboBox.setCurrentIndex(self.parameters.bondColoring)
         bondColorComboBox.setToolTip('Atom colors: each half of a bond in the color of its atom')
         bondColorComboBox.currentIndexChanged.connect(self.setBondColoring)
 
@@ -690,7 +694,7 @@ class WavefunctionControls(Inspector):
 
     @Slot()
     def centreOnFixedParticle(self):
-        position = np.asarray(self.options.particlePosition(), dtype=float)
+        position = np.asarray(self.parameters.position(), dtype=float)
         self.setCellOrigin([0.5 - p for p in position])
 
     def showCellOriginNote(self, text):
@@ -724,7 +728,7 @@ class WavefunctionControls(Inspector):
 
         self.planeBasisComboBox = QComboBox()
         self.planeBasisComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.planeBasisComboBox.addItems(self.options.viewBases)
+        self.planeBasisComboBox.addItems(VIEW_BASES)
         self.planeBasisComboBox.setToolTip('Basis of the normal: Cartesian, lattice [uvw] or reciprocal (hkl),\n'
                                            'the last one giving the lattice plane (hkl)')
         self.planeBasisComboBox.currentIndexChanged.connect(self.onPlaneNormalEdited)
@@ -818,7 +822,7 @@ class WavefunctionControls(Inspector):
             raise ValueError('Invalid number in the normal of the plane')
         if np.allclose(components, 0.0):
             raise ValueError('The normal of the plane must be a non-zero vector')
-        normal = self.options.viewVectorToCartesian(components, self.planeBasisComboBox.currentText())
+        normal = viewVectorToCartesian(components, self.planeBasisComboBox.currentText(), self.dataset.cell)
         return {'normal': np.asarray(normal, dtype=float), 'up': self.planeUpHint,
                 'offset': self.planeOffsetSpinBox.value() * ANGSTROM_TO_BOHR,
                 'atoms': self.planeAtomsSpinBox.value() * ANGSTROM_TO_BOHR,
@@ -886,14 +890,14 @@ class WavefunctionControls(Inspector):
     def setGVectorShells(self, found):
         """The G-vectors of the dataset, to give the cutoff in RL too (none without a dataset)."""
         self.gShells = None
-        if found and self.options.saveDir:
+        if found and self.dataset.saveDir:
             from visual_excitons.core.memory import GVectorShells
             from visual_excitons.core.tasks import databaseAccess
             from yambopy import YamboLatticeDB
             try:
                 with databaseAccess():
-                    lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1', Expand=False)
-                    self.gShells = GVectorShells(self.options.saveDir, lattice)
+                    lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1', Expand=False)
+                    self.gShells = GVectorShells(self.dataset.saveDir, lattice)
             except (OSError, KeyError, ValueError):
                 self.gShells = None
         box = self.wfCutoffRlSpinBox
@@ -945,7 +949,7 @@ class WavefunctionControls(Inspector):
             text += f', with the degenerate states {states[0]}–{states[-1]}' if states == list(range(states[0], states[-1] + 1)) \
                 else ', with the degenerate states ' + ', '.join(map(str, states))
         text += '.'
-        if calc.wfDegenerate is not None and calc.wfDegenerate != self.options.sumDegenerate:
+        if calc.wfDegenerate is not None and calc.wfDegenerate != self.calculations.sumDegenerate:
             text += (' <span style="color:#d9822b">Computed ' + ('summing' if calc.wfDegenerate else 'without summing')
                      + ' the degenerate states: compute it again for the setting of now.</span>')
         self.wfStatesNote.setText(text)
@@ -953,9 +957,9 @@ class WavefunctionControls(Inspector):
 
     @Slot(int)
     def updateParticlePositionWidgets(self, index: int):
-        self.options.setParticleType(index)
+        self.parameters.particle = 'h' if index == 0 else 'e'
 
-        position = self.options.particlePosition()
+        position = self.parameters.position()
 
         for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit),
                                    position):
@@ -966,7 +970,7 @@ class WavefunctionControls(Inspector):
     @Slot()
     def particlePositionChanged(self):
         position = [float(self.xParticlePosLineEdit.text()), float(self.yParticlePosLineEdit.text()), float(self.zParticlePosLineEdit.text())]
-        self.options.setParticlePosition(position)
+        self.parameters.setPosition(position)
         self.fixedParticlePosChanged.emit()
 
     def particleShift(self):
@@ -988,7 +992,7 @@ class WavefunctionControls(Inspector):
                                                                 else 'Position (a, b, c):')
         if not shifted:
             return
-        computed = np.asarray(self.options.particlePosition(), dtype=float)
+        computed = np.asarray(self.parameters.position(), dtype=float)
         shown = (computed + np.asarray(shift)) % 1.0
         shown[np.isclose(shown, 1.0, atol=1e-6)] = 0.0
         for lineEdit, value in zip(self.shownParticleLineEdits, shown):
@@ -1021,8 +1025,8 @@ class WavefunctionControls(Inspector):
                 spinBox.setValue(size)
 
         # Fixed particle position snapped to the real-space grid
-        self.options.setParticlePositionOf(calc.wfFixedParticle, calc.wfFixedPosition)
-        if calc.wfFixedParticle == self.options.particleType():
+        self.parameters.setPosition(calc.wfFixedPosition, calc.wfFixedParticle)
+        if calc.wfFixedParticle == self.parameters.particle:
             for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit), calc.wfFixedPosition):
                 lineEdit.setText(f'{value + 0.0:.4f}')   # + 0.0: no "-0.0000"
 
@@ -1036,8 +1040,8 @@ class WavefunctionControls(Inspector):
     def computeWf(self):
         q_index = self.qPointIndex()
         exc_index = self.excitonIndexSpinBox.value()
-        fixed_particle = self.options.particleType()
-        fixed_position = self.options.particlePosition()
+        fixed_particle = self.parameters.particle
+        fixed_position = self.parameters.position()
         cutoff = self.cutoff()
         supercell = [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
 
@@ -1145,7 +1149,7 @@ class WavefunctionControls(Inspector):
                     self.selectedEstimateChanged.emit('', False)
                 return
         memory, warning = self.describeMemory(estimate)
-        particle = 'hole' if self.options.particleType() == 'h' else 'electron'
+        particle = 'hole' if self.parameters.particle == 'h' else 'electron'
         cells = ' × '.join(str(n) for n in estimate['supercell'])
         cutoff = 'all plane waves' if self.cutoff() < 0 else f'cutoff {self.cutoff():g} Ry'
         states = f', {estimate["states"]} degenerate states' if estimate['states'] > 1 else ''
@@ -1188,57 +1192,57 @@ class WavefunctionControls(Inspector):
 
     @Slot(int)
     def setIsoLevel(self, tick: int):
-        self.options.setIsoLevel(float(tick / self.isoLevelTickMax))
+        self.parameters.isoLevel = float(tick / self.isoLevelTickMax)
         self.isoLevelChanged.emit()
 
     @Slot(int)
     def setNumIsoLevels(self, numIsoLevels: int):
-        self.options.setNumIsoLevels(numIsoLevels)
+        self.parameters.numIsoLevels = numIsoLevels
         self.numIsoLevelsChanged.emit()
 
     @Slot(int)
     def setIsoOpacity(self, tick: int):
-        self.options.setIsoOpacity(float(tick / self.opacityTickMax))
-        self.isoOpacityChanged.emit(self.options.isoOpacity(), self.options.isoLevel())
+        self.parameters.isoOpacity = float(tick / self.opacityTickMax)
+        self.isoOpacityChanged.emit(self.parameters.isoOpacity, self.parameters.isoLevel)
 
     @Slot(int)
     def setIsoSetOpacity(self, tick: int):
-        self.options.setIsoSetOpacity(float(tick / self.opacityTickMax))
-        self.isoSetOpacityChanged.emit(self.options.isoSetOpacity())
+        self.parameters.isoSetOpacity = float(tick / self.opacityTickMax)
+        self.isoSetOpacityChanged.emit(self.parameters.isoSetOpacity)
 
     @Slot(int)
     def setSliceDensity(self, density):
-        self.options.setSliceDensity(density)
+        self.parameters.sliceDensity = density
         self.sliceDensityChanged.emit()
 
     @Slot(int)
     def setVolumeOpacity(self, tick: int):
-        self.options.setVolumeOpacity(tick / self.opacityTickMax)
+        self.parameters.volumeOpacity = tick / self.opacityTickMax
         self.volumeParametersChanged.emit()
 
     @Slot(float)
     def setVolumeContrast(self, contrast: float):
-        self.options.setVolumeContrast(contrast)
+        self.parameters.volumeContrast = contrast
         self.volumeParametersChanged.emit()
 
     @Slot(float)
     def setAtomScale(self, scale: float):
-        self.options.setAtomScale(scale)
+        self.parameters.atomScale = scale
         self.signalReplotLattice.emit()
 
     @Slot(float)
     def setBondTolerance(self, tolerance: float):
-        self.options.setBondTolerance(tolerance)
+        self.parameters.bondTolerance = tolerance
         self.signalReplotLattice.emit()
 
     @Slot(float)
     def setBondRadius(self, radius: float):
-        self.options.setBondRadius(radius)
+        self.parameters.bondRadius = radius
         self.signalReplotLattice.emit()
 
     @Slot(int)
     def setBondColoring(self, mode: int):
-        self.options.setBondColoring(mode)
+        self.parameters.bondColoring = mode
         self.signalReplotLattice.emit()
 
     @Slot(int)
@@ -1271,7 +1275,7 @@ class WavefunctionControls(Inspector):
                 spinBox.setValue(spinBox.value() + 1)
                 spinBox.blockSignals(False)
 
-        self.options.setSupercell([self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()])
+        self.parameters.supercell = [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
         self.signalReplotLattice.emit()
         self.supercellResized.emit()
         # The fixed particle sits in the central cell, which moves with the supercell
@@ -1291,7 +1295,7 @@ class WavefunctionControls(Inspector):
 
     def setLatticeBasesEnabled(self, enabled: bool):
         model = self.viewBasisComboBox.model()
-        for i, basis in enumerate(self.options.viewBases):
+        for i, basis in enumerate(VIEW_BASES):
             if basis != 'Cartesian':
                 model.item(i).setEnabled(enabled)
         if not enabled and self.viewBasis() != 'Cartesian':
@@ -1307,7 +1311,7 @@ class WavefunctionControls(Inspector):
 
     def populateViewPresets(self):
         self.viewPresetComboBox.clear()
-        self.viewPresetComboBox.addItems(list(self.options.viewPresets[self.viewBasis()].keys()))
+        self.viewPresetComboBox.addItems(list(VIEW_PRESETS[self.viewBasis()].keys()))
 
     @Slot(int)
     def onViewBasisChanged(self, index: int):
@@ -1318,7 +1322,7 @@ class WavefunctionControls(Inspector):
 
     @Slot(int)
     def onViewPresetActivated(self, index: int, apply: bool = True):
-        presets = self.options.viewPresets[self.viewBasis()]
+        presets = VIEW_PRESETS[self.viewBasis()]
         vector = list(presets.values())[index]
         for lineEdit, value in zip(self.viewDirLineEdits, vector):
             lineEdit.setText(f'{value:g}')
@@ -1355,8 +1359,8 @@ class WavefunctionControls(Inspector):
             up = None
 
         try:
-            lookDir = self.options.viewVectorToCartesian(direction, self.viewBasis())
-            upDir = None if up is None else self.options.viewVectorToCartesian(up, self.viewBasis())
+            lookDir = viewVectorToCartesian(direction, self.viewBasis(), self.dataset.cell)
+            upDir = None if up is None else viewVectorToCartesian(up, self.viewBasis(), self.dataset.cell)
         except ValueError as error:
             self.showViewStatus(str(error))
             return

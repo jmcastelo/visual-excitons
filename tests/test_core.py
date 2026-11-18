@@ -1,12 +1,12 @@
-"""Options, datasets and the calculation bookkeeping (no Yambo databases needed)."""
+"""The dataset, the parameters and the calculation bookkeeping (no Yambo databases needed)."""
 
 import numpy as np
 import pyqtgraph as pg
 import pytest
 
-from visual_excitons.core.options import Options
+from visual_excitons.core.parameters import SpectraParameters, WavefunctionParameters
 from visual_excitons.core.calculations import Calculations, PointData
-from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
+from visual_excitons.core.dataset import Dataset, findDataset, datasetName, datasetExists
 from visual_excitons.core.style import AbsorptionStyle
 
 
@@ -47,47 +47,55 @@ def test_find_dataset_without_save(tmp_path):
     assert dataset['save'] is None and not datasetExists(dataset) and datasetName(dataset) == ''
 
 
-# Options
+# The dataset and the parameters
 
-@pytest.fixture
-def options():
-    o = Options()
-    o.cell = np.array([[2.0, 0, 0], [1.0, 3.0, 0], [0, 0, 4.0]])
-    return o
+CELL = np.array([[2.0, 0, 0], [1.0, 3.0, 0], [0, 0, 4.0]])
 
 
-def test_view_vectors(options):
-    np.testing.assert_allclose(options.viewVectorToCartesian([1, 2, 3], 'Cartesian'), [1, 2, 3])
-    np.testing.assert_allclose(options.viewVectorToCartesian([1, 1, 0], 'Lattice [uvw]'), [3.0, 3.0, 0])
+def test_view_vectors():
+    from visual_excitons.core.lattice_info import viewVectorToCartesian
+    np.testing.assert_allclose(viewVectorToCartesian([1, 2, 3], 'Cartesian', CELL), [1, 2, 3])
+    np.testing.assert_allclose(viewVectorToCartesian([1, 1, 0], 'Lattice [uvw]', CELL), [3.0, 3.0, 0])
     # (hkl) normals are perpendicular to the lattice vectors of the plane
-    normal = options.viewVectorToCartesian([0, 0, 1], 'Reciprocal (hkl)')
-    assert abs(normal @ options.cell[0]) < 1e-12 and abs(normal @ options.cell[1]) < 1e-12
+    normal = viewVectorToCartesian([0, 0, 1], 'Reciprocal (hkl)', CELL)
+    assert abs(normal @ CELL[0]) < 1e-12 and abs(normal @ CELL[1]) < 1e-12
     with pytest.raises(ValueError):
-        Options().viewVectorToCartesian([1, 0, 0], 'Lattice [uvw]')
+        viewVectorToCartesian([1, 0, 0], 'Lattice [uvw]', Dataset().cell)      # no dataset: no lattice
 
 
-def test_fixed_particle_sits_in_the_central_cell(options):
-    options.setParticlePosition([0.5, 0.0, 0.25])
-    options.setSupercell([3, 1, 5])
-    np.testing.assert_allclose(options.particlePositionCartesian(), options.cell.T @ np.array([1.5, 0.0, 2.25]))
+def test_fixed_particle_sits_in_the_central_cell():
+    parameters = WavefunctionParameters(supercell=[3, 1, 5])
+    parameters.setPosition([0.5, 0.0, 0.25])
+    assert parameters.holePosition == [0.5, 0.0, 0.25] and parameters.position('e') == [0.0, 0.0, 0.0]
+    np.testing.assert_allclose(parameters.positionCartesian(CELL), CELL.T @ np.array([1.5, 0.0, 2.25]))
 
 
-def test_energy_range_stays_consistent(options):
-    options.setEnergyMin(25.0)       # above the maximum (20 eV)
-    assert options.energyMin < options.energyMax
-    options.setEnergyStep(-1.0)
-    assert options.energyStep > 0
-    options.setExcMinIntensity(3.0)
-    assert options.excMinIntensity == 1.0
+def test_energy_range_stays_consistent():
+    parameters = SpectraParameters()
+    parameters.setEnergyMin(25.0)       # above the maximum (20 eV)
+    assert parameters.energyMin < parameters.energyMax
+    parameters.setEnergyStep(-1.0)
+    assert parameters.energyStep > 0
 
 
-def test_gw_signal(qtbot, options):
-    assert options.gw
-    with qtbot.waitSignal(options.gwChanged) as blocker:
-        options.setGW(False)
+def test_gw_signal(qtbot):
+    dataset = Dataset()
+    assert dataset.gw
+    with qtbot.waitSignal(dataset.gwChanged) as blocker:
+        dataset.setGW(False)
     assert blocker.args == [False]
-    with qtbot.assertNotEmitted(options.gwChanged):
-        options.setGW(False)
+    with qtbot.assertNotEmitted(dataset.gwChanged):
+        dataset.setGW(False)
+
+
+def test_sum_degenerate_signal(qtbot):
+    calc = Calculations(synchronous=True)
+    assert calc.sumDegenerate
+    with qtbot.waitSignal(calc.sumDegenerateChanged) as blocker:
+        calc.setSumDegenerate(False)
+    assert blocker.args == [False] and not calc.sumDegenerate
+    with qtbot.assertNotEmitted(calc.sumDegenerateChanged):
+        calc.setSumDegenerate(False)
 
 
 # Calculations
@@ -108,7 +116,7 @@ class Point:
 @pytest.fixture
 def calculations():
     # Calculations run inline: results are there when the call returns
-    calc = Calculations(Options(), synchronous=True)
+    calc = Calculations(synchronous=True)
     calc.qIndices = [4, 7, 9, 0, 2, 3, 5, 6, 8, 1]
     return calc
 
@@ -220,22 +228,22 @@ def test_select_from_dispersion_and_highlight_positions(calculations):
 @pytest.mark.data
 def test_new_lattice_clears_the_q_path():
     from conftest import datasetPath
-    options = Options()
-    options.setSaveDir(str(datasetPath('BiI3_Bulk_8x8x8') / 'save'))
-    options.identifyLattice()
-    options.extraHighSymmetryPoints = {'M': [0.25, 0.25, 0.0]}
-    options.setBrillouinZone(path='LGZFM', npoints=50)
-    assert options.qBZ is not None
-    options.setLatticeData()                # e.g. another dataset
-    assert options.qBZ is None and options.extraHighSymmetryPoints == {}
+    dataset = Dataset()
+    dataset.setSaveDir(str(datasetPath('BiI3_Bulk_8x8x8') / 'save'))
+    dataset.identifyLattice()
+    dataset.extraHighSymmetryPoints = {'M': [0.25, 0.25, 0.0]}
+    dataset.setBrillouinZone(path='LGZFM', npoints=50)
+    assert dataset.qBZ is not None
+    dataset.setLatticeData()                # e.g. another dataset
+    assert dataset.qBZ is None and dataset.extraHighSymmetryPoints == {}
 
 
-def optionsWithCell(cell):
-    from visual_excitons.core.options import get_cell_params
-    options = Options()
-    options.cell = np.asarray(cell, dtype=float)
-    options.latticeParameters = get_cell_params(options.cell)
-    return options
+def datasetWithCell(cell):
+    from visual_excitons.core.lattice_info import cellParameters
+    dataset = Dataset()
+    dataset.cell = np.asarray(cell, dtype=float)
+    dataset.latticeParameters = cellParameters(dataset.cell)
+    return dataset
 
 
 A = 6.8
@@ -249,29 +257,29 @@ A = 6.8
 ])
 def test_lattice_detected_from_the_cell(cell, ibrav, variant):
     """Centred lattices too: the primitive vector lengths alone took an FCC crystal for a rhombohedral one."""
-    options = optionsWithCell(cell)
-    assert options.identifyLattice() == ibrav and options.ibrav == ibrav
-    assert options.variant == variant and options.symmetryTolerance == 1e-5
+    dataset = datasetWithCell(cell)
+    assert dataset.identifyLattice() == ibrav and dataset.ibrav == ibrav
+    assert dataset.variant == variant and dataset.symmetryTolerance == 1e-5
     # The Brillouin zone of the cell itself: its special points in the cell's reduced coordinates
-    options.setBrillouinZone(npoints=40)
-    np.testing.assert_allclose(options.qBZ.cell, options.cell)
-    assert options.getPathString() == options.defaultPath
+    dataset.setBrillouinZone(npoints=40)
+    np.testing.assert_allclose(dataset.qBZ.cell, dataset.cell)
+    assert dataset.pathString() == dataset.defaultPath
 
 
 def test_slightly_distorted_cell_is_identified_with_a_looser_tolerance():
     """A hexagonal cell with numerical noise: not hexagonal at the strictest tolerance, hexagonal at a looser one."""
     cell = np.array([[3.0, 0.0, 0.0], [-1.5, 1.5 * np.sqrt(3) * (1 + 2e-5), 0.0], [0.0, 0.0, 5.0]])
-    options = optionsWithCell(cell)
-    assert options.identifyLattice() == 4 and options.symmetryTolerance > 1e-5
-    assert options.variant == 'HEX' and options.strictVariant.startswith('ORC')
+    dataset = datasetWithCell(cell)
+    assert dataset.identifyLattice() == 4 and dataset.symmetryTolerance > 1e-5
+    assert dataset.variant == 'HEX' and dataset.strictVariant.startswith('ORC')
 
 
 def test_unsupported_lattice_is_not_detected():
     triclinic = [[3.0, 0.1, 0.2], [0.4, 4.1, 0.3], [0.5, 0.6, 5.3]]
-    options = optionsWithCell(triclinic)
-    assert options.identifyLattice() is None and options.ibrav == -1 and options.latticeProblem
+    dataset = datasetWithCell(triclinic)
+    assert dataset.identifyLattice() is None and dataset.ibrav == -1 and dataset.latticeProblem
     with pytest.raises(ValueError, match='not identified'):
-        options.setBrillouinZone(npoints=10)
+        dataset.setBrillouinZone(npoints=10)
 
 
 def test_new_dispersion_or_dataset_drops_curve_styles(calculations):

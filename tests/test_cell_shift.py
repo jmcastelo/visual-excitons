@@ -137,7 +137,7 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath('WSe2')))
-    p3, options = window.wavefunction.controls, window.options
+    p3, parameters = window.wavefunction.controls, window.wfParameters
     form = p3.calculationForm
     shown = lambda: [float(edit.text()) for edit in p3.shownParticleLineEdits]
 
@@ -150,7 +150,7 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
     for edit, text in zip(p3.shownParticleLineEdits, ('0.3333', '0.6667', '0.5')):
         edit.setText(text)
     p3.shownPositionEdited()
-    assert options.particlePosition() == pytest.approx([0.3333, 0.6667, 0.0], abs=1e-4)
+    assert parameters.position() == pytest.approx([0.3333, 0.6667, 0.0], abs=1e-4)
     assert p3.zParticlePosLineEdit.text() == '0.0000'
 
     # Editing the position computed updates the one shown

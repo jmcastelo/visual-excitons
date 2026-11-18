@@ -1,0 +1,39 @@
+{
+ "nExcitons": 8,
+ "energyStep": 0.03,
+ "energyMin": 4.2,
+ "energyMax": 20.2,
+ "absorptionAutoRange": false,
+ "excMinIntensity": 0.2,
+ "gw": false,
+ "sumDegenerate": false,
+ "partType": "e",
+ "holePos": [
+  0.125,
+  0.25,
+  0.375
+ ],
+ "electronPos": [
+  0.5,
+  0.0,
+  0.25
+ ],
+ "wfCutoffRy": 12.125,
+ "scell": [
+  5,
+  5,
+  5
+ ],
+ "wfIsoLevel": 0.502,
+ "numWfIsoLevels": 12,
+ "wfIsoOpacity": 0.302,
+ "wfIsoSetOpacity": 0.102,
+ "volSliceDensity": 7,
+ "volOpacity": 0.802,
+ "volContrast": 1.2,
+ "atomRadiusScale": 0.6,
+ "bondToleranceFactor": 1.25,
+ "bondRadiusAngstrom": 0.14,
+ "bondColorMode": 1,
+ "pathString": "LGZF"
+}

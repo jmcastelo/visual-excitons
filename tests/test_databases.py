@@ -6,7 +6,7 @@ import pytest
 
 from visual_excitons.core.databases import identify, qpDatabases, bseFiles, QP, BSE
 from visual_excitons.core.consistency import checkDataset, summary, OK, WARNING, ERROR
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
 from conftest import datasetPath, writeQPDatabase, writeBSEDatabase
 
 
@@ -31,15 +31,15 @@ def test_default_qp_database(tmp_path):
     writeQPDatabase(tmp_path / 'ndb.QP', bands=(2, 4))
     assert qpDatabases(tmp_path)[0]['name'] == 'ndb.QP'                                          # ndb.QP if there
 
-    options = Options()
-    options.setQPDir(str(tmp_path))
-    assert options.qpFile == 'ndb.QP' and '3 QP databases found: using ndb.QP (bands 2–4)' in options.qpStatus()
-    options.setQPFile('ndb.QP_1_5')
-    assert options.qpFile == 'ndb.QP_1_5'
-    options.setQPFile('missing')
-    assert options.qpFile == 'ndb.QP_1_5'
-    options.setQPDir(str(tmp_path), qpFile='ndb.QP_merged')       # e.g. remembered with the dataset
-    assert options.qpFile == 'ndb.QP_merged'
+    dataset = Dataset()
+    dataset.setQPDir(str(tmp_path))
+    assert dataset.qpFile == 'ndb.QP' and '3 QP databases found: using ndb.QP (bands 2–4)' in dataset.qpStatus()
+    dataset.setQPFile('ndb.QP_1_5')
+    assert dataset.qpFile == 'ndb.QP_1_5'
+    dataset.setQPFile('missing')
+    assert dataset.qpFile == 'ndb.QP_1_5'
+    dataset.setQPDir(str(tmp_path), qpFile='ndb.QP_merged')       # e.g. remembered with the dataset
+    assert dataset.qpFile == 'ndb.QP_merged'
 
 
 def test_bse_files_and_their_problems(tmp_path):
@@ -101,7 +101,7 @@ def test_system_panel_offers_the_qp_databases_and_shows_the_checks(qtbot, monkey
     index = combo.findData('ndb.QP_140_146')
     combo.setCurrentIndex(index)
     combo.activated.emit(index)
-    assert window.options.qpFile == 'ndb.QP_140_146' and window.dataset['qpFile'] == 'ndb.QP_140_146'
+    assert window.dataset.qpFile == 'ndb.QP_140_146' and window.datasetRecord['qpFile'] == 'ndb.QP_140_146'
     assert 'using ndb.QP_140_146' in system.qpLabel.text()
 
     system.runChecks()

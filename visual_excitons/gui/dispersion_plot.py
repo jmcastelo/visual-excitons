@@ -4,7 +4,7 @@ import numpy as np
 
 from .theme import plotForeground
 from .highlight import ExcitonHighlight
-from visual_excitons.core.options import tickLabels
+from visual_excitons.core.lattice_info import tickLabels
 
 
 class DispersionPlot(pg.PlotWidget):

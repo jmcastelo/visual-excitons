@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QL
 
 from visual_excitons.core.kspace import (planeMap, planeIndices, zonePoints, nearestSpecialPoint, planeBasis,
                                          TO_INVERSE_ANGSTROM)
-from visual_excitons.core.options import tickLabels
+from visual_excitons.core.lattice_info import tickLabels
 from .persistence import PersistentState, GLOBAL, DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
 from .axis_gizmo import AxisGizmo
@@ -206,7 +206,7 @@ class CompositionPanel(QWidget):
         self.persistence = PersistentState()
 
         # What it is: the exciton and its states (with those degenerate with it per
-        # Options.sumDegenerate, in the Selected exciton section)
+        # Calculations.sumDegenerate, in the Selected exciton section)
         self.infoLabel = QLabel('Select an exciton in a spectrum.')
         self.infoLabel.setWordWrap(True)
         self.infoLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

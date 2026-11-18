@@ -252,7 +252,7 @@ def test_theme_is_remembered(window):
 
 
 def test_exciton_selection_reaches_both_pages(window, qtbot):
-    window.options.numQPointsChanged.emit(90)
+    window.dataset.numQPointsChanged.emit(90)
     window.calculations.qIndices = list(range(90))
     window.calculations.selectedExciton = (4, 2, 2.2284)
     window.calculations.excitonSelected.emit(4, 2, 2.2284)
@@ -289,7 +289,7 @@ def test_compute_the_selected_exciton_from_the_spectra(window, monkeypatch):
     p3.updateEstimate()
     assert not spectra.computeWavefunctionButton.isEnabled() and spectra.wfEstimateNote.isHidden()
 
-    window.options.numQPointsChanged.emit(90)
+    window.dataset.numQPointsChanged.emit(90)
     calc.selectedExciton = (4, 2, 2.2284)
     calc.excitonSelected.emit(4, 2, 2.2284)
     p3.ySupercellSpinBox.setValue(3)
@@ -329,20 +329,20 @@ def test_compute_passes_the_chosen_exciton(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window.calculations, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
     parameters = window.wavefunction.controls
-    window.options.numQPointsChanged.emit(10)
+    window.dataset.numQPointsChanged.emit(10)
     parameters.qPointSpinBox.setValue(3)
     parameters.excitonIndexSpinBox.setValue(7)
     parameters.xSupercellSpinBox.setValue(3)
     parameters.wfCutoffSpinBox.setValue(5.0)
     parameters.computeWf()
     assert calls[0]['q_index'] == 2 and calls[0]['exc_index'] == 7 and calls[0]['supercell'] == [3, 1, 1]
-    assert window.options.wfCutoff() == 5.0
+    assert window.wfParameters.cutoff == 5.0
 
 
 def test_supercell_sizes_are_odd(window):
     parameters = window.wavefunction.controls
     parameters.ySupercellSpinBox.setValue(4)
-    assert parameters.ySupercellSpinBox.value() == 5 and window.options.supercell() == [1, 5, 1]
+    assert parameters.ySupercellSpinBox.value() == 5 and window.wfParameters.supercell == [1, 5, 1]
 
 
 def test_display_rows_follow_the_plot_type(window):
@@ -396,7 +396,7 @@ def test_open_dataset(window):
     window.openDataset(main_window.findDataset(folder))
     assert window.windowTitle() == 'Untitled[*] — BiI3_Bulk_8x8x8 — Visual Excitons'
     assert 'RHL1' in window.datasetLabel.text() and '90 Q-points' in window.datasetLabel.text()
-    assert window.options.gw and window.system.calcTypeComboBox.currentText() == 'DFT+GW+BSE'
+    assert window.dataset.gw and window.system.calcTypeComboBox.currentText() == 'DFT+GW+BSE'
     assert window.system.parameterLabels['a'].text() == '8.15801 Å'
     assert window.recentMenu.actions()[0].text() == 'BiI3_Bulk_8x8x8'
     # The lattice is drawn: atoms (one mesh per cell) and bonds
@@ -411,7 +411,7 @@ def test_switching_datasets_resets_calculations(window):
     window.calculations.waveFunction = np.zeros((2, 2, 2))
     window.openDataset(main_window.findDataset(datasetPath('BN')))
     assert window.calculations.selectedExciton is None and window.calculations.waveFunction is None
-    assert not window.options.gw and window.system.calcTypeComboBox.currentText() == 'DFT+BSE'
+    assert not window.dataset.gw and window.system.calcTypeComboBox.currentText() == 'DFT+BSE'
     assert [action.text() for action in window.recentMenu.actions()] == ['BN', 'BiI3_Bulk_8x8x8']
 
 
@@ -459,7 +459,7 @@ def test_automatic_absorption_range_control(window, qtbot):
     assert inspector.autoRangeCheckBox.isChecked() and not inspector.energyMinSpinBox.isEnabled()
     with qtbot.waitSignal(inspector.absorptionParametersChanged):
         inspector.autoRangeCheckBox.setChecked(False)
-    assert not window.options.absorptionAutoRange and inspector.energyMaxSpinBox.isEnabled()
+    assert not window.spectraParameters.absorptionAutoRange and inspector.energyMaxSpinBox.isEnabled()
 
     inspector.autoRangeCheckBox.setChecked(True)
     window.calculations.excAbsData = [{'q': 0, 'range': (1.5, 3.0)}, {'q': 1, 'range': (1.6, 3.2)}]
@@ -473,7 +473,7 @@ def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
     folder = datasetPath('BiI3_Bulk_8x8x8')
     window.openDataset(main_window.findDataset(folder))
     system = window.system
-    assert window.options.qBZ is None          # nothing saved yet: no path set
+    assert window.dataset.qBZ is None          # nothing saved yet: no path set
 
     # An extra point, a path through it and density sampling
     row = system.hspTable.rowCount()
@@ -489,14 +489,14 @@ def test_q_path_is_remembered_per_dataset(window, qtbot, monkeypatch, tmp_path):
     # Next session: the dataset opened again, from the start page
     restored = MainWindow()
     qtbot.addWidget(restored)
-    assert restored.options.saveDir == '' and not restored.startPage.isHidden()
+    assert restored.dataset.saveDir == '' and not restored.startPage.isHidden()
     restored.startPage.datasetLinks[0].click()
     assert restored.startPage.isHidden()
-    assert restored.options.saveDir == str(folder / 'save')
-    assert restored.options.getPathString() == 'LGZFM'
+    assert restored.dataset.saveDir == str(folder / 'save')
+    assert restored.dataset.pathString() == 'LGZFM'
     assert restored.system.interpolationComboBox.currentIndex() == 1
     assert restored.system.densitySpin.value() == 12.5
-    assert restored.options.extraHighSymmetryPoints == {'M': [0.25, 0.25, 0.0]}
+    assert restored.dataset.extraHighSymmetryPoints == {'M': [0.25, 0.25, 0.0]}
     assert restored.system.hspTable.item(restored.system.hspTable.rowCount() - 1, 0).text() == 'M'
     assert 'restored' in restored.statusBar().currentMessage()
     restored.close()
@@ -507,8 +507,8 @@ def test_invalid_saved_q_path_is_dropped(window):
     dataset = main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8'))
     dataset['qPath'] = {'ibrav': -5, 'path': 'NOPE', 'sampling': 'points', 'points': 100, 'density': 10.0, 'extraPoints': {}}
     window.openDataset(dataset)
-    assert window.options.qBZ is None and 'qPath' not in window.recentDatasets()[0]
-    assert window.system.qPathLineEdit.text() == window.options.defaultPath
+    assert window.dataset.qBZ is None and 'qPath' not in window.recentDatasets()[0]
+    assert window.system.qPathLineEdit.text() == window.dataset.defaultPath
     assert 'could not be restored' in window.statusBar().currentMessage()
 
 
@@ -778,7 +778,7 @@ def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
 
 def test_path_labels_on_the_plots(window):
     """Typeset as yambopy renders them; a label it cannot read is shown as it is."""
-    from visual_excitons.core.options import tickLabels
+    from visual_excitons.core.lattice_info import tickLabels
     assert tickLabels(['G', 'Sigma1', "K'", 'K — U', 'old|style']) == ['Γ', 'Σ₁', 'K′', 'K|U', 'old|style']
     window.spectra.dispersionPlot.setXAxis([0.0, 1.0, 2.0], ['G', 'Sigma1', 'K — U'])
     ticks = window.spectra.dispersionPlot.getAxis('bottom')._tickLevels[0]

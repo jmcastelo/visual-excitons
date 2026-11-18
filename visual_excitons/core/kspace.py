@@ -170,7 +170,7 @@ def nearestSpecialPoint(red_kpoint, special_points, rlat, tolerance=0.08):
     (within `tolerance` of the shortest reciprocal vector), or ''. A point
     near -s, when -s is not equivalent to s, gets the label of s with a prime
     (K' of the hexagonal zone, whose list has K only; in YamboPy's label
-    grammar, shown K′ by options.tickLabels).
+    grammar, shown K′ by lattice_info.tickLabels).
     """
     rlat = np.asarray(rlat, dtype=float)
     limit = tolerance * np.min(np.linalg.norm(rlat, axis=1))

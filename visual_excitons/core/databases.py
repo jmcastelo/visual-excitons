@@ -151,3 +151,27 @@ def bseFiles(folder):
             continue
         files[q] = name
     return dict(sorted(files.items())), problems
+
+
+def computedQPoints(folder):
+    """
+    Indices (from 0) of the Q-points with a BSE file in `folder`, sorted. The
+    number of a BSE file (ndb.BS_diago_Q<n>) is the index (from 1) of its
+    Q-point in the irreducible list of the grid; a calculation may have only
+    some. Files are recognised by their content too (see databases.py).
+    """
+    return list(bseFiles(folder)[0])
+
+
+def qPointNames(indices, limit=12):
+    """Q-points by their file numbers, runs shortened: [0, 1, 2, 4, 29] -> 'Q1–Q3, Q5, Q30'."""
+    runs = []
+    for index in sorted(indices):
+        if runs and index == runs[-1][1] + 1:
+            runs[-1][1] = index
+        else:
+            runs.append([index, index])
+    names = [f'Q{a + 1}' if a == b else f'Q{a + 1}, Q{b + 1}' if b == a + 1 else f'Q{a + 1}–Q{b + 1}' for a, b in runs]
+    if len(names) > limit:
+        names = names[:limit] + ['…']
+    return ', '.join(names)

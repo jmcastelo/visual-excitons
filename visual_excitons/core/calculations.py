@@ -4,7 +4,9 @@ from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
 import numpy as np
 from pathlib import Path
 
-from .options import qPointNames
+from .databases import qPointNames
+from .dataset import Dataset
+from .parameters import SpectraParameters
 from .tasks import TaskRunner, databaseAccess, DATABASE_LOCK
 from .memory import PlaneWaves, estimateMemory, chooseBlockSize, availableMemory
 from .export import supercellAtoms, writeDensity
@@ -15,7 +17,7 @@ from visual_excitons.yambopy_ext.bse.exciton_bands import interpolate_exciton_ba
 from visual_excitons.yambopy_ext.dbs.qp_energies import qp_energies
 
 # States within this energy (eV) of an exciton are degenerate with it (summed with it when
-# Options.sumDegenerate: wave function, composition, band structure)
+# Calculations.sumDegenerate: wave function, composition, band structure)
 DEGENERACY_EV = 1e-2
 
 
@@ -489,12 +491,22 @@ class Calculations(QObject):
     progressChanged = Signal(int, int, str)  # done, total (0: unknown), stage
     taskCancelled = Signal(str)
     errorOccurred = Signal(str, str)   # title, message
+    # Whether the states degenerate with the selected exciton are summed with it
+    # (its wave function, composition and band structure)
+    sumDegenerateChanged = Signal(bool)
 
-    def __init__(self, options, synchronous=False):
-        """`synchronous`: run the calculations in the calling thread (tests)."""
+    def __init__(self, dataset=None, spectraParameters=None, synchronous=False):
+        """
+        The calculations on `dataset` (a core.dataset.Dataset), with the
+        parameters of the spectra (core.parameters.SpectraParameters); new
+        ones if not given (tests). `synchronous`: run the calculations in the
+        calling thread (tests).
+        """
         super().__init__()
 
-        self.options = options
+        self.dataset = dataset if dataset is not None else Dataset()
+        self.spectraParameters = spectraParameters if spectraParameters is not None else SpectraParameters()
+        self.sumDegenerate = True
 
         self.tasks = TaskRunner(synchronous, self)
         self.tasks.started.connect(self.busyStarted)
@@ -504,7 +516,7 @@ class Calculations(QObject):
         self.tasks.cancelled.connect(self.taskCancelled)
         self.tasks.failed.connect(self.errorOccurred)
         # Calculations on the previous dataset are pointless: stop them before it changes
-        self.options.datasetAboutToChange.connect(self.tasks.reset)
+        self.dataset.datasetAboutToChange.connect(self.tasks.reset)
 
         self.dispPoints = []
         self.dispPointsData = []
@@ -631,6 +643,12 @@ class Calculations(QObject):
 
     # Composition of the selected exciton
 
+    @Slot(bool)
+    def setSumDegenerate(self, sum):
+        if bool(sum) != self.sumDegenerate:
+            self.sumDegenerate = bool(sum)
+            self.sumDegenerateChanged.emit(self.sumDegenerate)
+
     def compositionMatches(self, degenerate):
         """Whether the composition shown is that of the selected exciton, with `degenerate` as asked."""
         c, selected = self.composition, self.selectedExciton
@@ -644,14 +662,14 @@ class Calculations(QObject):
                 self.composition = None
                 self.compositionReady.emit(None)
             return
-        if self.compositionMatches(degenerate) or not self.options.saveDir or not self.options.diagoDir:
+        if self.compositionMatches(degenerate) or not self.dataset.saveDir or not self.dataset.diagoDir:
             return
         qIndex, excIndex, _ = self.selectedExciton
         # Computed when an exciton is selected: problems are said in its panel, not in a dialog
-        missing = self.options.missingQPoint(qIndex)
+        missing = self.dataset.missingQPoint(qIndex)
         if missing:
             return self._failComposition(missing)
-        o = self.options
+        o = self.dataset
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
                          qIndex=qIndex, excIndex=excIndex, degenerate=degenerate, cache=self.compositionCache)
 
@@ -671,13 +689,13 @@ class Calculations(QObject):
 
     def computeCharacter(self, axis='z'):
         """The symmetry and spin along `axis` of the selected exciton, in the background."""
-        if self.selectedExciton is None or not self.options.saveDir or not self.options.diagoDir:
+        if self.selectedExciton is None or not self.dataset.saveDir or not self.dataset.diagoDir:
             return
         qIndex, excIndex, _ = self.selectedExciton
-        missing = self.options.missingQPoint(qIndex)
+        missing = self.dataset.missingQPoint(qIndex)
         if missing:
             return self._reject('Analysing the symmetry and spin…', missing)
-        o = self.options
+        o = self.dataset
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
                          qIndex=qIndex, excIndex=excIndex, axis=axis, wavefunctionCache=self.wavefunctionCache,
                          symmetryCache=self.symmetryCache,
@@ -755,17 +773,17 @@ class Calculations(QObject):
     @Slot()
     def getExcitonDispersion(self):
         message = 'Computing the excitonic dispersion…'
-        options = self.options
-        if options.qBZ is None:
+        dataset = self.dataset
+        if dataset.qBZ is None:
             return self._reject(message, 'No Q-path: set one on the System page first.')
-        if not options.diagoDir:
+        if not dataset.diagoDir:
             return self._reject(message, 'No BSE directory: choose one on the System page first.')
 
-        if not options.qPoints:
+        if not dataset.qPoints:
             return self._reject(message, 'The BSE directory has no BSE databases (ndb.BS_diago_Q*).')
 
-        arguments = dict(saveDir=options.saveDir, diagoDir=options.diagoDir, nExcitons=options.nExcitons,
-                         qBZ=options.qBZ, qPoints=list(options.qPoints), bseFiles=dict(options.bseFiles))
+        arguments = dict(saveDir=dataset.saveDir, diagoDir=dataset.diagoDir,
+                         nExcitons=self.spectraParameters.nExcitons, qBZ=dataset.qBZ, qPoints=list(dataset.qPoints), bseFiles=dict(dataset.bseFiles))
         self.tasks.submit(message, lambda context: computeDispersion(context, **arguments),
                           self._applyDispersion, key='dispersion')
 
@@ -804,9 +822,10 @@ class Calculations(QObject):
 
     def absorptionParameters(self):
         """Snapshot of the inputs of the absorption spectra."""
-        o = self.options
-        return dict(lattice=self.lattice, diagoDir=o.diagoDir, energyStep=o.energyStep, energyMin=o.energyMin,
-                    energyMax=o.energyMax, minIntensity=o.excMinIntensity, autoRange=o.absorptionAutoRange,
+        o = self.dataset
+        p = self.spectraParameters
+        return dict(lattice=self.lattice, diagoDir=o.diagoDir, energyStep=p.energyStep, energyMin=p.energyMin,
+                    energyMax=p.energyMax, minIntensity=p.excMinIntensity, autoRange=p.absorptionAutoRange,
                     bseFiles=dict(o.bseFiles))
 
     def computeAbsorptionSpectrum(self, index, qPointIndex, parameters):
@@ -831,7 +850,7 @@ class Calculations(QObject):
     def showQPointAbsorption(self, qPointIndex):
         """Add the absorption spectrum at a Q-point given by its index (e.g. one off the Q-path), kept."""
         message = 'Computing the absorption spectrum…'
-        missing = self.options.missingQPoint(qPointIndex)
+        missing = self.dataset.missingQPoint(qPointIndex)
         if missing:
             return self._reject(message, missing)
         curve = self.absorptionCurveIndex(qPointIndex)
@@ -840,7 +859,7 @@ class Calculations(QObject):
             return
         if self.lattice is None:
             with databaseAccess():
-                self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+                self.lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1')
         parameters = self.absorptionParameters()
         self.tasks.submit(message, lambda context: self.computeAbsorptionSpectrum(-1, qPointIndex, parameters),
                           lambda data: self._updateAbsorptionCurves(qPointIndex, True, data))
@@ -930,7 +949,7 @@ class Calculations(QObject):
         """
         The band structure of the excitons clicked (at any Q-point: that of the
         first; those of others are left out), kept to be computed again when
-        Options.sumDegenerate changes.
+        sumDegenerate changes.
         """
         def qIndexOf(point):
             data = point.data()
@@ -951,12 +970,12 @@ class Calculations(QObject):
         if self.bandStructureSelection is None:
             return
         qIndex, indices = self.bandStructureSelection
-        o = self.options
+        o = self.dataset
         if o.qBZ is None or not o.saveDir or not o.diagoDir or o.missingQPoint(qIndex):
             self._applyBandStructure({'k': [], 'bands': [], 'weights': []})
             return
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
-                         qIndex=qIndex, excitonIndices=indices, degenerate=o.sumDegenerate, qBZ=o.qBZ,
+                         qIndex=qIndex, excitonIndices=indices, degenerate=self.sumDegenerate, qBZ=o.qBZ,
                          gw=o.gw, qpDir=o.qpDir, qpFile=o.qpFile)
         self.tasks.submit('Interpolating the excitonic band structure…',
                           lambda context: computeBandStructure(context, **arguments),
@@ -1001,15 +1020,15 @@ class Calculations(QObject):
         `exc_index` (1-based) at Q-point `q_index` (0-based, the file
         ndb.BS_diago_Q<q_index + 1>); wfComputed is emitted when it is ready.
         """
-        missing = self.options.missingQPoint(q_index)
+        missing = self.dataset.missingQPoint(q_index)
         if missing:
             return self._reject('Computing the exciton wave function…', missing)
-        arguments = dict(lattice=self.lattice, saveDir=self.options.saveDir, diagoDir=self.options.diagoDir,
-                         bseFile=self.options.bseFile(q_index),
+        arguments = dict(lattice=self.lattice, saveDir=self.dataset.saveDir, diagoDir=self.dataset.diagoDir,
+                         bseFile=self.dataset.bseFile(q_index),
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
                          cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
-                         cache=self.wavefunctionCache, block_size=block_size, degenerate=self.options.sumDegenerate)
+                         cache=self.wavefunctionCache, block_size=block_size, degenerate=self.sumDegenerate)
         self.tasks.submit('Computing the exciton wave function…',
                           lambda context: computeWaveFunction(context, **arguments),
                           self._applyWaveFunction, key='wave-function')
@@ -1107,7 +1126,7 @@ class Calculations(QObject):
         lattice = self.lattice
         if lattice is None:
             with databaseAccess():
-                lattice = self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+                lattice = self.lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1')
 
         if 'dispersion' in meta:
             axes = meta['dispersion']
@@ -1180,22 +1199,22 @@ class Calculations(QObject):
         None when the databases are busy (a calculation is reading them) or
         missing. Raises ValueError for an exciton that does not exist.
         """
-        if not self.options.saveDir or not self.options.diagoDir:
+        if not self.dataset.saveDir or not self.dataset.diagoDir:
             return None
-        missing = self.options.missingQPoint(q_index)
+        missing = self.dataset.missingQPoint(q_index)
         if missing:
             raise ValueError(missing)
         if not DATABASE_LOCK.acquire(blocking=False):
             return None
         try:
             if self.lattice is None:
-                self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+                self.lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1')
             if self.planeWaves is None:
-                self.planeWaves = PlaneWaves(self.options.saveDir, self.lattice)
-            key = (self.options.diagoDir, q_index, exc_index)
+                self.planeWaves = PlaneWaves(self.dataset.saveDir, self.lattice)
+            key = (self.dataset.diagoDir, q_index, exc_index)
             if key not in self.excitonSizes:
-                filename = self.options.bseFile(q_index)
-                excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.options.diagoDir,
+                filename = self.dataset.bseFile(q_index)
+                excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.dataset.diagoDir,
                                                         neigs=exc_index + 20)
                 if exc_index > len(excitonDB.eigenvalues):
                     raise ValueError(f'Exciton {exc_index} does not exist: {filename} has '
@@ -1213,12 +1232,12 @@ class Calculations(QObject):
             DATABASE_LOCK.release()
 
         size = dict(self.excitonSizes[key])
-        if not self.options.sumDegenerate:
+        if not self.sumDegenerate:
             size['states'] = 1          # the exciton alone
         fftBox = self.planeWaves.fftBox(cutoff_ry)
         supercell = [s + 1 - s % 2 for s in supercell]   # odd, as computed
         # A snapshot of the keys: the worker thread may be changing the cache
-        loaded = any(saveDir == self.options.saveDir and bands[1] - bands[0] == size['bands']
+        loaded = any(saveDir == self.dataset.saveDir and bands[1] - bands[0] == size['bands']
                      for saveDir, bands in list(self.wavefunctionCache.keys()))
         memory = availableMemory()
         blockSize = chooseBlockSize(self.planeWaves, fftBox, size['states'], size['kpoints'],
@@ -1304,7 +1323,7 @@ class Calculations(QObject):
     def unitCell(self):
         if self.lattice is None:
             with databaseAccess():
-                self.lattice = YamboLatticeDB.from_db(self.options.saveDir + '/ns.db1')
+                self.lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1')
 
         return {
             'atomic_numbers': self.lattice.atomic_numbers,

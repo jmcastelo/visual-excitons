@@ -6,7 +6,7 @@ from pathlib import Path
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
 from visual_excitons.core.lattice_info import bravaisName
-from visual_excitons.core.options import SYMMETRY_TOLERANCES
+from visual_excitons.core.lattice_info import SYMMETRY_TOLERANCES
 from visual_excitons.core.consistency import checkDataset, summary, Busy, OK, INFO, WARNING, ERROR
 from .inspector import NoteLabel
 
@@ -26,21 +26,20 @@ class SystemPanel(QWidget):
     # A Q-path was set successfully: its state (see qPathState), to be saved
     qPathApplied = Signal(dict)
 
-    def __init__(self, options):
+    def __init__(self, dataset):
+        """The System panel of `dataset` (a core.dataset.Dataset)."""
         QWidget.__init__(self)
 
-        # All options are contained in this object
-
-        self.options = options
+        self.dataset = dataset
 
         # Calculation type
 
         self.calcTypeComboBox = QComboBox()
         self.calcTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.calcTypeComboBox.addItems(['DFT+BSE', 'DFT+GW+BSE'])
-        self.calcTypeComboBox.setCurrentIndex(1 if self.options.gw else 0)
+        self.calcTypeComboBox.setCurrentIndex(1 if self.dataset.gw else 0)
         self.calcTypeComboBox.currentIndexChanged.connect(self.setGW)
-        self.options.gwChanged.connect(lambda gw: self.calcTypeComboBox.setCurrentIndex(1 if gw else 0))
+        self.dataset.gwChanged.connect(lambda gw: self.calcTypeComboBox.setCurrentIndex(1 if gw else 0))
 
         # Directory rows: label, path, browse button, and a status line below
 
@@ -84,10 +83,10 @@ class SystemPanel(QWidget):
         # Narrower than its longest entry when the panel is: the entries are elided
         self.qpFileComboBox.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.qpFileComboBox.setMinimumContentsLength(12)
-        self.qpFileComboBox.activated.connect(lambda index: self.options.setQPFile(self.qpFileComboBox.itemData(index)))
+        self.qpFileComboBox.activated.connect(lambda index: self.dataset.setQPFile(self.qpFileComboBox.itemData(index)))
         dirLayout.addWidget(self.qpFileLabel, 7, 0)
         dirLayout.addWidget(self.qpFileComboBox, 7, 1)
-        self.options.qpDatabasesChanged.connect(self.setQPDatabases)
+        self.dataset.qpDatabasesChanged.connect(self.setQPDatabases)
         self.setQPDatabases([], '')
 
         # Whether the databases belong together (see core/consistency.py)
@@ -118,17 +117,17 @@ class SystemPanel(QWidget):
         self.checkTimer.setSingleShot(True)
         self.checkTimer.setInterval(300)
         self.checkTimer.timeout.connect(self.runChecks)
-        for signal in (self.options.databaseFound, self.options.diagoDirChanged, self.options.qpDirChanged,
-                       self.options.gwChanged):
+        for signal in (self.dataset.databaseFound, self.dataset.diagoDirChanged, self.dataset.qpDirChanged,
+                       self.dataset.gwChanged):
             signal.connect(lambda *args: self.checkTimer.start())
 
         self.setStatus(self.saveLabel, 'ns.db1 not found!')
         self.setStatus(self.diagoLabel, 'No BSE databases (ndb.BS_diago_Q*) found!')
         self.setStatus(self.qpLabel, 'No QP database (ndb.QP) found!')
 
-        self.options.saveDirChanged.connect(self.setSaveLabel)
-        self.options.diagoDirChanged.connect(self.setDiagoLabel)
-        self.options.qpDirChanged.connect(self.setQPLabel)
+        self.dataset.saveDirChanged.connect(self.setSaveLabel)
+        self.dataset.diagoDirChanged.connect(self.setDiagoLabel)
+        self.dataset.qpDirChanged.connect(self.setQPLabel)
 
         dirGroupBox = QGroupBox('Data')
         dirGroupBox.setLayout(dirLayout)
@@ -180,7 +179,7 @@ class SystemPanel(QWidget):
             bravaisLayout.addWidget(label, row, 1, 1, 3)
             row += 1
         bravaisLayout.addWidget(self.latticeNote, row, 0, 1, 4)
-        self.options.databaseFound.connect(self.onDatabaseFound)
+        self.dataset.databaseFound.connect(self.onDatabaseFound)
 
         bravaisGroup = QGroupBox('Crystal')
         bravaisGroup.setLayout(bravaisLayout)
@@ -281,7 +280,7 @@ class SystemPanel(QWidget):
                                         f'{info["kpoints"]} k-points', info['name'])
         if current:
             self.qpFileComboBox.setCurrentIndex(max(0, self.qpFileComboBox.findData(current)))
-        shown = self.options.gw and bool(databases)
+        shown = self.dataset.gw and bool(databases)
         self.qpFileLabel.setVisible(shown)
         self.qpFileComboBox.setVisible(shown)
         self.qpFileComboBox.setEnabled(len(databases) > 1)
@@ -289,7 +288,7 @@ class SystemPanel(QWidget):
     @Slot()
     def runChecks(self):
         """Check that the databases belong together, and show the result."""
-        o = self.options
+        o = self.dataset
         if not o.saveDir:
             self.findings = []
             self.checksLabel.setText('')
@@ -320,7 +319,7 @@ class SystemPanel(QWidget):
 
     def bseKey(self):
         """What a check of every BSE file was done on."""
-        return self.options.diagoDir, tuple(sorted(self.options.bseFiles.items()))
+        return self.dataset.diagoDir, tuple(sorted(self.dataset.bseFiles.items()))
 
     def setFullBSEChecks(self, key, findings):
         """The BSE findings of a check of every BSE file (of `key`, see bseKey), shown from now on."""
@@ -336,28 +335,28 @@ class SystemPanel(QWidget):
     @Slot(int)
     def setGW(self, index):
         gw = (index == 1)
-        self.options.setGW(gw)
+        self.dataset.setGW(gw)
         self.qpDirLabel.setVisible(gw)
         self.qpDirEdit.setVisible(gw)
         self.selectQPDirButton.setVisible(gw)
-        self.setQPDatabases(self.options.qpDatabases, self.options.qpFile)
+        self.setQPDatabases(self.dataset.qpDatabases, self.dataset.qpFile)
         self.qpLabel.setVisible(gw)
 
     @Slot()
     def selectSaveDir(self):
-        directory = QFileDialog.getExistingDirectory(self, 'SAVE directory', self.options.saveDir, QFileDialog.Option.ShowDirsOnly)
+        directory = QFileDialog.getExistingDirectory(self, 'SAVE directory', self.dataset.saveDir, QFileDialog.Option.ShowDirsOnly)
         if directory:
             self.directoryChosen.emit('save', directory)
 
     @Slot()
     def selectDiagoDir(self):
-        directory = QFileDialog.getExistingDirectory(self, 'BSE directory', self.options.diagoDir, QFileDialog.Option.ShowDirsOnly)
+        directory = QFileDialog.getExistingDirectory(self, 'BSE directory', self.dataset.diagoDir, QFileDialog.Option.ShowDirsOnly)
         if directory:
             self.directoryChosen.emit('diago', directory)
 
     @Slot()
     def selectQPDir(self):
-        directory = QFileDialog.getExistingDirectory(self, 'GW directory', self.options.qpDir or self.options.diagoDir,
+        directory = QFileDialog.getExistingDirectory(self, 'GW directory', self.dataset.qpDir or self.dataset.diagoDir,
                                                      QFileDialog.Option.ShowDirsOnly)
         if directory:
             self.directoryChosen.emit('qp', directory)
@@ -372,21 +371,21 @@ class SystemPanel(QWidget):
 
     @Slot()
     def editSaveDir(self):
-        self.directoryEdited('save', self.saveDirEdit, self.options.saveDir)
+        self.directoryEdited('save', self.saveDirEdit, self.dataset.saveDir)
 
     @Slot()
     def editDiagoDir(self):
-        self.directoryEdited('diago', self.diagoDirEdit, self.options.diagoDir)
+        self.directoryEdited('diago', self.diagoDirEdit, self.dataset.diagoDir)
 
     @Slot()
     def editQPDir(self):
-        self.directoryEdited('qp', self.qpDirEdit, self.options.qpDir)
+        self.directoryEdited('qp', self.qpDirEdit, self.dataset.qpDir)
 
     def showDirectories(self):
         """The directories in use in the fields (after a choice that was not applied)."""
-        self.saveDirEdit.setText(self.options.saveDir)
-        self.diagoDirEdit.setText(self.options.diagoDir)
-        self.qpDirEdit.setText(self.options.qpDir)
+        self.saveDirEdit.setText(self.dataset.saveDir)
+        self.diagoDirEdit.setText(self.dataset.diagoDir)
+        self.qpDirEdit.setText(self.dataset.qpDir)
 
     @Slot()
     def setSaveLabel(self, dir, text):
@@ -406,7 +405,7 @@ class SystemPanel(QWidget):
     @Slot(bool)
     def onDatabaseFound(self, found):
         """The crystal of the dataset found (or none): its description, special points and default path."""
-        o = self.options
+        o = self.dataset
         ibrav = o.identifyLattice() if found else None
         self.qPathLineEdit.setText(o.defaultPath if ibrav is not None else '')
         self.setPathButton.setEnabled(ibrav is not None)
@@ -415,7 +414,7 @@ class SystemPanel(QWidget):
 
     def showLattice(self, found):
         """The description of the crystal (see lattice_info.latticeSummary)."""
-        o = self.options
+        o = self.dataset
         labels = (self.latticeLabel, self.spaceGroupLabel, self.atomsLabel, self.volumeLabel, self.kGridLabel,
                   self.vacuumLabel, *self.parameterLabels.values())
         for label in labels:
@@ -469,9 +468,9 @@ class SystemPanel(QWidget):
         """Set the Q-path of the widgets; errors are shown in a dialog unless `quiet`. True if it was set."""
         try:
             if self.interpolationComboBox.currentIndex() == 0:
-                self.options.setBrillouinZone(path=self.qPathLineEdit.text(), npoints=self.numPointsSpin.value())
+                self.dataset.setBrillouinZone(path=self.qPathLineEdit.text(), npoints=self.numPointsSpin.value())
             elif self.interpolationComboBox.currentIndex() == 1:
-                self.options.setBrillouinZone(path=self.qPathLineEdit.text(), density=self.densitySpin.value())
+                self.dataset.setBrillouinZone(path=self.qPathLineEdit.text(), density=self.densitySpin.value())
         except ValueError as error:
             if not quiet:
                 msgBox = QMessageBox()
@@ -479,29 +478,29 @@ class SystemPanel(QWidget):
                 msgBox.setInformativeText(str(error))
                 msgBox.exec()
             return False
-        self.qPathLineEdit.setText(self.options.getPathString())
+        self.qPathLineEdit.setText(self.dataset.pathString())
         self.qPathApplied.emit(self.qPathState())
         return True
 
     def qPathState(self) -> dict:
         """The Q-path as set, with what it depends on: lattice type and extra points."""
         return {
-            'ibrav': self.options.ibrav,
-            'path': self.options.getPathString(),
+            'ibrav': self.dataset.ibrav,
+            'path': self.dataset.pathString(),
             'sampling': 'density' if self.interpolationComboBox.currentIndex() == 1 else 'points',
             'points': self.numPointsSpin.value(),
             'density': self.densitySpin.value(),
-            'extraPoints': {label: list(coords) for label, coords in self.options.extraHighSymmetryPoints.items()},
+            'extraPoints': {label: list(coords) for label, coords in self.dataset.extraHighSymmetryPoints.items()},
         }
 
     def restoreQPath(self, state: dict) -> bool:
         """Set a Q-path saved with qPathState. False (and the default path left) if it cannot be set."""
         try:
             # Saved for another lattice (e.g. chosen by hand in earlier versions): not valid
-            if int(state['ibrav']) != self.options.ibrav or self.options.ibrav == -1:
+            if int(state['ibrav']) != self.dataset.ibrav or self.dataset.ibrav == -1:
                 return False
-            self.options.setLatticeData()             # the points and path of the lattice, afresh
-            self.populateHSPTable(self.options.highSymmetryPoints)
+            self.dataset.setLatticeData()             # the points and path of the lattice, afresh
+            self.populateHSPTable(self.dataset.highSymmetryPoints)
 
             # Extra points, as rows below those of the lattice
             self.hspTable.blockSignals(True)
@@ -548,7 +547,7 @@ class SystemPanel(QWidget):
         addAction = menu.addAction("Add Row")
         deleteAction = menu.addAction("Delete Row")
 
-        deleteAction.setEnabled(self.hspTable.rowCount() > len(self.options.highSymmetryPoints))
+        deleteAction.setEnabled(self.hspTable.rowCount() > len(self.dataset.highSymmetryPoints))
 
         action = menu.exec(self.hspTable.mapToGlobal(position))
 
@@ -590,9 +589,9 @@ class SystemPanel(QWidget):
         self.setExtraHSP()
 
     def setExtraHSP(self):
-        self.options.extraHighSymmetryPoints = {}
+        self.dataset.extraHighSymmetryPoints = {}
 
-        for row in range(len(self.options.highSymmetryPoints), self.hspTable.rowCount()):
+        for row in range(len(self.dataset.highSymmetryPoints), self.hspTable.rowCount()):
             validExtraHSP = True
             for col in range(4):
                 validExtraHSP  &= (self.hspTable.item(row, col) is not None and self.hspTable.item(row, col).text() != '')
@@ -601,4 +600,4 @@ class SystemPanel(QWidget):
                 kx = self.hspTable.item(row, 1).text()
                 ky = self.hspTable.item(row, 2).text()
                 kz = self.hspTable.item(row, 3).text()
-                self.options.extraHighSymmetryPoints[label]=  [float(kx), float(ky), float(kz)]
+                self.dataset.extraHighSymmetryPoints[label]=  [float(kx), float(ky), float(kz)]

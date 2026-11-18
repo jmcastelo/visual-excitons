@@ -148,7 +148,7 @@ def test_composition_panel(window, qtbot, tmp_path):
     window.writeSessionFile(str(path))
     window.openSession(str(path))
     assert calc.composition is not None and calc.composition['states'] == [2] and panel.composition is calc.composition
-    assert panel.viewComboBox.currentText() == 'Plane' and not window.options.sumDegenerate
+    assert panel.viewComboBox.currentText() == 'Plane' and not window.calculations.sumDegenerate
 
 
 @pytest.mark.data

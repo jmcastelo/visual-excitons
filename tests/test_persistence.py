@@ -131,7 +131,7 @@ def test_preferences_are_resumed(newWindow):
     w2 = newWindow()
     q3 = w2.wavefunction.controls
     assert q3.plotTypeComboBox.currentText() == 'Volumetric'
-    assert w2.wavefunction.view is not None and w2.options.isoLevel() == pytest.approx(0.7)
+    assert w2.wavefunction.view is not None and w2.wfParameters.isoLevel == pytest.approx(0.7)
     assert not q3.reverseViewCheckBox.isChecked() and q3.viewPresetComboBox.currentText() == 'z'
     assert [e.text() for e in q3.viewDirLineEdits] == ['0', '0', '1'] and q3.viewUpLineEdits[1].text() == '1'
     assert q3.sections['Structure'].isExpanded() and not q3.sections['Display'].isExpanded()
@@ -167,31 +167,31 @@ def test_dataset_parameters_are_resumed_per_dataset(newWindow):
 
     # Another dataset starts from the defaults
     w.openDataset(bn)
-    assert w.options.supercell() == [1, 1, 1] and p3.particleTypeComboBox.currentText() == 'Hole'
+    assert w.wfParameters.supercell == [1, 1, 1] and p3.particleTypeComboBox.currentText() == 'Hole'
     assert spectra.autoRangeCheckBox.isChecked() and spectra.nExcitonsSpinBox.value() == 6
     p3.setSupercell([5, 5, 1])
 
     # Back to BiI3: its parameters are back, BN keeps its own
     w.openDataset(bii3)
-    assert w.options.supercell() == [3, 1, 3] and w.options.wfCutoff() == 20.0
-    assert w.options.nExcitons == 10 and not w.options.absorptionAutoRange and w.options.energyMax == 3.5
-    assert w.options.energyMin == 1.0 and w.options.excMinIntensity == 0.25
+    assert w.wfParameters.supercell == [3, 1, 3] and w.wfParameters.cutoff == 20.0
+    assert w.spectraParameters.nExcitons == 10 and not w.spectraParameters.absorptionAutoRange and w.spectraParameters.energyMax == 3.5
+    assert w.spectraParameters.energyMin == 1.0 and w.spectraParameters.excMinIntensity == 0.25
     assert spectra.energyMaxSpinBox.value() == 3.5
     assert (p3.qPointSpinBox.value(), p3.excitonIndexSpinBox.value()) == (5, 3)
-    assert p3.particleTypeComboBox.currentText() == 'Electron' and w.options.holePos == [0.5, 0.25, 0.0]
+    assert p3.particleTypeComboBox.currentText() == 'Electron' and w.wfParameters.holePosition == [0.5, 0.25, 0.0]
     w.close()
 
     # Next session: empty; BiI3, the last dataset, opened again with its parameters
     w2 = newWindow()
-    assert w2.options.saveDir == '' and w2.recentDatasets()[0]['save'] == bii3['save']
+    assert w2.dataset.saveDir == '' and w2.recentDatasets()[0]['save'] == bii3['save']
     w2.openDataset(w2.recentDatasets()[0])
-    assert w2.options.saveDir == bii3['save'] and w2.options.supercell() == [3, 1, 3]
+    assert w2.dataset.saveDir == bii3['save'] and w2.wfParameters.supercell == [3, 1, 3]
     assert w2.wavefunction.controls.particleTypeComboBox.currentText() == 'Electron'
-    assert w2.options.particleType() == 'e' and w2.options.holePos == [0.5, 0.25, 0.0]
-    assert (w2.options.energyMin, w2.options.energyMax) == (1.0, 3.5)
+    assert w2.wfParameters.particle == 'e' and w2.wfParameters.holePosition == [0.5, 0.25, 0.0]
+    assert (w2.spectraParameters.energyMin, w2.spectraParameters.energyMax) == (1.0, 3.5)
     # Through Open dataset as well, BN gets its own parameters back
     w2.openDataset(main_window.findDataset(datasetPath('BN')))
-    assert w2.options.supercell() == [5, 5, 1]
+    assert w2.wfParameters.supercell == [5, 5, 1]
 
 
 def test_energy_range_is_restored_whole(newWindow):
@@ -200,7 +200,7 @@ def test_energy_range_is_restored_whole(newWindow):
     spectra = w.spectra.controls
     spectra.setEnergyRange(1.0, 3.0, 0.01)
     spectra.persistence.restore(DATASET, {'energyRange': [5.0, 10.0, 0.05]})
-    assert (w.options.energyMin, w.options.energyMax, w.options.energyStep) == (5.0, 10.0, 0.05)
+    assert (w.spectraParameters.energyMin, w.spectraParameters.energyMax, w.spectraParameters.energyStep) == (5.0, 10.0, 0.05)
     assert (spectra.energyMinSpinBox.value(), spectra.energyMaxSpinBox.value()) == (5.0, 10.0)
     spectra.persistence.restore(DATASET, {'energyRange': [10.0, 5.0, 0.05]})   # invalid: ignored
-    assert (w.options.energyMin, w.options.energyMax) == (5.0, 10.0)
+    assert (w.spectraParameters.energyMin, w.spectraParameters.energyMax) == (5.0, 10.0)

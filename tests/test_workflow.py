@@ -7,7 +7,7 @@ pytest -m slow.
 import numpy as np
 import pytest
 
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.dataset import findDataset
 from conftest import datasetPath
@@ -21,15 +21,15 @@ pytestmark = [pytest.mark.slow, pytest.mark.data, pytest.mark.xdist_group('workf
 def bii3():
     """Calculations on BiI3 with the dispersion along LGZF computed (once for the module)."""
     dataset = findDataset(datasetPath('BiI3_Bulk_8x8x8'))
-    options = Options()
-    options.setSaveDir(dataset['save'])
-    options.setDiagoDir(dataset['diago'])
-    options.setQPDir(dataset['qp'])
-    options.identifyLattice()
-    options.setBrillouinZone(path='LGZF', npoints=100)
+    dataset = Dataset()
+    dataset.setSaveDir(dataset['save'])
+    dataset.setDiagoDir(dataset['diago'])
+    dataset.setQPDir(dataset['qp'])
+    dataset.identifyLattice()
+    dataset.setBrillouinZone(path='LGZF', npoints=100)
 
     # Inline: each call returns with its result applied
-    calculations = Calculations(options, synchronous=True)
+    calculations = Calculations(dataset, synchronous=True)
     errors = []
     calculations.errorOccurred.connect(lambda title, message: errors.append(message))
     calculations.getExcitonDispersion()
@@ -50,7 +50,7 @@ class Point:
 
 
 def test_dispersion(bii3):
-    assert len(bii3.dispPoints) == bii3.options.nExcitons
+    assert len(bii3.dispPoints) == bii3.spectraParameters.nExcitons
     energies = np.array([[p[1] for p in curve] for curve in bii3.dispPoints])
     assert np.all((energies > 1.5) & (energies < 3.0))
     # Curves are the excitons in increasing energy
@@ -102,7 +102,7 @@ def test_absorption_selection_and_wave_function(bii3, monkeypatch):
 
 def test_wave_function_in_the_background(qtbot, bii3):
     """Real threads: progress comes from yambopy's own loops, and cancelling stops them."""
-    calculations = Calculations(bii3.options)
+    calculations = Calculations(bii3.dataset)
     calculations.lattice = bii3.lattice
     stages = []
     calculations.progressChanged.connect(lambda done, total, stage: stages.append((stage, done, total)))

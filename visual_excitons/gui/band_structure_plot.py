@@ -1,6 +1,6 @@
 from PySide6.QtCore import Signal, Slot, Qt
 import pyqtgraph as pg
-from visual_excitons.core.options import tickLabels
+from visual_excitons.core.lattice_info import tickLabels
 
 
 class BandStructurePlot(pg.PlotWidget):

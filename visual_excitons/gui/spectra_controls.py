@@ -22,19 +22,20 @@ class SpectraControls(Inspector):
     # Asks the main window to export the plots as a publication figure
     exportFigureRequested = Signal()
 
-    def __init__(self, options, calculations):
+    def __init__(self, dataset, parameters, calculations):
+        """The controls of the spectra of `dataset`, setting `parameters` (a core.parameters.SpectraParameters)."""
         Inspector.__init__(self)
 
-        # All options are contained in this object
-        self.options = options
+        self.dataset = dataset
+        self.parameters = parameters
         self.calculations = calculations
 
         # Dispersion
 
         self.nExcitonsSpinBox = QSpinBox(minimum=1, maximum=999)
-        self.nExcitonsSpinBox.setValue(self.options.nExcitons)
+        self.nExcitonsSpinBox.setValue(self.parameters.nExcitons)
         self.nExcitonsSpinBox.setToolTip('Number of lowest-energy excitons whose dispersion is computed')
-        self.nExcitonsSpinBox.valueChanged.connect(self.options.setNExcitons)
+        self.nExcitonsSpinBox.valueChanged.connect(lambda n: setattr(self.parameters, 'nExcitons', n))
         self.nExcitonsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
         self.calculateDispersionButton = QPushButton('Compute dispersion')
@@ -61,14 +62,14 @@ class SpectraControls(Inspector):
             spinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
             return spinBox
 
-        self.energyMinSpinBox = energySpinBox(self.options.energyMin)
-        self.energyMaxSpinBox = energySpinBox(self.options.energyMax)
-        self.energyStepSpinBox = energySpinBox(self.options.energyStep)
+        self.energyMinSpinBox = energySpinBox(self.parameters.energyMin)
+        self.energyMaxSpinBox = energySpinBox(self.parameters.energyMax)
+        self.energyStepSpinBox = energySpinBox(self.parameters.energyStep)
         self.energyStepSpinBox.setSingleStep(0.005)
         self.energyStepSpinBox.setMinimum(0.001)
 
         self.autoRangeCheckBox = QCheckBox('Automatic range')
-        self.autoRangeCheckBox.setChecked(self.options.absorptionAutoRange)
+        self.autoRangeCheckBox.setChecked(self.parameters.absorptionAutoRange)
         self.autoRangeCheckBox.setToolTip('Each spectrum spans its excitons, plus a margin of five broadenings\n'
                                           '(0.5 eV) on both sides. Untick to set the range by hand.')
         self.autoRangeCheckBox.toggled.connect(self.setAutoRange)
@@ -80,7 +81,7 @@ class SpectraControls(Inspector):
         self.energyStepSpinBox.valueChanged.connect(self.updateEnergyStep)
 
         self.excMinIntensitySpinBox = QDoubleSpinBox(minimum=0.0, maximum=1.0, singleStep=0.05, decimals=3)
-        self.excMinIntensitySpinBox.setValue(self.options.excMinIntensity)
+        self.excMinIntensitySpinBox.setValue(self.parameters.excMinIntensity)
         self.excMinIntensitySpinBox.setKeyboardTracking(False)
         self.excMinIntensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.excMinIntensitySpinBox.setToolTip('Excitons with at least this intensity (relative to the brightest)\n'
@@ -105,7 +106,7 @@ class SpectraControls(Inspector):
         qPointRow.addStretch(1)
         qPointWidget = QWidget()
         qPointWidget.setLayout(qPointRow)
-        self.options.qPointsChanged.connect(self.setQPoints)
+        self.dataset.qPointsChanged.connect(self.setQPoints)
         self.addSpectrumButton.setEnabled(False)
 
         form = formLayout()
@@ -126,13 +127,13 @@ class SpectraControls(Inspector):
         # Its symmetry and spin, once analysed (in the Composition panel)
         self.characterSummary = NoteLabel()
         self.characterSummary.hide()
-        # Shared by everything about the selected exciton (Options.sumDegenerate); a
+        # Shared by everything about the selected exciton (Calculations.sumDegenerate); a
         # copy in the Wave function controls' Exciton section, linked to it
         self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
-        self.sumDegenerateCheckBox.setChecked(self.options.sumDegenerate)
+        self.sumDegenerateCheckBox.setChecked(self.calculations.sumDegenerate)
         self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)
-        self.sumDegenerateCheckBox.toggled.connect(self.options.setSumDegenerate)
-        self.options.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
+        self.sumDegenerateCheckBox.toggled.connect(self.calculations.setSumDegenerate)
+        self.calculations.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
         self.computeWavefunctionButton = QPushButton('Compute its wave function')
         self.computeWavefunctionButton.setToolTip('Compute the wave function of this exciton with the settings of the\n'
                                                   'Wave function controls, and show it')
@@ -179,15 +180,15 @@ class SpectraControls(Inspector):
             self.remember(key, widget, DATASET)
         # The range as a whole: set one bound at a time, it would be clamped by the old other one
         self.remember('energyRange', scope=DATASET,
-                      get=lambda: [self.options.energyMin, self.options.energyMax, self.options.energyStep],
+                      get=lambda: [self.parameters.energyMin, self.parameters.energyMax, self.parameters.energyStep],
                       set=lambda values: self.setEnergyRange(*values))
         self.remember('labels', self.showLabelsCheckBox)
 
     def _syncEnergies(self):
-        """Show the energies as clamped by the options."""
-        for spinBox, value in ((self.energyMinSpinBox, self.options.energyMin),
-                               (self.energyMaxSpinBox, self.options.energyMax),
-                               (self.energyStepSpinBox, self.options.energyStep)):
+        """Show the energies as clamped by the parameters."""
+        for spinBox, value in ((self.energyMinSpinBox, self.parameters.energyMin),
+                               (self.energyMaxSpinBox, self.parameters.energyMax),
+                               (self.energyStepSpinBox, self.parameters.energyStep)):
             spinBox.blockSignals(True)
             spinBox.setValue(value)
             spinBox.blockSignals(False)
@@ -198,27 +199,27 @@ class SpectraControls(Inspector):
         energyMin, energyMax, energyStep = float(energyMin), float(energyMax), float(energyStep)
         if not (0.0 <= energyMin < energyMax and 0.0 < energyStep <= energyMax - energyMin):
             raise ValueError('invalid energy range')
-        self.options.energyMin, self.options.energyMax, self.options.energyStep = energyMin, energyMax, energyStep
+        self.parameters.energyMin, self.parameters.energyMax, self.parameters.energyStep = energyMin, energyMax, energyStep
         self._syncEnergies()
 
     @Slot(float)
     def updateEnergyMin(self, value):
-        self.options.setEnergyMin(value)
+        self.parameters.setEnergyMin(value)
         self._syncEnergies()
 
     @Slot(float)
     def updateEnergyMax(self, value):
-        self.options.setEnergyMax(value)
+        self.parameters.setEnergyMax(value)
         self._syncEnergies()
 
     @Slot(float)
     def updateEnergyStep(self, value):
-        self.options.setEnergyStep(value)
+        self.parameters.setEnergyStep(value)
         self._syncEnergies()
 
     @Slot(bool)
     def setAutoRange(self, auto: bool, recompute: bool = True):
-        self.options.setAbsorptionAutoRange(auto)
+        self.parameters.absorptionAutoRange = auto
         self.energyMinSpinBox.setEnabled(not auto)
         self.energyMaxSpinBox.setEnabled(not auto)
         self.updateRangeNote()
@@ -229,7 +230,7 @@ class SpectraControls(Inspector):
     def updateRangeNote(self, *args):
         """With the automatic range, show the range of the spectra plotted."""
         ranges = [data['range'] for data in self.calculations.excAbsData if 'range' in data]
-        if self.options.absorptionAutoRange and ranges:
+        if self.parameters.absorptionAutoRange and ranges:
             low, high = min(r[0] for r in ranges), max(r[1] for r in ranges)
             self.rangeNote.setText(f'Spectra from {low:.1f} to {high:.1f} eV.')
             self.rangeNote.show()
@@ -238,7 +239,7 @@ class SpectraControls(Inspector):
 
     @Slot(float)
     def updateExcMinIntensity(self, value):
-        self.options.setExcMinIntensity(value)
+        self.parameters.excMinIntensity = value
         self.absorptionParametersChanged.emit()
 
     @Slot(str, bool)

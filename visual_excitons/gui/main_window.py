@@ -14,7 +14,8 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QLabel, QFileDialog, QMessageBox, QApplication,
                                QProgressBar, QToolButton, QInputDialog)
 
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
+from visual_excitons.core.parameters import SpectraParameters, WavefunctionParameters
 from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
@@ -51,9 +52,13 @@ class MainWindow(QMainWindow):
         self.settings = QSettings('VisualExcitons', 'VisualExcitons')
         self.theme = themeManager()
 
-        self.options = Options()
-        self.calculations = Calculations(self.options)
-        self.dataset = None
+        # The dataset open and the parameters set in the controls
+        self.dataset = Dataset()
+        self.spectraParameters = SpectraParameters()
+        self.wfParameters = WavefunctionParameters()
+        self.calculations = Calculations(self.dataset, self.spectraParameters)
+        # The dataset open as it is remembered (recent list, sessions): its directories, Q-path and state
+        self.datasetRecord = None
         self.sessionPath = None   # session file of the current setup, if saved or opened
 
         self.createStyles()
@@ -63,11 +68,11 @@ class MainWindow(QMainWindow):
 
         # A new SAVE directory invalidates everything computed before; reset
         # first, then redraw the lattice
-        self.options.databaseFound.connect(lambda found: self.calculations.resetDataset())
-        self.options.databaseFound.connect(self.wavefunction.onDatasetChanged)
-        self.options.databaseFound.connect(self.updateDatasetLabel)
-        self.options.numQPointsChanged.connect(self.updateDatasetLabel)
-        self.options.saveDirChanged.connect(self.updateDatasetLabel)
+        self.dataset.databaseFound.connect(lambda found: self.calculations.resetDataset())
+        self.dataset.databaseFound.connect(self.wavefunction.onDatasetChanged)
+        self.dataset.databaseFound.connect(self.updateDatasetLabel)
+        self.dataset.numQPointsChanged.connect(self.updateDatasetLabel)
+        self.dataset.saveDirChanged.connect(self.updateDatasetLabel)
 
         self.calculations.busyStarted.connect(self.onTaskStarted)
         self.calculations.busyChanged.connect(self.onBusyChanged)
@@ -78,9 +83,9 @@ class MainWindow(QMainWindow):
         self.calculations.wfComputed.connect(lambda: self.exportDensityAction.setEnabled(True))
         self.calculations.densityExported.connect(
             lambda filename: self.statusBar().showMessage(f'Probability density saved to {filename}', 6000))
-        self.options.databaseFound.connect(self.onDatasetForExports)
-        self.options.qpDatabasesChanged.connect(self.onQPDatabaseChosen)
-        self.options.gwChanged.connect(self.onGWChanged)
+        self.dataset.databaseFound.connect(self.onDatasetForExports)
+        self.dataset.qpDatabasesChanged.connect(self.onQPDatabaseChosen)
+        self.dataset.gwChanged.connect(self.onGWChanged)
 
         self.theme.themeChanged.connect(self.spectra.setDarkTheme)
         self.theme.themeChanged.connect(self.wavefunction.setDarkTheme)
@@ -117,7 +122,7 @@ class MainWindow(QMainWindow):
             self.resize(1600, 1000)
         self.restoreLayout()
         # No dataset yet: the start page, to open one or a session
-        self.setStartPageShown(self.dataset is None)
+        self.setStartPageShown(self.datasetRecord is None)
 
         # Unsaved changes of the session: what a session file would hold is
         # compared with what was saved, shortly after each input and change of
@@ -152,10 +157,10 @@ class MainWindow(QMainWindow):
         calc.excitonBandStructureInit.connect(self.bandStructureStyle.applyDefaultStyle)
 
     def createPanels(self):
-        self.system = SystemPanel(self.options)
-        self.spectra = SpectraPanels(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
+        self.system = SystemPanel(self.dataset)
+        self.spectra = SpectraPanels(self.dataset, self.spectraParameters, self.calculations, self.dispersionStyle, self.absorptionStyle,
                                      self.bandStructureStyle, parent=self)
-        self.wavefunction = WavefunctionPanels(self.options, self.calculations, parent=self)
+        self.wavefunction = WavefunctionPanels(self.dataset, self.wfParameters, self.calculations, parent=self)
         self.spectra.controls.computeWavefunctionRequested.connect(self.computeSelectedWaveFunction)
         self.wavefunction.controls.selectedEstimateChanged.connect(self.spectra.controls.setWaveFunctionEstimate)
         self.system.qPathApplied.connect(self.saveQPath)
@@ -171,8 +176,8 @@ class MainWindow(QMainWindow):
         self.calculations.compositionFailed.connect(self.compositionPanel.showProblem)
         # Summing degenerate states or not: what depends on it and is cheap follows at once
         # (the wave function, costly, says it was computed with the other setting)
-        self.options.sumDegenerateChanged.connect(self.updateComposition)
-        self.options.sumDegenerateChanged.connect(lambda checked: self.calculations.computeBandStructure())
+        self.calculations.sumDegenerateChanged.connect(self.updateComposition)
+        self.calculations.sumDegenerateChanged.connect(lambda checked: self.calculations.computeBandStructure())
         self.calculations.excitonSelected.connect(self.updateComposition)
         self.compositionPanel.compositionNeeded.connect(self.updateComposition)
         self.compositionPanel.exportDataRequested.connect(self.exportComposition)
@@ -189,7 +194,7 @@ class MainWindow(QMainWindow):
         self.calculations.excitonSelected.connect(self.onCharacterSelection)
         self.compositionPanel.setSelectedExciton(self.calculations.selectedExciton)
         self.spectra.controls.showCompositionRequested.connect(lambda: self.showPanel('composition'))
-        self.options.databaseFound.connect(lambda found: self.compositionPanel.clear())
+        self.dataset.databaseFound.connect(lambda found: self.compositionPanel.clear())
         self.system.qPathApplied.connect(lambda state: self.compositionPanel.setQPath(self.qPathCartesian()))
 
         # The styles of the 2D plots
@@ -476,15 +481,15 @@ class MainWindow(QMainWindow):
         # Open, and in front (behind another tab it catches up when brought up, see
         # CompositionPanel.showEvent); a window not shown (tests) shows nothing
         if self.panels.isShown('composition') and (self.compositionPanel.isVisible() or not self.isVisible()):
-            self.calculations.computeComposition(self.options.sumDegenerate)
+            self.calculations.computeComposition(self.calculations.sumDegenerate)
 
     @Slot(object)
     def onCompositionReady(self, composition):
         if composition is not None:
             lattice = self.calculations.lattice
-            summary = self.options.latticeSummary() or {}
+            summary = self.dataset.latticeSummary() or {}
             self.compositionPanel.setCrystal(lattice.lat, lattice.rlat, lattice.red_kpoints, self.calculations.kGrid(),
-                                             summary.get('layer'), self.options.highSymmetryPoints,
+                                             summary.get('layer'), self.dataset.highSymmetryPoints,
                                              self.qPathCartesian())
         self.compositionPanel.setComposition(composition)
 
@@ -494,7 +499,7 @@ class MainWindow(QMainWindow):
         selected = self.calculations.selectedExciton
         self.compositionPanel.setSelectedExciton(selected)
         self.updateCharacterSummary()
-        o = self.options
+        o = self.dataset
         summary = o.latticeSummary() or {}
         grid, group = summary.get('grid'), summary.get('spaceGroup')
         if selected is None or not grid:
@@ -530,7 +535,7 @@ class MainWindow(QMainWindow):
 
     def qPathCartesian(self):
         """The k-points of the Q-path (Cartesian, Bohr⁻¹ without 2π), or None."""
-        return self.options.qBZ.kpoints('car') if self.options.qBZ is not None else None
+        return self.dataset.qBZ.kpoints('car') if self.dataset.qBZ is not None else None
 
     @Slot()
     def exportComposition(self):
@@ -538,13 +543,13 @@ class MainWindow(QMainWindow):
         if c is None:
             QMessageBox.information(self, 'Export composition', 'Select an exciton in a spectrum first.')
             return
-        name = f'{datasetName(self.dataset or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_composition.csv'
+        name = f'{datasetName(self.datasetRecord or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_composition.csv'
         filename, _ = QFileDialog.getSaveFileName(self, 'Export composition', self.exportPath(name), 'CSV files (*.csv)')
         if not filename:
             return
         from visual_excitons.core.kspace import compositionCSV
         try:
-            Path(filename).write_text(compositionCSV(c, self.calculations.lattice, datasetName(self.dataset or {})))
+            Path(filename).write_text(compositionCSV(c, self.calculations.lattice, datasetName(self.datasetRecord or {})))
         except OSError as error:
             QMessageBox.critical(self, 'Export composition failed', str(error))
             return
@@ -557,7 +562,7 @@ class MainWindow(QMainWindow):
         if c is None:
             QMessageBox.information(self, 'Export image', 'Select an exciton in a spectrum first.')
             return
-        name = f'{datasetName(self.dataset or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_kspace.png'
+        name = f'{datasetName(self.datasetRecord or {}) or "visual_excitons"}_Q{c["qIndex"] + 1}_exciton{c["excIndex"]}_kspace.png'
         filename, _ = QFileDialog.getSaveFileName(self, 'Export image', self.exportPath(name), IMAGE_FILTERS)
         if not filename:
             return
@@ -649,7 +654,7 @@ class MainWindow(QMainWindow):
     def chooseDataset(self):
         if not self.maybeSaveSession('opening another dataset'):
             return
-        start = str(Path(self.dataset['save']).parent.parent) if self.dataset and self.dataset.get('save') else str(Path.cwd())
+        start = str(Path(self.datasetRecord['save']).parent.parent) if self.datasetRecord and self.datasetRecord.get('save') else str(Path.cwd())
         folder = QFileDialog.getExistingDirectory(self, 'Open dataset', start, QFileDialog.Option.ShowDirsOnly)
         if not folder:
             return
@@ -672,27 +677,27 @@ class MainWindow(QMainWindow):
         # What was saved for this dataset (Q-path, parameters), even when it is
         # found again through Open dataset
         saved = next((d for d in self.recentDatasets() if d.get('save') == dataset.get('save')), {})
-        self.dataset = {**{key: saved[key] for key in ('qPath', 'state') if key in saved}, **dict(dataset)}
-        dataset = self.dataset
-        self.options.setGW(bool(dataset.get('gw')))
-        self.options.setSaveDir(dataset['save'])
+        self.datasetRecord = {**{key: saved[key] for key in ('qPath', 'state') if key in saved}, **dict(dataset)}
+        dataset = self.datasetRecord
+        self.dataset.setGW(bool(dataset.get('gw')))
+        self.dataset.setSaveDir(dataset['save'])
         if dataset.get('diago'):
-            self.options.setDiagoDir(dataset['diago'])
+            self.dataset.setDiagoDir(dataset['diago'])
         if dataset.get('qp'):
-            self.options.setQPDir(dataset['qp'], dataset.get('qpFile'))
+            self.dataset.setQPDir(dataset['qp'], dataset.get('qpFile'))
 
         # The Q-path last set on this dataset, if any
         qPath = dataset.get('qPath')
         if qPath:
             if self.system.restoreQPath(qPath):
-                self.statusBar().showMessage(f'Q-path {self.options.getPathString()} restored', 4000)
+                self.statusBar().showMessage(f'Q-path {self.dataset.pathString()} restored', 4000)
             else:
                 # Not valid any more (e.g. different lattice): forget it
-                self.dataset.pop('qPath', None)
+                self.datasetRecord.pop('qPath', None)
                 self.statusBar().showMessage('The saved Q-path could not be restored: set it again', 8000)
 
         self.state.restore(DATASET, dataset.get('state') or self.datasetDefaults)
-        self.addRecentDataset(self.dataset)
+        self.addRecentDataset(self.datasetRecord)
         self.updateDatasetLabel()
         self.setStartPageShown(False)
 
@@ -709,9 +714,9 @@ class MainWindow(QMainWindow):
         self.calculations.cancel()
         # Its parameters stay with it, for when it is opened again
         self.storeDatasetState()
-        self.dataset = None
+        self.datasetRecord = None
         self.sessionPath = None
-        self.options.closeDataset()
+        self.dataset.close()
         self.spectra.clearQPath()
         self.markSessionSaved()
         self.updateDatasetLabel()
@@ -719,10 +724,10 @@ class MainWindow(QMainWindow):
 
     def storeDatasetState(self):
         """Save the parameters of the current dataset with it, in the recent datasets."""
-        if self.dataset is None:
+        if self.datasetRecord is None:
             return
-        self.dataset['state'] = self.state.values(DATASET)
-        recent = [dict(self.dataset) if d.get('save') == self.dataset.get('save') else d for d in self.recentDatasets()]
+        self.datasetRecord['state'] = self.state.values(DATASET)
+        recent = [dict(self.datasetRecord) if d.get('save') == self.datasetRecord.get('save') else d for d in self.recentDatasets()]
         self.settings.setValue('recentDatasets', json.dumps(recent))
         # The menu and start page open the datasets with what they hold: up to date
         self.updateRecentMenu()
@@ -737,7 +742,7 @@ class MainWindow(QMainWindow):
     def checkAllBSE(self):
         """Read every BSE database in the background, then show the checks of all of them."""
         from visual_excitons.core.consistency import checkDataset
-        o = self.options
+        o = self.dataset
         if not o.saveDir or not o.bseFiles:
             return
         key = self.system.bseKey()
@@ -764,9 +769,9 @@ class MainWindow(QMainWindow):
                                 'The directory in use stays.')
             self.system.showDirectories()
             return
-        o = self.options
+        o = self.dataset
         if kind == 'save':
-            if self.dataset is not None and not self.maybeSaveSession('opening another dataset'):
+            if self.datasetRecord is not None and not self.maybeSaveSession('opening another dataset'):
                 self.system.showDirectories()
                 return
             self.openDataset({'save': path, 'diago': o.diagoDir or None, 'qp': o.qpDir or None,
@@ -779,20 +784,20 @@ class MainWindow(QMainWindow):
             self.wavefunction.onDatasetChanged(True)
         else:
             o.setQPDir(path)        # the spectra go in onQPDatabaseChosen
-        if self.dataset is not None:
-            self.dataset.update({'diago': o.diagoDir or None, 'qp': o.qpDir or None, 'qpFile': o.qpFile or None})
-            self.addRecentDataset(self.dataset)
+        if self.datasetRecord is not None:
+            self.datasetRecord.update({'diago': o.diagoDir or None, 'qp': o.qpDir or None, 'qpFile': o.qpFile or None})
+            self.addRecentDataset(self.datasetRecord)
         self.updateDatasetLabel()
         self.modifiedTimer.start()
 
     @Slot(bool)
     def onGWChanged(self, gw):
         """With or without the QP corrections: the energies change, the spectra go."""
-        if self.dataset is None or bool(self.dataset.get('gw')) == gw:
+        if self.datasetRecord is None or bool(self.datasetRecord.get('gw')) == gw:
             return            # opening a dataset, which sets it
-        self.dataset['gw'] = gw
+        self.datasetRecord['gw'] = gw
         self.calculations.resetSpectra()
-        self.addRecentDataset(self.dataset)
+        self.addRecentDataset(self.datasetRecord)
         self.updateDatasetLabel()
         self.modifiedTimer.start()
 
@@ -802,33 +807,33 @@ class MainWindow(QMainWindow):
         Remember the QP database used with the dataset (e.g. ndb.QP_140_146
         rather than ndb.QP); another one changes the energies: the spectra go.
         """
-        if self.dataset is None:
+        if self.datasetRecord is None:
             return
-        changed = (self.dataset.get('qp'), self.dataset.get('qpFile')) != (self.options.qpDir, name)
-        self.dataset['qp'], self.dataset['qpFile'] = self.options.qpDir, name
-        if changed and self.options.gw and self.calculations.hasResults():
+        changed = (self.datasetRecord.get('qp'), self.datasetRecord.get('qpFile')) != (self.dataset.qpDir, name)
+        self.datasetRecord['qp'], self.datasetRecord['qpFile'] = self.dataset.qpDir, name
+        if changed and self.dataset.gw and self.calculations.hasResults():
             self.calculations.resetSpectra()
 
     @Slot(dict)
     def saveQPath(self, state: dict):
         """Remember the Q-path of the current dataset, restored when it is opened again."""
-        if self.dataset is None or self.dataset.get('save') != self.options.saveDir:
+        if self.datasetRecord is None or self.datasetRecord.get('save') != self.dataset.saveDir:
             return
-        self.dataset['qPath'] = state
-        self.addRecentDataset(self.dataset)
+        self.datasetRecord['qPath'] = state
+        self.addRecentDataset(self.datasetRecord)
 
     @Slot()
     def updateDatasetLabel(self, *args):
-        name = datasetName({'save': self.options.saveDir, 'diago': self.options.diagoDir,
-                            'qp': self.options.qpDir if self.options.gw else None})
+        name = datasetName({'save': self.dataset.saveDir, 'diago': self.dataset.diagoDir,
+                            'qp': self.dataset.qpDir if self.dataset.gw else None})
         parts = [name] if name else ['No dataset']
-        if self.options.variant:
-            parts.append(f'ibrav {self.options.ibrav} ({self.options.variant})' if self.options.ibrav != -1 else self.options.variant)
-        if self.options.nQpoints:
-            parts.append(self.options.qPointCount())
+        if self.dataset.variant:
+            parts.append(f'ibrav {self.dataset.ibrav} ({self.dataset.variant})' if self.dataset.ibrav != -1 else self.dataset.variant)
+        if self.dataset.nQpoints:
+            parts.append(self.dataset.qPointCount())
         self.datasetLabel.setText('  ·  '.join(parts))
         # [*]: where Qt shows the unsaved changes mark
-        title = [self.sessionName() + '[*]'] if self.dataset is not None else []
+        title = [self.sessionName() + '[*]'] if self.datasetRecord is not None else []
         title += [name] if name else []
         self.setWindowTitle(' — '.join(title + ['Visual Excitons']))
 
@@ -872,7 +877,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def saveSessionAs(self):
-        if self.dataset is None:
+        if self.datasetRecord is None:
             QMessageBox.information(self, 'Save session', 'Open a dataset first.')
             return
         suggestion = Path(self.sessionPath).name if self.sessionPath else self.exportBaseName() + SESSION_SUFFIX
@@ -887,7 +892,7 @@ class MainWindow(QMainWindow):
     def sessionContent(self):
         """The manifest and arrays of a session file of the current setup."""
         self.storeDatasetState()
-        dataset = {key: value for key, value in self.dataset.items() if key != 'state'}
+        dataset = {key: value for key, value in self.datasetRecord.items() if key != 'state'}
         manifest = {
             'dataset': dataset,
             'fingerprint': datasetFingerprint(dataset),
@@ -898,7 +903,7 @@ class MainWindow(QMainWindow):
         return manifest, arrays
 
     def writeSessionFile(self, path):
-        if self.dataset is None:
+        if self.datasetRecord is None:
             QMessageBox.information(self, 'Save session', 'Open a dataset first.')
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -982,7 +987,7 @@ class MainWindow(QMainWindow):
         # Not part of the setup: open sections, and the Appearance panel's own settings
         state = {key: value for key, value in state.items()
                  if '/section/' not in key and not key.startswith('appearancePanel/')}
-        dataset = {key: value for key, value in (self.dataset or {}).items() if key != 'state'}
+        dataset = {key: value for key, value in (self.datasetRecord or {}).items() if key != 'state'}
         results = None
         if self.sessionResultsAction.isChecked():
             results = [self.calculations.resultsVersion, list(self.calculations.selectedExciton or [])]
@@ -998,14 +1003,14 @@ class MainWindow(QMainWindow):
             modified = self.sessionSignature() != self.savedSignature
         else:
             # Not saved yet: only results would be lost (the parameters stay with the dataset)
-            modified = (self.dataset is not None and self.sessionResultsAction.isChecked()
+            modified = (self.datasetRecord is not None and self.sessionResultsAction.isChecked()
                         and self.calculations.hasResults())
         if modified != self.isWindowModified():
             self.setWindowModified(modified)
 
     def eventFilter(self, watched, event):
         if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.KeyRelease, QEvent.Type.Wheel):
-            if self.dataset is not None:
+            if self.datasetRecord is not None:
                 self.modifiedTimer.start()
         return False
 
@@ -1109,7 +1114,7 @@ class MainWindow(QMainWindow):
 
     def exportBaseName(self):
         """File name without extension: the dataset, and the exciton of the wave function if any."""
-        name = datasetName(self.dataset or {}) or 'visual_excitons'
+        name = datasetName(self.datasetRecord or {}) or 'visual_excitons'
         if self.calculations.waveFunction is not None and self.calculations.wfExciton is not None:
             qIndex, excIndex = self.calculations.wfExciton
             name += f'_Q{qIndex + 1}_exciton{excIndex}'
@@ -1194,7 +1199,7 @@ class MainWindow(QMainWindow):
         if panels:
             panels = [p for p in panels if p in figures.availablePanels(data)] or None
         styles = figureStyles(self.dispersionStyle, self.absorptionStyle, self.bandStructureStyle)
-        name = datasetName(self.dataset or {}) or 'figure'
+        name = datasetName(self.datasetRecord or {}) or 'figure'
         dialog = FigureExportDialog(data, styles, defaultName=f'{name}_figure', programVersion=__version__, parent=self,
                                     panels=panels)
         dialog.exec()

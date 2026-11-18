@@ -17,7 +17,7 @@ from .inspector import NoteLabel
 
 
 class SpectraPanels(QObject):
-    def __init__(self, options, calculations, dispersionStyle, absorptionStyle, bandStructureStyle, parent=None):
+    def __init__(self, dataset, parameters, calculations, dispersionStyle, absorptionStyle, bandStructureStyle, parent=None):
         super().__init__(parent)
 
         self.calculations = calculations
@@ -74,7 +74,7 @@ class SpectraPanels(QObject):
 
         # Spectra controls
 
-        self.controls = SpectraControls(options, calculations)
+        self.controls = SpectraControls(dataset, parameters, calculations)
         self.controls.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
         self.controls.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
 

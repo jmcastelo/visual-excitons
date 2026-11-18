@@ -49,10 +49,10 @@ visual_excitons/
 ├── __main__.py             python -m visual_excitons
 ├── main.py                 main(): QApplication, OpenGL context sharing, MainWindow (the visual-excitons command)
 ├── core/                   No widgets: data, calculations, pure numerics
-│   ├── options.py          Options: the user's parameters and the lattice/Q-path state
 │   ├── calculations.py     Calculations: all Yambo calculations, as background tasks
 │   ├── tasks.py            TaskRunner: worker thread, progress, cancellation, DB lock
-│   ├── dataset.py          Finding SAVE / BSE / GW directories in a folder
+│   ├── dataset.py          Dataset: the dataset open (databases, lattice, Q-path); finding its directories
+│   ├── parameters.py       SpectraParameters, WavefunctionParameters: the parameters set in the controls
 │   ├── session.py          Session files: format, reading/writing, dataset fingerprint
 │   ├── figures.py          Publication figures of the plots (Matplotlib; self-contained)
 │   ├── figure_script.py    Export of a figure as a standalone script with its data
@@ -117,7 +117,6 @@ data/                       Test datasets (not in the repository)
 | `SpectraControls` | `spectra_controls.py` | The **Spectra controls** panel (inspector) |
 | `WavefunctionControls` | `wavefunction_controls.py` | The **Wave function controls** panel |
 | `WavefunctionView` | `wavefunction_view.py` | The 3D view |
-| `Options` | `core/options.py` | Parameters and lattice state, not only "options" |
 
 ---
 
@@ -137,15 +136,17 @@ flowchart TB
     WF --> AN["Analysis panel"]
 
     subgraph core [core: no widgets]
-        OPT[Options]
+        DS[Dataset]
+        PAR["SpectraParameters,<br/>WavefunctionParameters"]
         CALC[Calculations]
         TASKS[TaskRunner]
         PURE["Pure modules:<br/>bonds, analysis, export,<br/>memory, dataset"]
     end
 
-    SYS <--> OPT
-    I2D --> OPT
-    I3D --> OPT
+    SYS <--> DS
+    I2D --> PAR
+    I3D --> PAR
+    CALC --> DS
     P2D <--> CALC
     I3D --> CALC
     CALC --> TASKS
@@ -156,27 +157,27 @@ flowchart TB
 
 The rules behind this structure:
 
-- **`core` has no widgets.** `Options` and `Calculations` are `QObject`s (for signals), but they know nothing about windows. Pure computations (bonds, plane cuts, exports, memory estimates) are plain functions taking arrays, testable without Qt.
+- **`core` has no widgets.** `Dataset` and `Calculations` are `QObject`s (for signals), but they know nothing about windows. Pure computations (bonds, plane cuts, exports, memory estimates) are plain functions taking arrays, testable without Qt.
 - **The GUI talks to `core` through signals and slots.** `Calculations` emits results; `SpectraPanels` and `WavefunctionPanels` connect them to their plots. Most wiring happens in their constructors and in `MainWindow`.
-- **One `Options` and one `Calculations`** exist, created by `MainWindow` and passed to the panels.
+- **One of each** `Dataset`, `SpectraParameters`, `WavefunctionParameters` and `Calculations` exists, created by `MainWindow` and passed to what uses it: `SystemPanel(dataset)`, `SpectraControls(dataset, spectraParameters, calculations)`, `WavefunctionControls(dataset, wfParameters, calculations)`, `Calculations(dataset, spectraParameters)`.
 - **Slow work runs in a worker thread** through `TaskRunner` (section 5): the GUI never blocks on Yambo databases or heavy numerics.
 
 ---
 
 ## 4. Core layer
 
-### `Options` (`core/options.py`)
+### `Dataset` (`core/dataset.py`) and the parameters (`core/parameters.py`)
 
-Holds the user's parameters and the lattice state:
+`Dataset` is the dataset open (`MainWindow.dataset`; `MainWindow.datasetRecord` is how it is remembered, a dict of its directories, Q-path and state for the recent list and sessions); `close()` forgets it. It holds:
 
 - Data directories (`saveDir`, `diagoDir`, `qpDir`), calculation type (`gw`), number of Q-points (`nQpoints`).
 - Lattice: `cell` (lattice vectors, rows, Bohr), `latticeParameters`, `ibrav`, `variant`, high-symmetry points, the Q-path `qBZ` (a yambopy `BrillouinZone`) and extra points.
-- Databases (`core/databases.py`): `identify(path)` tells a SAVE, QP or BSE database by its netCDF variables (after a cheap signature check; `_fragment_` files skipped; cached by path, size and modification time). Standard BSE names are trusted without opening the file (a header takes about 15 ms; hundreds of BSE files are common). SAVE stays `ns.db1` by name: yambopy's other readers (YamboElectronsDB, YamboWFDB) open the SAVE files by their names anyway. `qpDatabases(folder)` puts the default first (ndb.QP, else the widest band range); `Options.setQPDir(dir, qpFile)` / `setQPFile` choose one (`qpDatabasesChanged`), remembered as the dataset's `qpFile`. `bseFiles(folder)` maps Q-points to file names; a BSE file must give its Q-point in its name as yambopy reads it (`YamboExcitonDB` takes the text after the first "Q", and recognises Γ by it), and those that do not, and duplicates, are reported (`Options.bseProblems`). `Options.bseFile(q)` gives the file to read everywhere; ExcitonDispersion only reads standard names, so other names are not interpolated.
+- Databases (`core/databases.py`): `identify(path)` tells a SAVE, QP or BSE database by its netCDF variables (after a cheap signature check; `_fragment_` files skipped; cached by path, size and modification time). Standard BSE names are trusted without opening the file (a header takes about 15 ms; hundreds of BSE files are common). SAVE stays `ns.db1` by name: yambopy's other readers (YamboElectronsDB, YamboWFDB) open the SAVE files by their names anyway. `qpDatabases(folder)` puts the default first (ndb.QP, else the widest band range); `Dataset.setQPDir(dir, qpFile)` / `setQPFile` choose one (`qpDatabasesChanged`), remembered as the dataset's `qpFile`. `bseFiles(folder)` maps Q-points to file names; a BSE file must give its Q-point in its name as yambopy reads it (`YamboExcitonDB` takes the text after the first "Q", and recognises Γ by it), and those that do not, and duplicates, are reported (`Dataset.bseProblems`). `Dataset.bseFile(q)` gives the file to read everywhere; ExcitonDispersion only reads standard names, so other names are not interpolated.
 - Consistency (`core/consistency.py`): `checkDataset()` cross-checks the databases (QP↔SAVE lattice constants, k-points and DFT energies up to a constant; BSE bands, coordinates of the Q-point modulo reciprocal lattice vectors, agreement between files; BSE bands within the QP range) on a sample of the BSE files, without waiting for the database lock (`Busy`: the System panel tries again). Findings have a level (ok, info, warning, error), an area and a text; `SystemPanel.runChecks` shows the worst and `showChecks` all of them. `checkDataset(..., bseSample=None, context=...)` reads every BSE file: `MainWindow.checkAllBSE` runs it as a task (the worker holds the reentrant database lock, so the check gets it), and `SystemPanel.setFullBSEChecks` keeps its BSE findings for the files checked (`bseKey`), used instead of the sampled ones until they change.
 - Computed Q-points: `qPoints` (indices from 0) come from the numbers of the `ndb.BS_diago_Q<n>` files (`computedQPoints`), never from their count: a calculation may have only some (`nIbzQpoints` is the size of the irreducible grid, `hasAllQPoints()`, `qPointCount()` for messages, `missingQPoint(q)` for errors, `qPointsChanged`). `computeDispersion` goes through yambopy's `ExcitonDispersion` (which needs every Q-point) and interpolates only with the whole grid; otherwise it reads the computed Q-points on the path with `YamboExcitonDB`, not interpolated, and returns a `note` (`dispersionNoteChanged`, shown in the Spectra controls; `dispersionQPointCountChanged` switches the dispersion plot to lines when there is a single Q-point). `Calculations.showQPointAbsorption(q)` adds the spectrum of any computed Q-point; the excitons of a spectrum carry their Q-point (`PointData.q`), so selecting them and the band structure's Γ test (Q1 is Γ) do not depend on the path. The wave function's Q-point is a `ChoiceSpinBox` restricted to the computed Q-points.
 - Lattice detection: `detectLatticeType()` identifies the lattice from the symmetry of the cell, with yambopy's `lattice_data_for_cell` (spglib), so centred lattices are found whatever the primitive vectors and orientation (comparing the primitive vector lengths with the standard cells did not: an FCC crystal could come out rhombohedral). The ibrav comes from the variant (`ibravCandidates`; for the lattices with two orientations, ±3, ±5, ±9, the one whose standard cell is the dataset's). It tries `SYMMETRY_TOLERANCES` and keeps the most symmetric lattice (`LATTICE_SYMMETRY`), at the strictest tolerance giving it (`symmetryTolerance`, `strictVariant`, `latticeProblem`). `identifyLattice()` detects and calls `setLatticeData()`, which takes the special points from the cell (in its own reduced coordinates, those of Yambo's Q-points); `setBrillouinZone` builds the zone with `BrillouinZone(cell=...)`. There is no ibrav chosen by hand (it took the points in a standard orientation, maybe not the cell's). `latticeSummary()` (`core/lattice_info.py`: space group with spglib, formula, volume, k-grid from the irreducible k-points, layer) feeds the System panel's Crystal section.
-- Parameters of the calculations and displays (energies, exciton count, fixed particle positions, supercell, cutoff, iso levels, opacities, atom/bond sizes...).
-- View directions: `viewBases`, `viewPresets` and `viewVectorToCartesian()`.
+
+The parameters set in the controls are plain dataclasses, without signals (the controls emit their own): `SpectraParameters` (exciton count, energy range and step, bright threshold; `setEnergyMin` / `setEnergyMax` / `setEnergyStep` keep the range consistent) and `WavefunctionParameters` (fixed particle and its positions, cutoff, supercell, iso levels, opacities, atom and bond sizes; `position(particle)`, `setPosition(position, particle)`, `positionCartesian(cell)`). Their ranges are those of the controls' widgets. Sessions keep them through the controls' `remember` keys, not by these names (`test_session_saved_before_options_was_split` opens a session saved before they replaced the former `Options` class). Whether the degenerate states are summed with the selected exciton is `Calculations.sumDegenerate` (`setSumDegenerate`, `sumDegenerateChanged`), with what it applies to. View directions (`VIEW_BASES`, `VIEW_PRESETS`, `viewVectorToCartesian(vector, basis, cell)`) and the lattice helpers (`cellParameters`, `tickLabels`, the symmetry tables) are in `core/lattice_info.py`; `computedQPoints` and `qPointNames` in `core/databases.py`.
 
 Key signals: `saveDirChanged`, `diagoDirChanged`, `qpDirChanged`, `databaseFound(bool)`, `numQPointsChanged(int)`, `gwChanged(bool)`, and `datasetAboutToChange`, emitted **before** a new SAVE directory is read (it cancels calculations on the old dataset).
 
@@ -251,7 +252,7 @@ The band structure (`computeBandStructure`, `yambopy_ext/bse/exciton_bands.py`) 
 
 At a finite Q the weights only have the symmetry of the little group of Q, not the crystal's; and a single state of a degenerate group does not have the full symmetry even at Γ (another reason to sum degenerate states). Folding them into the irreducible wedge, as YamboPy does, takes one star member's weight for all of them. Interpolating on the full grid (`lattice.red_kpoints`, any order, any cell, in reduced coordinates where the grid is regular) assumes no symmetry. The linear version was used first and drew the cusps; the spline keeps what it had right (exact at the grid points, `test_band_structure.py` checks it) and is smooth between them. On BiI3's 8×8×8 grid only 6 of 150 path points are grid points, so the widths still follow the coarse grid (smooth bumps); on a 72×72 grid they are fine.
 
-**Degenerate states.** `Options.sumDegenerate` (one setting, in the Selected exciton section with a linked copy in the Wave function controls; `DEGENERACY_EV` = 10 meV) decides whether the states degenerate with an exciton are summed with it, in the wave function (`computeWaveFunction(degenerate=...)`, its memory estimate), the composition and the band structure. Changing it recomputes the composition and the band structure (`Calculations.computeBandStructure` from `bandStructureSelection`, the excitons last clicked); the wave function, costly, is not: `wfStates` / `wfDegenerate` record how it was computed, and the Exciton section says when that is not the setting of now.
+**Degenerate states.** `Calculations.sumDegenerate` (one setting, in the Selected exciton section with a linked copy in the Wave function controls; `DEGENERACY_EV` = 10 meV) decides whether the states degenerate with an exciton are summed with it, in the wave function (`computeWaveFunction(degenerate=...)`, its memory estimate), the composition and the band structure. Changing it recomputes the composition and the band structure (`Calculations.computeBandStructure` from `bandStructureSelection`, the excitons last clicked); the wave function, costly, is not: `wfStates` / `wfDegenerate` record how it was computed, and the Exciton section says when that is not the setting of now.
 
 ---
 
@@ -270,7 +271,7 @@ self.tasks.submit(message,
                   key='something')
 ```
 
-- **`compute(context)`** runs in the worker thread, on a **snapshot** of its inputs taken when submitting. It must not touch shared state (`self.xxx` of `Calculations`, `Options`, widgets) and must not emit signals. It returns a result.
+- **`compute(context)`** runs in the worker thread, on a **snapshot** of its inputs taken when submitting. It must not touch shared state (`self.xxx` of `Calculations`, `Dataset`, the parameters, widgets) and must not emit signals. It returns a result.
 - **`apply(result)`** runs in the GUI thread: it stores the result and emits signals.
 
 Results go from the worker to the GUI through a `_Relay` QObject's signals (queued connections).
@@ -308,7 +309,7 @@ The wave function display uses the same runner for heavy display work (upsamplin
 sequenceDiagram
     participant U as User
     participant MW as MainWindow
-    participant O as Options
+    participant O as Dataset
     participant C as Calculations
     participant P as Panels
     U->>MW: File › Open dataset / Open recent / startup
@@ -371,7 +372,7 @@ Getting these wrong is the most common source of bugs here.
 - yambopy's `ex_wf2Real` makes even supercell sizes odd, snaps the fixed particle to the nearest grid point and moves it to the **central cell** (`supercell // 2`). The app enforces odd sizes in the GUI and reads back the effective values: `wfSupercell`, `wfGrid` (points per cell), `wfFixedPosition` (crystal coordinates in the unit cell), `wfFixedCrystal()` (in the supercell).
 - The supercell spans cells `0 … n − 1` along each lattice vector from the origin, as the 3D view draws it.
 - Grid point `(i, j, k)` is at `i v1 + j v2 + k v3`, the voxel vectors being supercell vectors divided by the grid size (`wfVoxels()`, `analysis.voxelVectors`). `Calculations.tr4x4` is the same map as a 4×4 transform (voxel vectors as **columns**), used for the 3D items. When upsampling by `f`, divide its 3×3 part by `f`.
-- `waveFunction` is the probability density summed over the spins and, with `Options.sumDegenerate`, the degenerate states (`wfStates`), **normalized to its maximum** (values in [0, 1]).
+- `waveFunction` is the probability density summed over the spins and, with `Calculations.sumDegenerate`, the degenerate states (`wfStates`), **normalized to its maximum** (values in [0, 1]).
 
 **View directions** follow VESTA: the direction is from the viewer into the screen. `WavefunctionView.viewRotation()` builds the quaternion; pyqtgraph's `opts['rotation']` is **world → camera**.
 
@@ -465,7 +466,7 @@ Yambo counts plane waves in RL: the G-vectors of `ns.db1` (`G-VECTORS`, in Carte
 
 ### Main window (`main_window.py`)
 
-`MainWindow` creates `Options`, `Calculations`, the 2D styles, the panels (`createPanels`: `SystemPanel`, `SpectraPanels`, `WavefunctionPanels`, each widget in its dock), menus (including the `Layout` menu), status bar (dataset label, task label, progress bar, Cancel), the theme, and the persistence registry. It handles datasets (open, recent list, Q-path and parameter restore), exports, errors (`QMessageBox`) and saving state on close.
+`MainWindow` creates the `Dataset`, the parameters, `Calculations`, the 2D styles, the panels (`createPanels`: `SystemPanel`, `SpectraPanels`, `WavefunctionPanels`, each widget in its dock), menus (including the `Layout` menu), status bar (dataset label, task label, progress bar, Cancel), the theme, and the persistence registry. It handles datasets (open, recent list, Q-path and parameter restore), exports, errors (`QMessageBox`) and saving state on close.
 
 `SpectraPanels` and `WavefunctionPanels` are `QObject`s, not widgets: they create the plots, the 3D view, the analysis and the control panels, and connect them to each other and to `Calculations`; `MainWindow` puts each of their widgets in a dock.
 
@@ -534,9 +535,9 @@ The **camera** (`WavefunctionView.cameraState()` / `setCameraState()`) is a `DAT
 
 ### Composition panel (`composition_panel.py`)
 
-`Calculations.computeComposition(Options.sumDegenerate)` analyses the selected exciton in the background (`computeComposition`: reads the BSE database of its Q-point with the states up to it plus 20, kept in `compositionCache` for the other excitons of that Q-point, then `exciton_kspace` with `DEGENERACY_EV`). It runs only while the panel is shown: `MainWindow.updateComposition` on each selection, when the panel is opened (`onPanelToggled`, `showPanel`) or brought up (`CompositionPanel.showEvent` emits `compositionNeeded`). Expected problems (a Q-point not computed, an exciton beyond the database) come back as `compositionFailed` and are said in the panel, not in a dialog. The composition goes with the selected exciton: cleared by `resetSpectra`, stored in session results (restored before the selection, so that it is not computed again).
+`Calculations.computeComposition(sumDegenerate)` analyses the selected exciton in the background (`computeComposition`: reads the BSE database of its Q-point with the states up to it plus 20, kept in `compositionCache` for the other excitons of that Q-point, then `exciton_kspace` with `DEGENERACY_EV`). It runs only while the panel is shown: `MainWindow.updateComposition` on each selection, when the panel is opened (`onPanelToggled`, `showPanel`) or brought up (`CompositionPanel.showEvent` emits `compositionNeeded`). Expected problems (a Q-point not computed, an exciton beyond the database) come back as `compositionFailed` and are said in the panel, not in a dialog. The composition goes with the selected exciton: cleared by `resetSpectra`, stored in session results (restored before the selection, so that it is not computed again).
 
-The panel draws a plane map (`TileMapItem`: one polygon per k-point, the 2D Voronoi cell of the grid, clipped to the zone's outline; points up to a tile outside the zone fill the edges of bulk sections) or, for bulk crystals, the zone in 3D (`KSpaceView`, a quaternion `GLViewWidget` with its own gizmo showing the reciprocal vectors; the k-points as one translucent `SortedMeshItem` of spheres, `spheresMeshData` with the headlight shader, drawn in the translucent stage as the wave function's surfaces). Layers (the vacuum axis of `Options.latticeSummary`) only have the plane map. Its settings are a `PersistentState` (`composition` in the registry): the plane and the 3D camera with the dataset; the camera is `None` until the zone is fitted or the camera restored, so that a dataset without a camera of its own gets the zone fitted (`cameraSet`, reset by `clear` on a new dataset).
+The panel draws a plane map (`TileMapItem`: one polygon per k-point, the 2D Voronoi cell of the grid, clipped to the zone's outline; points up to a tile outside the zone fill the edges of bulk sections) or, for bulk crystals, the zone in 3D (`KSpaceView`, a quaternion `GLViewWidget` with its own gizmo showing the reciprocal vectors; the k-points as one translucent `SortedMeshItem` of spheres, `spheresMeshData` with the headlight shader, drawn in the translucent stage as the wave function's surfaces). Layers (the vacuum axis of `Dataset.latticeSummary`) only have the plane map. Its settings are a `PersistentState` (`composition` in the registry): the plane and the 3D camera with the dataset; the camera is `None` until the zone is fitted or the camera restored, so that a dataset without a camera of its own gets the zone fitted (`cameraSet`, reset by `clear` on a new dataset).
 
 ### Symmetry and spin (`computeCharacter`, Composition panel)
 
@@ -552,8 +553,8 @@ A session file is a zip with `session.json` (manifest) and `results.npz` (arrays
 - Opening (`MainWindow.openSession`): restores the `global` values, then opens the dataset with the session's `dataset` values (camera included), then, if the fingerprint matches (`fingerprintsMatch`; sizes only when the dataset was located elsewhere), `Calculations.restoreResults()`, which goes through the same `_apply…` methods as real calculations, so plots, curve styles and dependent panels update as usual.
 - **Unsaved changes** (`*` in the title, through Qt's `[*]` placeholder and `setWindowModified`): `MainWindow.sessionSignature()` is what a session file would hold, as a JSON string: the state values (except open sections, `/section/`, and the Appearance panel's own settings), the dataset, and, when results are stored, `Calculations.resultsVersion` (increased by `markResultsChanged()` wherever results are applied or cleared, which also emits `resultsChanged`) with the selected exciton. `markSessionSaved()` keeps it when a session is saved or opened (again after a zero-delay timer, once what opening started has settled); `updateModified()` compares, 150 ms after each mouse, key or wheel release (application event filter) and each change of the results. `maybeSaveSession(action)` asks Save / Discard / Cancel before closing (`closeEvent`) and before opening another dataset or session from the menus (not in `openDataset` / `openSession` themselves, which tests and sessions call).
 - **Untitled sessions** (`sessionPath` is `None`, a dataset open): no signature; `updateModified()` marks them only when they have results (`Calculations.hasResults()`) and results are stored in sessions, since their parameters are kept with the dataset anyway. Save in `maybeSaveSession` then goes through `saveSessionAs`. Tests leave windows with results: a teardown hook in `conftest.py` replaces their `maybeSaveSession`, so that closing them does not ask.
-- **Directories chosen by hand**: `SystemPanel` only emits `directoryChosen(kind, path)`; `MainWindow.onDirectoryChosen` checks the databases are there, opens another dataset for a SAVE directory (through `maybeSaveSession` and `openDataset`), or applies a BSE or GW directory to `Options` and to `self.dataset` (so it is remembered and in sessions), clearing what it outdates (`Calculations.resetDataset`, or `resetSpectra` for QP changes, also from `onQPDatabaseChosen` and `onGWChanged`).
-- **New session and the start page**: the program starts with no dataset. `MainWindow.newSession()` stores the dataset's values, then `Options.closeDataset()` resets the directories, lattice and Q-path and emits the usual signals with nothing found (`databaseFound(False)` resets the calculations, the System panel and the 3D view). `StartPage` (`start_page.py`) is a child of the main window placed over its central widget (the dock manager), not inside it, so the docking layout is untouched; it is shown while `dataset` is `None` and refilled with the recent sessions and datasets whenever their menus are. Widgets with `WA_AlwaysStackOnTop` (the axes gizmo, an OpenGL widget over the 3D view) are drawn over every sibling, the start page included: `MainWindow.setStartPageShown` hides the gizmo while it is shown.
+- **Directories chosen by hand**: `SystemPanel` only emits `directoryChosen(kind, path)`; `MainWindow.onDirectoryChosen` checks the databases are there, opens another dataset for a SAVE directory (through `maybeSaveSession` and `openDataset`), or applies a BSE or GW directory to `self.dataset` and to `self.datasetRecord` (so it is remembered and in sessions), clearing what it outdates (`Calculations.resetDataset`, or `resetSpectra` for QP changes, also from `onQPDatabaseChosen` and `onGWChanged`).
+- **New session and the start page**: the program starts with no dataset. `MainWindow.newSession()` stores the dataset's values, then `Dataset.close()` resets the directories, lattice and Q-path and emits the usual signals with nothing found (`databaseFound(False)` resets the calculations, the System panel and the 3D view). `StartPage` (`start_page.py`) is a child of the main window placed over its central widget (the dock manager), not inside it, so the docking layout is untouched; it is shown while `dataset` is `None` and refilled with the recent sessions and datasets whenever their menus are. Widgets with `WA_AlwaysStackOnTop` (the axes gizmo, an OpenGL widget over the 3D view) are drawn over every sibling, the start page included: `MainWindow.setStartPageShown` hides the gizmo while it is shown.
 - **The export dialogs' choices** (`figureExport/options`, `imageExport/*` in the settings, where the dialogs read and write them) are GLOBAL entries of `exports` in the registry (`figureExportState` / `imageExportState`), so sessions save and restore them.
 - `test_every_control_is_part_of_the_session` changes every control of the panels, and `test_every_button_is_part_of_the_session` clicks every button (answering the color and font dialogs), and both check the session is marked modified; a new control or button whose effect is left out of the persistence registry fails them, unless added to their exclusions (with the reason).
 - Anything new worth keeping in sessions: parameters go through the persistence registry (section 9) and are included automatically; results need `resultsSnapshot` / `restoreResults` (store arrays in `arrays`, everything else JSON-able in `meta`).
@@ -578,7 +579,7 @@ Settings (`QSettings('VisualExcitons', 'VisualExcitons')`):
 ### Add a control to a control panel
 
 1. Create the widget in the right `build…Section` of the inspector and add it to the section's form.
-2. Connect it to an `Options` setter and/or a signal of the inspector; connect that signal in the constructor of `SpectraPanels` or `WavefunctionPanels`.
+2. Connect it to a field of the parameters (or a `Dataset` setter) and/or a signal of the inspector; connect that signal in the constructor of `SpectraPanels` or `WavefunctionPanels`.
 3. If it should be kept between sessions: `self.remember('key', widget, scope)`; choose `DATASET` if it depends on the system.
 4. Add a test in `tests/test_gui.py`, and to `test_persistence.py` if remembered.
 

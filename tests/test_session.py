@@ -3,6 +3,7 @@
 import json
 import os
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,7 +12,6 @@ from PySide6.QtGui import QQuaternion, QVector3D, QColor
 
 from visual_excitons.core.session import (writeSession, readSession, datasetFingerprint, fingerprintsMatch,
                                           SessionError, SESSION_FORMAT, SESSION_VERSION)
-from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.style import AbsorptionStyle
 from conftest import datasetPath
@@ -116,14 +116,14 @@ def withResults(calc):
 
 
 def test_results_round_trip(qtbot):
-    source = Calculations(Options(), synchronous=True)
+    source = Calculations(synchronous=True)
     withResults(source)
     meta, arrays = source.resultsSnapshot()
     assert sorted(meta) == ['absorption', 'bands', 'dispersion', 'selectedExciton', 'waveFunction']
     assert arrays['waveFunction/density'].dtype == np.float32
     meta = json.loads(json.dumps(__import__('visual_excitons.core.session', fromlist=['jsonable']).jsonable(meta)))
 
-    target = Calculations(Options(), synchronous=True)
+    target = Calculations(synchronous=True)
     target.lattice = FakeLattice()
     style = AbsorptionStyle()
     target.excitonAbsorptionCurveAppended.connect(style.appendCurveStyle)
@@ -156,7 +156,7 @@ def shownTitle(window):
 def injectResults(window, wfShape=(54, 54, 18), supercell=(3, 3, 1)):
     """Give the window synthetic results as a calculation would (signals, curve styles...)."""
     from visual_excitons.core.session import jsonable
-    source = Calculations(Options(), synchronous=True)
+    source = Calculations(synchronous=True)
     withResults(source)
     source.waveFunction = np.random.default_rng(1).random(wfShape)
     source.wfSupercell, source.wfGrid = list(supercell), [n // s for n, s in zip(wfShape, supercell)]
@@ -219,7 +219,7 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     w2.openSession(str(path))
     c2 = w2.calculations
     assert 'with its results' in w2.statusBar().currentMessage()
-    assert w2.options.getPathString() == 'LGZF' and w2.options.supercell() == [3, 3, 1]
+    assert w2.dataset.pathString() == 'LGZF' and w2.wfParameters.supercell == [3, 3, 1]
     assert w2.wavefunction.controls.colormapComboBox.currentText() == 'Magma'
     assert c2.selectedExciton == (4, 2, 2.1) and len(c2.excAbsData) == 2 and c2.waveFunction.shape == (54, 54, 18)
     # The styles of the plots, each curve's too (restored after the curves)
@@ -261,7 +261,7 @@ def test_changed_or_moved_dataset(newWindow, monkeypatch, tmp_path):
     monkeypatch.setattr(main_window.QFileDialog, 'getExistingDirectory', lambda *args, **kwargs: str(folder))
     w3 = newWindow()
     w3.openSession(str(path))
-    assert w3.options.saveDir == str(folder / 'save')
+    assert w3.dataset.saveDir == str(folder / 'save')
     assert 'with its results' in w3.statusBar().currentMessage() and w3.calculations.waveFunction is not None
 
     # Not located: nothing opened
@@ -351,7 +351,7 @@ def test_starts_empty_with_the_start_page(newWindow, tmp_path):
     settings.setValue('recentDatasets', json.dumps([{'save': str(tmp_path / 'gone' / 'save')}]))
     w = newWindow()
     page = w.startPage
-    assert w.dataset is None and w.options.saveDir == '' and not page.isHidden()
+    assert w.datasetRecord is None and w.dataset.saveDir == '' and not page.isHidden()
     assert w.wavefunction.view.gizmo.isHidden()      # drawn over everything otherwise
     assert w.windowTitle() == 'Visual Excitons'
     # The recent ones, those missing disabled
@@ -395,12 +395,12 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Cancel))
     w.newSession()
     assert 'results of this session are not saved' in answers[-1] and 'starting a new session' in answers[-1]
-    assert w.dataset is not None and w.calculations.hasResults()
+    assert w.datasetRecord is not None and w.calculations.hasResults()
 
     # Discard: the dataset closed, as before any was opened
     monkeypatch.setattr(main_window.QMessageBox, 'warning', answer(QMessageBox.StandardButton.Discard))
     w.newSession()
-    assert w.dataset is None and w.options.saveDir == '' and w.options.qBZ is None and not w.options.qPoints
+    assert w.datasetRecord is None and w.dataset.saveDir == '' and w.dataset.qBZ is None and not w.dataset.qPoints
     assert not w.calculations.hasResults() and w.calculations.waveFunction is None
     assert not w.startPage.isHidden() and shownTitle(w) == 'Visual Excitons' and w.datasetLabel.text() == 'No dataset'
     assert w.system.saveDirEdit.text() == '' and w.system.hspTable.rowCount() == 0
@@ -415,7 +415,7 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
 
     # Opened again: its parameters and Q-path are back
     w.startPage.datasetLinks[0].click()
-    assert w.options.nExcitons == 10 and w.options.getPathString() == 'LGZF'
+    assert w.spectraParameters.nExcitons == 10 and w.dataset.pathString() == 'LGZF'
     assert w.startPage.isHidden() and not gizmo.isHidden()
 
 
@@ -450,11 +450,11 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
     empty = tmp_path / 'empty'
     empty.mkdir()
     for kind in ('save', 'diago', 'qp'):
-        before = (w.options.saveDir, w.options.diagoDir, w.options.qpDir)
+        before = (w.dataset.saveDir, w.dataset.diagoDir, w.dataset.qpDir)
         w.system.directoryChosen.emit(kind, str(empty))
-        assert (w.options.saveDir, w.options.diagoDir, w.options.qpDir) == before
+        assert (w.dataset.saveDir, w.dataset.diagoDir, w.dataset.qpDir) == before
         assert 'The directory in use stays' in warnings[-1]
-    assert w.system.diagoDirEdit.text() == w.options.diagoDir and w.options.qPoints
+    assert w.system.diagoDirEdit.text() == w.dataset.diagoDir and w.dataset.qPoints
 
     # Another BSE directory: part of the dataset, remembered; results from the old one go
     injectResults(w)
@@ -463,14 +463,14 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
     for n in (1, 2):
         (partial / f'ndb.BS_diago_Q{n}').symlink_to(bii3 / 'diagos' / f'ndb.BS_diago_Q{n}')
     w.system.directoryChosen.emit('diago', str(partial))
-    assert w.options.diagoDir == str(partial) and w.options.qPoints == [0, 1]
-    assert w.dataset['diago'] == str(partial) and w.recentDatasets()[0]['diago'] == str(partial)
+    assert w.dataset.diagoDir == str(partial) and w.dataset.qPoints == [0, 1]
+    assert w.datasetRecord['diago'] == str(partial) and w.recentDatasets()[0]['diago'] == str(partial)
     assert not w.calculations.hasResults()
 
     # Without the QP corrections: the spectra go, the wave function stays
     injectResults(w)
     w.system.calcTypeComboBox.setCurrentIndex(0)
-    assert w.dataset['gw'] is False and w.recentDatasets()[0]['gw'] is False
+    assert w.datasetRecord['gw'] is False and w.recentDatasets()[0]['gw'] is False
     assert not len(w.calculations.dispPoints) and w.calculations.waveFunction is not None
 
     # Another SAVE directory: another dataset, asked first (the wave function is not saved)
@@ -481,13 +481,13 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
     monkeypatch.setattr(main_window.QMessageBox, 'warning',
                         lambda *args: answers.append(args[2]) or QMessageBox.StandardButton.Cancel)
     w.system.directoryChosen.emit('save', str(main_window.findDataset(bn)['save']))
-    assert 'opening another dataset' in answers[-1] and w.dataset['save'] == str(bii3 / 'save')
+    assert 'opening another dataset' in answers[-1] and w.datasetRecord['save'] == str(bii3 / 'save')
     monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: QMessageBox.StandardButton.Discard)
     w.system.directoryChosen.emit('save', str(main_window.findDataset(bn)['save']))
     # BiI3 keeps its parameters
-    assert w.dataset['save'] == str(main_window.findDataset(bn)['save']) and w.dataset['diago'] == str(partial)
-    assert w.calculations.waveFunction is None and w.options.nExcitons == 6
-    assert [d['save'] for d in w.recentDatasets()][:2] == [w.dataset['save'], str(bii3 / 'save')]
+    assert w.datasetRecord['save'] == str(main_window.findDataset(bn)['save']) and w.datasetRecord['diago'] == str(partial)
+    assert w.calculations.waveFunction is None and w.spectraParameters.nExcitons == 6
+    assert [d['save'] for d in w.recentDatasets()][:2] == [w.datasetRecord['save'], str(bii3 / 'save')]
     assert w.recentDatasets()[1]['state']['spectra/excitons'] == 9
 
 
@@ -668,3 +668,42 @@ def test_plane_perpendicular_to_the_view_is_saved(newWindow, tmp_path):
     w.openSession(str(path))
     assert p3.planeSettings()['up'] == [1.0, 0.0, 0.0]
     assert [edit.text() for edit in p3.planeNormalLineEdits] == ['0.0000', '0.0000', '1.0000']
+
+
+# Sessions saved by earlier versions
+
+SESSIONS = Path(__file__).parent / 'sessions'
+
+
+def restoredParameters(w):
+    """The parameters a session sets, by the names of before_options_split.json."""
+    s, p = w.spectraParameters, w.wfParameters
+    return {'nExcitons': s.nExcitons, 'energyStep': s.energyStep, 'energyMin': s.energyMin, 'energyMax': s.energyMax,
+            'absorptionAutoRange': s.absorptionAutoRange, 'excMinIntensity': s.excMinIntensity, 'gw': w.dataset.gw,
+            'sumDegenerate': w.calculations.sumDegenerate, 'partType': p.particle, 'holePos': list(p.holePosition),
+            'electronPos': list(p.electronPosition), 'wfCutoffRy': p.cutoff, 'scell': list(p.supercell),
+            'wfIsoLevel': p.isoLevel, 'numWfIsoLevels': p.numIsoLevels, 'wfIsoOpacity': p.isoOpacity,
+            'wfIsoSetOpacity': p.isoSetOpacity, 'volSliceDensity': p.sliceDensity, 'volOpacity': p.volumeOpacity,
+            'volContrast': p.volumeContrast, 'atomRadiusScale': p.atomScale, 'bondToleranceFactor': p.bondTolerance,
+            'bondRadiusAngstrom': p.bondRadius, 'bondColorMode': p.bondColoring, 'pathString': w.dataset.pathString()}
+
+
+@pytest.mark.data
+def test_session_saved_before_options_was_split(newWindow, tmp_path):
+    """
+    A session saved before Options was split into Dataset, SpectraParameters
+    and WavefunctionParameters (every parameter changed from its default)
+    restores the same values.
+    """
+    manifest, arrays = readSession(SESSIONS / 'before_options_split.vxsession')
+    folder = datasetPath('BiI3_Bulk_8x8x8')
+    manifest['dataset'].update(save=str(folder / 'save'), diago=str(folder / 'diagos'), qp=str(folder / 'qp'))
+    path = tmp_path / 'old.vxsession'
+    writeSession(path, manifest, arrays)
+    w = newWindow()
+    w.openSession(str(path))
+    expected = json.loads((SESSIONS / 'before_options_split.json').read_text())
+    restored = restoredParameters(w)
+    assert restored.keys() == expected.keys()
+    for name, value in expected.items():
+        assert restored[name] == pytest.approx(value) if isinstance(value, float) else restored[name] == value, name

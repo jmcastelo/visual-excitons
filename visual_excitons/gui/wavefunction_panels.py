@@ -19,7 +19,8 @@ from .wf_geometry import isoMesh, isoSetMesh, volumeColors
 # fast enough not to show (e.g. while dragging the iso level slider)
 INLINE_DISPLAY_WORK = 3_000_000
 from .persistence import PersistentState, DATASET
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
+from visual_excitons.core.parameters import WavefunctionParameters
 from visual_excitons.core.calculations import Calculations
 from visual_excitons.core.bonds import findBonds, halfBonds
 from visual_excitons.core.cellshift import (detectLayer, shiftAtoms, shiftCrystal, snapShift, rollDensity,
@@ -32,10 +33,11 @@ BOND_GREY = (0.6, 0.6, 0.6)
 
 
 class WavefunctionPanels(QObject):
-    def __init__(self, options: Options, calculations: Calculations, parent=None):
+    def __init__(self, dataset: Dataset, parameters: WavefunctionParameters, calculations: Calculations, parent=None):
         super().__init__(parent)
 
-        self.options = options
+        self.dataset = dataset
+        self.parameters = parameters
 
         self.calculations = calculations
         # Display upsampling (see displayDensity), cleared with each new wave function
@@ -47,7 +49,7 @@ class WavefunctionPanels(QObject):
 
         self.view = WavefunctionView()
 
-        self.controls = WavefunctionControls(options, calculations)
+        self.controls = WavefunctionControls(dataset, parameters, calculations)
         self.controls.plotTypeChanged.connect(self.plotWfIfMissing)
         self.controls.plotTypeChanged.connect(self.view.showItem)
         self.controls.isoLevelChanged.connect(self.plotWfIso)
@@ -249,7 +251,7 @@ class WavefunctionPanels(QObject):
 
     @Slot()
     def onCellShiftChanged(self):
-        if not self.options.hasCell():
+        if not self.dataset.hasCell():
             return
         self.plotLattice()
         self.translateFixedParticle()
@@ -380,11 +382,11 @@ class WavefunctionPanels(QObject):
     def showGeometry(self, plotType, geometry, transform):
         view = self.view
         if plotType == 0:
-            view.showIsoMesh(geometry, self.options.isoLevel(), transform, self.options.isoOpacity())
+            view.showIsoMesh(geometry, self.parameters.isoLevel, transform, self.parameters.isoOpacity)
         elif plotType == 1:
             view.showIsoSetMesh(geometry, transform)
         else:
-            view.showVolume(geometry, self.options.sliceDensity(), transform)
+            view.showVolume(geometry, self.parameters.sliceDensity, transform)
 
     def gridPoints(self):
         density = self.shownDensity()
@@ -392,13 +394,13 @@ class WavefunctionPanels(QObject):
 
     @Slot()
     def plotWfIso(self):
-        level = self.options.isoLevel()
+        level = self.parameters.isoLevel
         self.prepareDisplay(0, 'Preparing the isosurface…', lambda density, context: isoMesh(density, level),
                             self.gridPoints())
 
     @Slot()
     def plotWfIsoSet(self):
-        numLevels, opacity = self.options.numIsoLevels(), self.options.isoSetOpacity()
+        numLevels, opacity = self.parameters.numIsoLevels, self.parameters.isoSetOpacity
         colormap = self.view.colormap
         self.prepareDisplay(1, 'Preparing the isosurfaces…',
                             lambda density, context: isoSetMesh(density, numLevels, colormap, opacity, context),
@@ -406,8 +408,8 @@ class WavefunctionPanels(QObject):
 
     @Slot()
     def plotWfVol(self):
-        colormap, sliceDensity = self.view.colormap, self.options.sliceDensity()
-        opacity, contrast = self.options.volumeOpacity(), self.options.volumeContrast()
+        colormap, sliceDensity = self.view.colormap, self.parameters.sliceDensity
+        opacity, contrast = self.parameters.volumeOpacity, self.parameters.volumeContrast
         self.prepareDisplay(2, 'Preparing the volume…',
                             lambda density, context: volumeColors(density, colormap, opacity, contrast, sliceDensity),
                             self.gridPoints())
@@ -419,7 +421,7 @@ class WavefunctionPanels(QObject):
         self.view.clearLatticeBoundaryItems()
 
         # Nothing to draw before a SAVE database is loaded, or once it is closed
-        if not self.options.hasCell():
+        if not self.dataset.hasCell():
             self.view.plotBaseLatticeVectors(None)
             return
 
@@ -431,7 +433,7 @@ class WavefunctionPanels(QObject):
 
         self.view.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
 
-        supercell = self.options.supercell()
+        supercell = self.parameters.supercell
 
         for i in range(supercell[0]):
             for j in range(supercell[1]):
@@ -439,7 +441,7 @@ class WavefunctionPanels(QObject):
                     offset = ucell['base_lattice_vectors'][0] * i + ucell['base_lattice_vectors'][1] * j + ucell['base_lattice_vectors'][2] * k
                     self.view.plotUnitCellBoundaries(ucell['base_lattice_vectors'], offset)
                     self.view.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset,
-                                                           self.options.atomScale())
+                                                           self.parameters.atomScale)
 
         self.plotBonds(ucell, supercell)
 
@@ -448,17 +450,17 @@ class WavefunctionPanels(QObject):
         numbers = np.asarray(ucell['atomic_numbers'], dtype=int)
         positions = np.asarray(ucell['atomic_positions'], dtype=float)[:len(numbers)]
 
-        bonds = findBonds(lattice, positions, numbers, self.options.bondTolerance())
+        bonds = findBonds(lattice, positions, numbers, self.parameters.bondTolerance)
         starts, ends, atoms = halfBonds(lattice, positions, bonds, supercell)
-        uniformColor = BOND_GREY if self.options.bondColoring() == 1 else None
-        self.view.plotBonds(starts, ends, numbers[atoms], self.options.bondRadius() * ANGSTROM_TO_BOHR,
+        uniformColor = BOND_GREY if self.parameters.bondColoring == 1 else None
+        self.view.plotBonds(starts, ends, numbers[atoms], self.parameters.bondRadius * ANGSTROM_TO_BOHR,
                                        uniformColor)
 
     @Slot()
     def translateFixedParticle(self):
-        if not self.options.hasCell():
+        if not self.dataset.hasCell():
             return
-        supercell = self.options.supercell()
-        crystal = np.asarray(self.options.particlePosition(), dtype=float) + np.asarray(supercell) // 2
+        supercell = self.parameters.supercell
+        crystal = np.asarray(self.parameters.position(), dtype=float) + np.asarray(supercell) // 2
         crystal = shiftCrystal(crystal, self.shownShift(), supercell)
-        self.view.translateFixedParticle(np.asarray(self.options.cell, dtype=float).T @ crystal)
+        self.view.translateFixedParticle(np.asarray(self.dataset.cell, dtype=float).T @ crystal)

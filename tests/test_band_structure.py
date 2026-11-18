@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from conftest import datasetPath
-from visual_excitons.core.options import Options
+from visual_excitons.core.dataset import Dataset
 from visual_excitons.core.calculations import Calculations, PointData
 
 
@@ -27,17 +27,17 @@ class Clicked:
 @pytest.fixture(scope='module')
 def bii3():
     folder = datasetPath('BiI3_Bulk_8x8x8')
-    options = Options()
-    options.setSaveDir(str(folder / 'save'))
-    options.setDiagoDir(str(folder / 'diagos'))
-    options.setQPDir(str(folder / 'qp'), 'ndb.QP')
-    options.identifyLattice()
-    options.setBrillouinZone(path='LGZF', npoints=100)
-    return options
+    dataset = Dataset()
+    dataset.setSaveDir(str(folder / 'save'))
+    dataset.setDiagoDir(str(folder / 'diagos'))
+    dataset.setQPDir(str(folder / 'qp'), 'ndb.QP')
+    dataset.identifyLattice()
+    dataset.setBrillouinZone(path='LGZF', npoints=100)
+    return dataset
 
 
-def compute(options, q, indices):
-    calc = Calculations(options, synchronous=True)
+def compute(dataset, q, indices):
+    calc = Calculations(dataset, synchronous=True)
     errors = []
     calc.errorOccurred.connect(lambda title, message: errors.append(message))
     quietly(calc.getExcitonBandStructure, [Clicked(q, j) for j in indices], None)
@@ -98,16 +98,16 @@ def test_degenerate_states_follow_the_setting(bii3):
     calc = compute(bii3, 0, [2])                                   # states 2-5 within 10 meV at Γ
     assert calc.bandStructureInfo['states'] == [2, 3, 4, 5]
     try:
-        bii3.setSumDegenerate(False)
+        calc.setSumDegenerate(False)
         quietly(calc.computeBandStructure)
         assert calc.bandStructureInfo['states'] == [2] and not calc.bandStructureInfo['degenerate']
         # The wave function's memory: the exciton alone
         calc.lattice = calc.lattice
         assert quietly(calc.estimateWaveFunction, 0, 2, 5, [1, 1, 1])['states'] == 1
-        bii3.setSumDegenerate(True)
+        calc.setSumDegenerate(True)
         assert quietly(calc.estimateWaveFunction, 0, 2, 5, [1, 1, 1])['states'] == 4
     finally:
-        bii3.setSumDegenerate(True)
+        calc.setSumDegenerate(True)
 
 
 @pytest.mark.data
@@ -162,23 +162,23 @@ def test_energies_where_skw_fails_are_smooth_and_exact():
     """WSe2 72x72x1: the SKW fit misses its own data by over 1 eV (oscillating); the spline on the grid is used."""
     from yambopy import YamboElectronsDB
     folder = datasetPath('WSe2_72x72x1')
-    options = Options()
-    options.setSaveDir(str(folder / 'save'))
-    options.setDiagoDir(str(folder / 'diagos_sel'))
-    options.setGW(False)
-    options.identifyLattice()
-    options.setBrillouinZone(path='MGKM', npoints=300)
-    calc = compute(options, 0, [1])
+    dataset = Dataset()
+    dataset.setSaveDir(str(folder / 'save'))
+    dataset.setDiagoDir(str(folder / 'diagos_sel'))
+    dataset.setGW(False)
+    dataset.identifyLattice()
+    dataset.setBrillouinZone(path='MGKM', npoints=300)
+    calc = compute(dataset, 0, [1])
     assert calc.bandStructureInfo['energyInterpolation'] == 'spline'
     energies = np.transpose(calc.bands)                                # (path, bands)
     assert np.abs(np.diff(energies, 2, axis=0)).max() < 0.1            # no oscillations (they were ~1 eV)
     # At the path points on the grid: the DFT energies
     lattice = calc.lattice
     first, last = calc.bandStructureInfo['bands']
-    dft = quietly(YamboElectronsDB.from_db_file, folder=options.saveDir).eigenvalues_ibz[0][:, first - 1:last]
+    dft = quietly(YamboElectronsDB.from_db_file, folder=dataset.saveDir).eigenvalues_ibz[0][:, first - 1:last]
     full = dft[np.asarray(lattice.kpoints_indexes)]
     index = {tuple(np.round((k[:2] % 1) * 72).astype(int) % 72): i for i, k in enumerate(lattice.red_kpoints)}
-    path = options.qBZ.kpoints('red')
+    path = dataset.qBZ.kpoints('red')
     on = [(p, index[tuple(np.round((r[:2] % 1) * 72).astype(int) % 72)]) for p, r in enumerate(path)
           if np.allclose(r[:2] * 72, np.round(r[:2] * 72), atol=1e-6)]
     assert on and all(np.allclose(energies[p], full[i], atol=1e-6) for p, i in on)

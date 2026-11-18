@@ -48,8 +48,8 @@ def test_linked_fields(qtbot):
     p3.wfCutoffSpinBox.setValue(10.0)
     assert p3.wfCutoffRlSpinBox.value() == 819
     p3.wfCutoffRlSpinBox.setValue(820)                               # up: the next shell
-    assert p3.wfCutoffRlSpinBox.value() == 843 and window.options.wfCutoff() == pytest.approx(10.086, abs=2e-3)
+    assert p3.wfCutoffRlSpinBox.value() == 843 and window.wfParameters.cutoff == pytest.approx(10.086, abs=2e-3)
     p3.wfCutoffRlSpinBox.stepBy(-1)                                  # down: the previous shell
-    assert p3.wfCutoffRlSpinBox.value() == 819 and window.options.wfCutoff() < 10.0
+    assert p3.wfCutoffRlSpinBox.value() == 819 and window.wfParameters.cutoff < 10.0
     p3.fullCutoffCheckBox.setChecked(True)
     assert not p3.wfCutoffRlSpinBox.isEnabled()

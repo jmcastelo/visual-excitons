@@ -5,7 +5,8 @@ import io
 
 import pytest
 
-from visual_excitons.core.options import Options, computedQPoints, qPointNames
+from visual_excitons.core.dataset import Dataset
+from visual_excitons.core.databases import computedQPoints, qPointNames
 from visual_excitons.core.calculations import Calculations, PointData
 from conftest import datasetPath
 
@@ -53,16 +54,16 @@ def partialDataset(tmp_path, qNumbers):
 
 
 def calculationsFor(folder):
-    options = Options()
-    options.setSaveDir(str(folder / 'save'))
-    options.setDiagoDir(str(folder / 'diagos'))
-    options.identifyLattice()
-    options.setBrillouinZone(path='LGZF', npoints=100)
-    calculations = Calculations(options, synchronous=True)
+    dataset = Dataset()
+    dataset.setSaveDir(str(folder / 'save'))
+    dataset.setDiagoDir(str(folder / 'diagos'))
+    dataset.identifyLattice()
+    dataset.setBrillouinZone(path='LGZF', npoints=100)
+    calculations = Calculations(dataset, synchronous=True)
     errors, notes = [], []
     calculations.errorOccurred.connect(lambda title, message: errors.append(message))
     calculations.dispersionNoteChanged.connect(notes.append)
-    return options, calculations, errors, notes
+    return dataset, calculations, errors, notes
 
 
 def quietly(call, *args):
@@ -72,15 +73,15 @@ def quietly(call, *args):
 
 @pytest.mark.data
 def test_sparse_q_points(tmp_path):
-    options, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (1, 2, 5, 30)))
-    assert options.qPoints == [0, 1, 4, 29] and options.qPointCount() == '4 of 90 Q-points'
-    assert not options.hasAllQPoints()
+    dataset, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (1, 2, 5, 30)))
+    assert dataset.qPoints == [0, 1, 4, 29] and dataset.qPointCount() == '4 of 90 Q-points'
+    assert not dataset.hasAllQPoints()
 
     # The dispersion: the computed Q-points on the path, not interpolated, and why
     quietly(calc.getExcitonDispersion)
     assert not errors
     assert sorted(set(int(q) for q in calc.qIndices)) == [0, 1, 4]
-    assert len(calc.dispXInter) == 0 and len(calc.dispPoints) == options.nExcitons
+    assert len(calc.dispXInter) == 0 and len(calc.dispPoints) == calc.spectraParameters.nExcitons
     assert 'Only Q1, Q2, Q5, Q30 computed (4 of the 90' in notes[-1] and 'not interpolated' in notes[-1]
     assert 'Absorption section' in notes[-1]                   # Q30 is off the path
 
@@ -111,7 +112,7 @@ def test_sparse_q_points(tmp_path):
 
 @pytest.mark.data
 def test_only_gamma(tmp_path):
-    options, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (1,)))
+    dataset, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (1,)))
     counts = []
     calc.dispersionQPointCountChanged.connect(counts.append)
     quietly(calc.getExcitonDispersion)
@@ -125,16 +126,16 @@ def test_only_gamma(tmp_path):
 
 @pytest.mark.data
 def test_no_computed_q_point_on_the_path(tmp_path):
-    options, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (30,)))
+    dataset, calc, errors, notes = calculationsFor(partialDataset(tmp_path, (30,)))
     quietly(calc.getExcitonDispersion)
     assert 'None of the computed Q-points (Q30) is on the Q-path' in errors[-1]
 
 
 def test_band_structure_at_the_q_point_of_the_excitons():
     """The excitons of a spectrum carry their Q-point: their band structure is computed there, Γ or not."""
-    calc = Calculations(Options(), synchronous=True)
-    calc.options.saveDir, calc.options.diagoDir, calc.options.qBZ = 'save', 'diagos', object()
-    calc.options.qPoints = [0, 29]
+    calc = Calculations(synchronous=True)
+    calc.dataset.saveDir, calc.dataset.diagoDir, calc.dataset.qBZ = 'save', 'diagos', object()
+    calc.dataset.qPoints = [0, 29]
     submitted = []
     calc.tasks.submit = lambda *args, **kwargs: submitted.append(args)
 

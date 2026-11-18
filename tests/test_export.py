@@ -5,7 +5,6 @@ import pytest
 
 from visual_excitons.core.atomic_data import BOHR_TO_ANGSTROM
 from visual_excitons.core.export import supercellAtoms, writeCube, writeXsf, writeDensity
-from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations
 
 LATTICE = np.array([[4.0, 0.0, 0.0], [1.0, 5.0, 0.0], [0.0, 0.5, 6.0]])   # Bohr, rows
@@ -117,7 +116,7 @@ class FakeLattice:
 
 
 def test_export_density_of_the_wave_function(qtbot, tmp_path):
-    calculations = Calculations(Options(), synchronous=True)
+    calculations = Calculations(synchronous=True)
     with qtbot.waitSignal(calculations.errorOccurred) as blocker:
         calculations.exportDensity(str(tmp_path / 'none.cube'))
     assert 'compute one first' in blocker.args[1]
