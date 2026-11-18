@@ -211,7 +211,7 @@ def test_theme(window, mode, dark):
     assert axes.backgroundColor.color == colors['background'] and axes.axesColor.color == colors['foreground']
     # Default-colored curves follow the theme
     assert window.dispersionStyle.curveStyle.commonPen.color() == colors['foreground']
-    background = window.wavefunction.excitonWfWidget.opts['bgcolor']
+    background = window.wavefunction.view.opts['bgcolor']
     assert (background[0] < 0.5) == dark
 
 
@@ -257,10 +257,10 @@ def test_exciton_selection_reaches_both_pages(window, qtbot):
     window.calculations.selectedExciton = (4, 2, 2.2284)
     window.calculations.excitonSelected.emit(4, 2, 2.2284)
 
-    parameters = window.wavefunction.parameters3DWidget
+    parameters = window.wavefunction.controls
     assert parameters.qPointSpinBox.value() == 5 and parameters.excitonIndexSpinBox.value() == 2
     assert '2.2284 eV' in parameters.excitonNote.text()
-    spectra = window.spectra.inspector
+    spectra = window.spectra.controls
     assert spectra.computeWavefunctionButton.isEnabled() and 'Q-point 5' in spectra.selectedExcitonNote.text()
     assert 'exciton 2 at Q-point 5' in window.statusBar().currentMessage()
 
@@ -272,8 +272,8 @@ def test_exciton_selection_reaches_both_pages(window, qtbot):
 
 def test_compute_the_selected_exciton_from_the_spectra(window, monkeypatch):
     """One click from an exciton in the spectra to its wave function, with the memory it needs shown."""
-    import visual_excitons.gui.parameters_3d_widget as module
-    p3, spectra, calc = window.wavefunction.parameters3DWidget, window.spectra.inspector, window.calculations
+    import visual_excitons.gui.wavefunction_controls as module
+    p3, spectra, calc = window.wavefunction.controls, window.spectra.controls, window.calculations
     estimates = []
 
     def estimate(qIndex, excIndex, cutoff, supercell, factor):
@@ -328,7 +328,7 @@ def test_compute_the_selected_exciton_from_the_spectra(window, monkeypatch):
 def test_compute_passes_the_chosen_exciton(window, monkeypatch):
     calls = []
     monkeypatch.setattr(window.calculations, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
-    parameters = window.wavefunction.parameters3DWidget
+    parameters = window.wavefunction.controls
     window.options.numQPointsChanged.emit(10)
     parameters.qPointSpinBox.setValue(3)
     parameters.excitonIndexSpinBox.setValue(7)
@@ -340,13 +340,13 @@ def test_compute_passes_the_chosen_exciton(window, monkeypatch):
 
 
 def test_supercell_sizes_are_odd(window):
-    parameters = window.wavefunction.parameters3DWidget
+    parameters = window.wavefunction.controls
     parameters.ySupercellSpinBox.setValue(4)
     assert parameters.ySupercellSpinBox.value() == 5 and window.options.supercell() == [1, 5, 1]
 
 
 def test_display_rows_follow_the_plot_type(window):
-    parameters = window.wavefunction.parameters3DWidget
+    parameters = window.wavefunction.controls
     for plotType in range(3):
         parameters.plotTypeComboBox.setCurrentIndex(plotType)
         for widget, plotTypes in parameters.plotTypeRows:
@@ -400,8 +400,8 @@ def test_open_dataset(window):
     assert window.system.parameterLabels['a'].text() == '8.15801 Å'
     assert window.recentMenu.actions()[0].text() == 'BiI3_Bulk_8x8x8'
     # The lattice is drawn: atoms (one mesh per cell) and bonds
-    assert window.wavefunction.excitonWfWidget.latticeItems
-    assert window.wavefunction.excitonWfWidget.bondsItem is not None
+    assert window.wavefunction.view.latticeItems
+    assert window.wavefunction.view.bondsItem is not None
 
 
 @pytest.mark.data
@@ -447,15 +447,15 @@ def test_selection_is_highlighted(window):
     calc.dispPoints = [[[0, 2.0], [1, 2.1]]]
     calc.selectedExciton = (9, 1, 2.1)
     calc.excitonSelected.emit(9, 1, 2.1)
-    ring = window.spectra.dispersionWidget.highlight.item
+    ring = window.spectra.dispersionPlot.highlight.item
     assert list(zip(*ring.getData())) == [(1.0, 2.1)] and ring.scene() is not None
-    assert len(window.spectra.absorptionWidget.highlight.item.getData()[0]) == 0
+    assert len(window.spectra.absorptionPlot.highlight.item.getData()[0]) == 0
     # Fake data, not to be replotted (e.g. by the theme reset at teardown)
     calc.dispPoints, calc.qIndices = [], None
 
 
 def test_automatic_absorption_range_control(window, qtbot):
-    inspector = window.spectra.inspector
+    inspector = window.spectra.controls
     assert inspector.autoRangeCheckBox.isChecked() and not inspector.energyMinSpinBox.isEnabled()
     with qtbot.waitSignal(inspector.absorptionParametersChanged):
         inspector.autoRangeCheckBox.setChecked(False)
@@ -514,7 +514,7 @@ def test_invalid_saved_q_path_is_dropped(window):
 
 def test_image_export_dialog(window):
     from visual_excitons.gui.image_export import ImageExportDialog
-    view = window.wavefunction.excitonWfWidget
+    view = window.wavefunction.view
     view.resize(400, 300)
     dialog = ImageExportDialog(view, window)
     dialog.scaleComboBox.setCurrentIndex(2)                 # 3x
@@ -557,8 +557,8 @@ def test_export_density_from_the_window(window, qtbot, monkeypatch, tmp_path):
 
 
 def test_colormap_choice(window, qtbot):
-    p3 = window.wavefunction.parameters3DWidget
-    view = window.wavefunction.excitonWfWidget
+    p3 = window.wavefunction.controls
+    view = window.wavefunction.view
     with qtbot.waitSignal(p3.colormapChanged):
         p3.colormapComboBox.setCurrentText('Inferno')
     from visual_excitons.gui.colormaps import makeColormap
@@ -572,7 +572,7 @@ def test_colormap_choice(window, qtbot):
 
 
 def test_side_panels_fit_their_content(window):
-    for inspector in (window.spectra.inspector, window.wavefunction.inspector):
+    for inspector in (window.spectra.controls, window.wavefunction.controls):
         for section in inspector.sections.values():
             assert inspector.minimumWidth() >= section.content.minimumSizeHint().width()
         # Buttons as wide as their text, not stretched to the panel
@@ -604,7 +604,7 @@ def fakeWaveFunction(calc, sigma):
 
 def test_analysis_panel(window, qtbot):
     page = window.wavefunction
-    p3, analysis, calc = page.parameters3DWidget, page.analysisWidget, window.calculations
+    p3, analysis, calc = page.controls, page.analysis, window.calculations
     assert not window.panels.isShown('analysis')
     p3.showAnalysisCheckBox.setChecked(True)
     assert window.panels.isShown('analysis') and 'Compute a wave function' in analysis.statistics.text()
@@ -617,12 +617,12 @@ def test_analysis_panel(window, qtbot):
     assert analysis.warning.isHidden()
     # The cut through the hole, and the plane in 3D (a square: normal z in a cubic supercell)
     assert np.isfinite(analysis.image.image).any()
-    assert len(page.excitonWfWidget.cutPlaneItems) == 2
+    assert len(page.view.cutPlaneItems) == 2
     assert len(analysis.atomsItem.data) > 0            # the Bi atoms of the plane z = 9 Bohr
 
     # Without the plane in 3D
     p3.showPlaneCheckBox.setChecked(False)
-    assert page.excitonWfWidget.cutPlaneItems == []
+    assert page.view.cutPlaneItems == []
 
     # Invalid normal: reported, nothing breaks
     for edit in p3.planeNormalLineEdits:
@@ -631,7 +631,7 @@ def test_analysis_panel(window, qtbot):
     assert 'non-zero' in p3.planeStatusLabel.text() and not p3.planeStatusLabel.isHidden()
 
     # Perpendicular to the view: the normal points to the viewer
-    page.excitonWfWidget.setViewDirection([0, 0, -1])
+    page.view.setViewDirection([0, 0, -1])
     p3.planeFromViewRequested.emit()
     assert [e.text() for e in p3.planeNormalLineEdits] == ['0.0000', '0.0000', '1.0000']
     assert p3.planeBasisComboBox.currentText() == 'Cartesian' and p3.planeUpHint is not None
@@ -644,14 +644,14 @@ def test_analysis_panel(window, qtbot):
 
     # A new dataset clears the analysis
     page.onDatasetChanged(False)
-    assert page.radialResult is None and page.excitonWfWidget.cutPlaneItems == []
+    assert page.radialResult is None and page.view.cutPlaneItems == []
     calc.waveFunction = None
     p3.showAnalysisCheckBox.setChecked(False)
     assert not window.panels.isShown('analysis')
 
 
 def test_resolution_controls(window, qtbot, monkeypatch):
-    p3, page, calc = window.wavefunction.parameters3DWidget, window.wavefunction, window.calculations
+    p3, page, calc = window.wavefunction.controls, window.wavefunction, window.calculations
     calls = []
     monkeypatch.setattr(calc, 'computeExcitonWaveFunction', lambda **kwargs: calls.append(kwargs))
     monkeypatch.setattr(p3, 'estimate', lambda: None)       # no dataset: no estimate
@@ -676,8 +676,8 @@ def test_resolution_controls(window, qtbot, monkeypatch):
 
 
 def test_memory_warning(window, monkeypatch):
-    p3, calc = window.wavefunction.parameters3DWidget, window.calculations
-    import visual_excitons.gui.parameters_3d_widget as module
+    p3, calc = window.wavefunction.controls, window.calculations
+    import visual_excitons.gui.wavefunction_controls as module
     estimate = {'peak': 12 * 2 ** 30, 'wavefunctions': 2 ** 30, 'loaded': False, 'fftBox': (46, 46, 46),
                 'supercell': [3, 3, 3], 'states': 7, 'blockSize': 64}
     monkeypatch.setattr(p3, 'estimate', lambda: estimate)
@@ -703,8 +703,8 @@ def test_memory_warning(window, monkeypatch):
 
 def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window, qtbot):
     """Heavy plots (smoothing, many levels) do not block the window; outdated results are not shown."""
-    page, p3, calc = window.wavefunction, window.wavefunction.parameters3DWidget, window.calculations
-    view = page.excitonWfWidget
+    page, p3, calc = window.wavefunction, window.wavefunction.controls, window.calculations
+    view = page.view
     fakeWaveFunction(calc, sigma=2.0)
     p3.plotTypeComboBox.setCurrentIndex(1)        # isosurface set
     p3.smoothingComboBox.setCurrentIndex(0)
@@ -731,8 +731,8 @@ def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window,
 
 def test_structure_toggles_apply_to_items_drawn_later(window):
     """Hidden parts stay hidden when the lattice is redrawn (dataset, supercell, sizes...)."""
-    view = window.wavefunction.excitonWfWidget
-    p3 = window.wavefunction.parameters3DWidget
+    view = window.wavefunction.view
+    p3 = window.wavefunction.controls
     boxes = {box.text(): box for box in p3.findChildren(QCheckBox)}
     for name in ('Atoms', 'Bonds', 'Cell boundaries'):
         boxes[name].setChecked(False)
@@ -758,19 +758,19 @@ def test_structure_toggles_apply_to_items_drawn_later(window):
 @pytest.mark.data
 def test_hidden_boundaries_stay_hidden_after_a_restart(window, qtbot):
     window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
-    p3 = window.wavefunction.parameters3DWidget
+    p3 = window.wavefunction.controls
     next(box for box in p3.findChildren(QCheckBox) if box.text() == 'Cell boundaries').setChecked(False)
     window.close()
 
     restarted = MainWindow()
     qtbot.addWidget(restarted)
     restarted.openDataset(restarted.recentDatasets()[0])
-    view = restarted.wavefunction.excitonWfWidget
+    view = restarted.wavefunction.view
     assert view.latticeBoundaryItems and not any(item.visible() for item in view.latticeBoundaryItems)
-    box = next(b for b in restarted.wavefunction.parameters3DWidget.findChildren(QCheckBox)
+    box = next(b for b in restarted.wavefunction.controls.findChildren(QCheckBox)
                if b.text() == 'Cell boundaries')
     assert not box.isChecked()
-    restarted.wavefunction.parameters3DWidget.setSupercell([3, 1, 1])   # redrawn: still hidden
+    restarted.wavefunction.controls.setSupercell([3, 1, 1])   # redrawn: still hidden
     assert len(view.latticeBoundaryItems) == 3 and not any(item.visible() for item in view.latticeBoundaryItems)
     box.setChecked(True)
     restarted.close()
@@ -780,14 +780,14 @@ def test_path_labels_on_the_plots(window):
     """Typeset as yambopy renders them; a label it cannot read is shown as it is."""
     from visual_excitons.core.options import tickLabels
     assert tickLabels(['G', 'Sigma1', "K'", 'K — U', 'old|style']) == ['Γ', 'Σ₁', 'K′', 'K|U', 'old|style']
-    window.spectra.dispersionWidget.setXAxis([0.0, 1.0, 2.0], ['G', 'Sigma1', 'K — U'])
-    ticks = window.spectra.dispersionWidget.getAxis('bottom')._tickLevels[0]
+    window.spectra.dispersionPlot.setXAxis([0.0, 1.0, 2.0], ['G', 'Sigma1', 'K — U'])
+    ticks = window.spectra.dispersionPlot.getAxis('bottom')._tickLevels[0]
     assert [label for x, label in ticks] == ['Γ', 'Σ₁', 'K|U']
 
 
 def test_path_density_default_and_unit(window):
     """Per Bohr⁻¹, as yambopy takes it: enough points along a default path."""
-    from visual_excitons.gui.options_widget import DEFAULT_PATH_DENSITY
+    from visual_excitons.gui.system_panel import DEFAULT_PATH_DENSITY
     spin = window.system.densitySpin
     assert spin.value() == DEFAULT_PATH_DENSITY and spin.suffix() == ' per Bohr⁻¹'
     import numpy as np
@@ -800,8 +800,8 @@ def test_path_density_default_and_unit(window):
 def test_view_centered_on_what_is_shown(window):
     """When the supercell changes: the middle of the box of the visible elements."""
     window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
-    view = window.wavefunction.excitonWfWidget
-    window.wavefunction.parameters3DWidget.setSupercell([3, 1, 1])
+    view = window.wavefunction.view
+    window.wavefunction.controls.setSupercell([3, 1, 1])
     low, high = view.sceneBounds()
     np.testing.assert_allclose(np.array(view.opts['center']), (low + high) / 2, atol=1e-6)
     # Atoms beyond the cell boundaries count: the box is not only the cells'
@@ -811,7 +811,7 @@ def test_view_centered_on_what_is_shown(window):
     assert (low <= cells.min(axis=0) + 1e-9).all() and (high >= cells.max(axis=0) - 1e-9).all()
     # Moving the view away and changing the supercell again centers it
     view.setCameraParams(center=__import__('pyqtgraph').Vector(100.0, 0.0, 0.0))
-    window.wavefunction.parameters3DWidget.setSupercell([1, 1, 1])
+    window.wavefunction.controls.setSupercell([1, 1, 1])
     low, high = view.sceneBounds()
     np.testing.assert_allclose(np.array(view.opts['center']), (low + high) / 2, atol=1e-6)
 

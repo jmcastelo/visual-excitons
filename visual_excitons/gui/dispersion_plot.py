@@ -7,7 +7,7 @@ from .highlight import ExcitonHighlight
 from visual_excitons.core.options import tickLabels
 
 
-class DispersionWidget(pg.PlotWidget):
+class DispersionPlot(pg.PlotWidget):
     qPointSelected = Signal(list, bool)
     curveClicked = Signal(int)
 

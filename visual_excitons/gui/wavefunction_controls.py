@@ -62,7 +62,7 @@ class ChoiceSpinBox(QSpinBox):
                 return str(self.value())
         return super().fixup(text)
 
-class Parameters3DWidget(Inspector):
+class WavefunctionControls(Inspector):
     plotTypeChanged = Signal(int)
     signalReplotLattice = Signal()
     # The supercell changed (not only redrawn): the view is centered again
@@ -149,7 +149,7 @@ class Parameters3DWidget(Inspector):
         self.excitonNote = NoteLabel()
         # A copy of the Selected exciton section's checkbox, linked to it (Options.sumDegenerate;
         # remembered there): it decides which states a wave function sums
-        from .parameters_widget import DEGENERATE_TIP
+        from .spectra_controls import DEGENERATE_TIP
         self.sumDegenerateCheckBox = QCheckBox('Sum degenerate states')
         self.sumDegenerateCheckBox.setChecked(self.options.sumDegenerate)
         self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)

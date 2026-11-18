@@ -14,7 +14,7 @@ from .inspector import NoteLabel
 DEFAULT_PATH_DENSITY = 300
 
 
-class OptionsWidget(QWidget):
+class SystemPanel(QWidget):
     """System panel: data directories, crystal lattice and Brillouin-zone path."""
 
     # Read every BSE file (run in the background by the main window, see setFullBSEChecks)

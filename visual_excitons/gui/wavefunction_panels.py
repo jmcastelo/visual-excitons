@@ -6,10 +6,10 @@ shown in its own dock by the main window.
 from PySide6.QtCore import QObject, Slot
 import numpy as np
 
-from .exciton_wf_widget import ExcitonWfWidget
-from .parameters_3d_widget import Parameters3DWidget
-from .axes_3d_widget import AxisGizmo
-from .analysis_widget import AnalysisWidget
+from .wavefunction_view import WavefunctionView
+from .wavefunction_controls import WavefunctionControls
+from .axis_gizmo import AxisGizmo
+from .analysis_panel import AnalysisPanel
 from visual_excitons.core.analysis import (planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon,
                                            upsampleDensity)
 from visual_excitons.core.tasks import TaskContext
@@ -45,76 +45,74 @@ class WavefunctionPanels(QObject):
         self.calculations.wfComputed.connect(self.displayCache.clear)
         self.calculations.wfComputed.connect(self.plotWf)
 
-        self.excitonWfWidget = ExcitonWfWidget()
+        self.view = WavefunctionView()
 
-        self.parameters3DWidget = Parameters3DWidget(options, calculations)
-        self.parameters3DWidget.plotTypeChanged.connect(self.plotWfIfMissing)
-        self.parameters3DWidget.plotTypeChanged.connect(self.excitonWfWidget.showItem)
-        self.parameters3DWidget.isoLevelChanged.connect(self.plotWfIso)
-        self.parameters3DWidget.numIsoLevelsChanged.connect(self.plotWfIsoSet)
-        self.parameters3DWidget.isoOpacityChanged.connect(self.excitonWfWidget.setIsoOpacity)
-        self.parameters3DWidget.isoSetOpacityChanged.connect(self.excitonWfWidget.setIsoSetOpacity)
-        self.parameters3DWidget.isoSetStyleChanged.connect(self.excitonWfWidget.setIsoSetStyle)
-        self.parameters3DWidget.colormapChanged.connect(self.setColormap)
-        self.parameters3DWidget.smoothingChanged.connect(self.setSmoothing)
-        self.parameters3DWidget.sliceDensityChanged.connect(self.plotWfVol)
-        self.parameters3DWidget.volumeParametersChanged.connect(self.plotWfVol)
-        self.parameters3DWidget.signalReplotLattice.connect(self.plotLattice)
+        self.controls = WavefunctionControls(options, calculations)
+        self.controls.plotTypeChanged.connect(self.plotWfIfMissing)
+        self.controls.plotTypeChanged.connect(self.view.showItem)
+        self.controls.isoLevelChanged.connect(self.plotWfIso)
+        self.controls.numIsoLevelsChanged.connect(self.plotWfIsoSet)
+        self.controls.isoOpacityChanged.connect(self.view.setIsoOpacity)
+        self.controls.isoSetOpacityChanged.connect(self.view.setIsoSetOpacity)
+        self.controls.isoSetStyleChanged.connect(self.view.setIsoSetStyle)
+        self.controls.colormapChanged.connect(self.setColormap)
+        self.controls.smoothingChanged.connect(self.setSmoothing)
+        self.controls.sliceDensityChanged.connect(self.plotWfVol)
+        self.controls.volumeParametersChanged.connect(self.plotWfVol)
+        self.controls.signalReplotLattice.connect(self.plotLattice)
         # Centered on what is shown when the supercell changes, and when a new
         # wave function is first shown (not one restored, with its own view)
-        self.parameters3DWidget.supercellResized.connect(self.excitonWfWidget.centerView)
+        self.controls.supercellResized.connect(self.view.centerView)
         # The origin of the cell shown (core/cellshift.py): everything moves together
         self.shiftCache = {}
-        self.parameters3DWidget.cellShiftChanged.connect(self.onCellShiftChanged)
+        self.controls.cellShiftChanged.connect(self.onCellShiftChanged)
         # The position as shown in the controls uses the same shift as the drawing
-        self.parameters3DWidget.shiftProvider = self.shownShift
-        self.calculations.wfComputed.connect(self.parameters3DWidget.updateShownPosition)
+        self.controls.shiftProvider = self.shownShift
+        self.calculations.wfComputed.connect(self.controls.updateShownPosition)
         self.calculations.wfComputed.connect(self.updateCellOriginNote)
         self.centerOnDisplay = False
         self.calculations.wfComputed.connect(
             lambda: setattr(self, 'centerOnDisplay', not self.calculations.restoringResults))
-        self.parameters3DWidget.fixedParticlePosChanged.connect(self.translateFixedParticle)
-        self.parameters3DWidget.centerViewClicked.connect(self.excitonWfWidget.centerView)
-        self.parameters3DWidget.viewDirChanged.connect(self.excitonWfWidget.setViewDirection)
-        self.parameters3DWidget.projectionChanged.connect(self.excitonWfWidget.changeProjection)
-        self.parameters3DWidget.viewLatticeChanged.connect(self.excitonWfWidget.viewLattice)
-        self.parameters3DWidget.viewAtomNamesChanged.connect(self.excitonWfWidget.viewAtomNames)
-        self.parameters3DWidget.viewBoundariesChanged.connect(self.excitonWfWidget.viewBoundaries)
-        self.parameters3DWidget.viewBondsChanged.connect(self.excitonWfWidget.viewBonds)
+        self.controls.fixedParticlePosChanged.connect(self.translateFixedParticle)
+        self.controls.centerViewClicked.connect(self.view.centerView)
+        self.controls.viewDirChanged.connect(self.view.setViewDirection)
+        self.controls.projectionChanged.connect(self.view.changeProjection)
+        self.controls.viewLatticeChanged.connect(self.view.viewLattice)
+        self.controls.viewAtomNamesChanged.connect(self.view.viewAtomNames)
+        self.controls.viewBoundariesChanged.connect(self.view.viewBoundaries)
+        self.controls.viewBondsChanged.connect(self.view.viewBonds)
 
-        gizmo = AxisGizmo(target=self.excitonWfWidget, size=200)
-        self.excitonWfWidget.attach_gizmo(gizmo, 10)
+        gizmo = AxisGizmo(target=self.view, size=200)
+        self.view.attach_gizmo(gizmo, 10)
 
-        self.parameters3DWidget.showCartesianAxesChanged.connect(gizmo.setShowCartesian)
-        self.parameters3DWidget.showLatticeVectorsChanged.connect(gizmo.setShowLattice)
-        self.parameters3DWidget.showReciprocalVectorsChanged.connect(self.excitonWfWidget.setShowReciprocalVectors)
-        self.parameters3DWidget.showAxisLabelsChanged.connect(gizmo.setShowLabels)
-        self.parameters3DWidget.showCellInfoChanged.connect(self.excitonWfWidget.setShowCellInfo)
+        self.controls.showCartesianAxesChanged.connect(gizmo.setShowCartesian)
+        self.controls.showLatticeVectorsChanged.connect(gizmo.setShowLattice)
+        self.controls.showReciprocalVectorsChanged.connect(self.view.setShowReciprocalVectors)
+        self.controls.showAxisLabelsChanged.connect(gizmo.setShowLabels)
+        self.controls.showCellInfoChanged.connect(self.view.setShowCellInfo)
 
         # Initial view from the view widgets' default state
-        self.parameters3DWidget.applyView()
+        self.controls.applyView()
 
         # Analysis panel: its dock is shown and hidden with the Analysis
         # section's checkbox (see MainWindow.createPanels)
-        self.analysisWidget = AnalysisWidget()
+        self.analysis = AnalysisPanel()
         self.radialResult = None   # of the current wave function, computed when first shown
         self.calculations.wfComputed.connect(self.onWfComputedForAnalysis)
-        self.parameters3DWidget.analysisChanged.connect(self.updateAnalysis)
-        self.parameters3DWidget.planeFromViewRequested.connect(self.setPlaneFromView)
-        self.parameters3DWidget.colormapChanged.connect(self.analysisWidget.setColormap)
-
-        self.inspector = self.parameters3DWidget
+        self.controls.analysisChanged.connect(self.updateAnalysis)
+        self.controls.planeFromViewRequested.connect(self.setPlaneFromView)
+        self.controls.colormapChanged.connect(self.analysis.setColormap)
 
         self.persistence = PersistentState()
         # The camera, with each dataset: restored after its lattice is drawn and
         # centered (which a preference, restored earlier, would not survive)
-        self.persistence.remember('camera', scope=DATASET, get=self.excitonWfWidget.cameraState,
-                                  set=self.excitonWfWidget.setCameraState)
+        self.persistence.remember('camera', scope=DATASET, get=self.view.cameraState,
+                                  set=self.view.setCameraState)
 
     @Slot(bool)
     def setDarkTheme(self, dark: bool):
-        self.excitonWfWidget.setDarkTheme(dark)
-        self.analysisWidget.setDarkTheme(dark)
+        self.view.setDarkTheme(dark)
+        self.analysis.setDarkTheme(dark)
 
     # Analysis
 
@@ -125,19 +123,19 @@ class WavefunctionPanels(QObject):
 
     @Slot()
     def setPlaneFromView(self):
-        toViewer, up = self.excitonWfWidget.cameraAxes()
-        self.parameters3DWidget.setPlaneFromView(toViewer, up)
+        toViewer, up = self.view.cameraAxes()
+        self.controls.setPlaneFromView(toViewer, up)
 
     @Slot()
     def updateAnalysis(self):
         """Update the analysis panel, if shown, and the plane in 3D."""
-        parameters, calc = self.parameters3DWidget, self.calculations
+        parameters, calc = self.controls, self.calculations
         shown = parameters.showAnalysisCheckBox.isChecked()
 
         if not shown or calc.probabilityDensity() is None or calc.wfSupercell is None:
-            self.excitonWfWidget.setCutPlane(None)
+            self.view.setCutPlane(None)
             if calc.probabilityDensity() is None:
-                self.analysisWidget.clear()
+                self.analysis.clear()
             return
 
         try:
@@ -160,36 +158,36 @@ class WavefunctionPanels(QObject):
         cut = planeCut(density, voxels, point, normal, inPlane=plane['up'], latticeVectors=lattice)
         numbers, positions = self.shownSupercellAtoms(shift)
         atoms = atomsNearPlane(positions, numbers, point, (cut['u'], cut['v'], cut['n']), plane['atoms'])
-        self.analysisWidget.setColormap(parameters.colormap())
-        self.analysisWidget.showCut(cut, atoms, particleLabel, plane['offset'])
+        self.analysis.setColormap(parameters.colormap())
+        self.analysis.showCut(cut, atoms, particleLabel, plane['offset'])
 
         if self.radialResult is None:
             # Distances to the nearest image along the axes where the density repeats with its box
             self.radialResult = radialDistribution(density, voxels, particle,
                                                    periodic=periodicAxes(calc.wfSupercell, calc.kGrid()))
-        self.analysisWidget.showRadial(self.radialResult, particleLabel)
+        self.analysis.showRadial(self.radialResult, particleLabel)
 
         # The plane in the 3D view: through the particle as shown there
         supercellVectors = lattice * np.asarray(calc.wfSupercell)[:, None]
         shownPoint = self.shownFixedCartesian() + plane['offset'] * normal
         polygon = planeSupercellPolygon(supercellVectors, shownPoint, normal) if plane['show3D'] else None
-        self.excitonWfWidget.setCutPlane(polygon)
+        self.view.setCutPlane(polygon)
 
     @Slot(bool)
     def onDatasetChanged(self, found: bool):
         """Drop the wave function of the previous dataset and draw the new lattice."""
-        self.excitonWfWidget.clearWfItems()
-        self.excitonWfWidget.setCutPlane(None)
+        self.view.clearWfItems()
+        self.view.setCutPlane(None)
         self.radialResult = None
         self.displayCache.clear()
-        self.analysisWidget.clear()
+        self.analysis.clear()
         self.shiftCache = {}
         if found:
             ucell = self.calculations.unitCell()
-            self.parameters3DWidget.setLayer(detectLayer(ucell['base_lattice_vectors'], ucell['atomic_positions'],
+            self.controls.setLayer(detectLayer(ucell['base_lattice_vectors'], ucell['atomic_positions'],
                                                          self.calculations.kGrid()))
             self.plotLattice()
-            self.excitonWfWidget.centerView()
+            self.view.centerView()
         else:
             self.plotLattice()      # clears the structure
 
@@ -197,7 +195,7 @@ class WavefunctionPanels(QObject):
 
     def shownShift(self):
         """The shift of what is shown (fractions of a, b, c), on the grid of the wave function if there is one."""
-        shift = self.parameters3DWidget.cellShift()
+        shift = self.controls.cellShift()
         calc = self.calculations
         if calc.waveFunction is not None and calc.wfGrid:
             shift = snapShift(shift, calc.wfGrid)
@@ -261,7 +259,7 @@ class WavefunctionPanels(QObject):
             self.plotWf()
             self.updateAnalysis()
         self.updateCellOriginNote()
-        self.excitonWfWidget.centerView()
+        self.view.centerView()
 
     @Slot()
     def updateCellOriginNote(self):
@@ -274,7 +272,7 @@ class WavefunctionPanels(QObject):
                 axes = ', '.join('abc'[axis] for axis in seams)
                 text = (f'Along {axes}, the wave function is cut by its supercell, and wrapping it with the shift '
                         f'shows a seam: a larger supercell along {axes} avoids it.')
-        self.parameters3DWidget.showCellOriginNote(text)
+        self.controls.showCellOriginNote(text)
 
     # Display resolution
 
@@ -300,7 +298,7 @@ class WavefunctionPanels(QObject):
     @Slot(object)
     def setColormap(self, colormap):
         """Recolor the density: the shown plot now, the others when shown (see plotWfIfMissing)."""
-        self.excitonWfWidget.colormap = colormap
+        self.view.colormap = colormap
         if self.calculations.probabilityDensity() is not None:
             self.plotWf()
 
@@ -308,21 +306,21 @@ class WavefunctionPanels(QObject):
     def plotWf(self):
         # The other plot types are redone when shown (plotWfIfMissing); the shown
         # one stays until its replacement is ready
-        view, plotType = self.excitonWfWidget, self.parameters3DWidget.plotType()
+        view, plotType = self.view, self.controls.plotType()
         for index, clear in enumerate((view.clearWfMeshItem, view.clearWfMeshItemSet, view.clearWfVolItem)):
             if index != plotType:
                 clear()
 
-        if self.parameters3DWidget.plotType() == 0:
+        if self.controls.plotType() == 0:
             self.plotWfIso()
-        elif self.parameters3DWidget.plotType() == 1:
+        elif self.controls.plotType() == 1:
             self.plotWfIsoSet()
-        elif self.parameters3DWidget.plotType() == 2:
+        elif self.controls.plotType() == 2:
             self.plotWfVol()
 
     @Slot(int)
     def plotWfIfMissing(self, index: int):
-        if not self.excitonWfWidget.itemExists(index):
+        if not self.view.itemExists(index):
             if index == 0:
                 self.plotWfIso()
             elif index == 1:
@@ -367,10 +365,10 @@ class WavefunctionPanels(QObject):
                 self.displayCache.clear()   # one copy at a time
                 self.displayCache[(id(density), factor)] = displayed
             self.showGeometry(plotType, geometry, transform)
-            self.excitonWfWidget.showItem(self.parameters3DWidget.plotType())
+            self.view.showItem(self.controls.plotType())
             if self.centerOnDisplay:
                 self.centerOnDisplay = False
-                self.excitonWfWidget.centerView()
+                self.view.centerView()
 
         # Upsampling always takes a while: only work on a grid at hand runs inline
         if cached is not None and work * factor ** 3 <= INLINE_DISPLAY_WORK:
@@ -380,7 +378,7 @@ class WavefunctionPanels(QObject):
             calc.tasks.submit(message, compute, apply, key='display')
 
     def showGeometry(self, plotType, geometry, transform):
-        view = self.excitonWfWidget
+        view = self.view
         if plotType == 0:
             view.showIsoMesh(geometry, self.options.isoLevel(), transform, self.options.isoOpacity())
         elif plotType == 1:
@@ -401,14 +399,14 @@ class WavefunctionPanels(QObject):
     @Slot()
     def plotWfIsoSet(self):
         numLevels, opacity = self.options.numIsoLevels(), self.options.isoSetOpacity()
-        colormap = self.excitonWfWidget.colormap
+        colormap = self.view.colormap
         self.prepareDisplay(1, 'Preparing the isosurfaces…',
                             lambda density, context: isoSetMesh(density, numLevels, colormap, opacity, context),
                             self.gridPoints() * numLevels)
 
     @Slot()
     def plotWfVol(self):
-        colormap, sliceDensity = self.excitonWfWidget.colormap, self.options.sliceDensity()
+        colormap, sliceDensity = self.view.colormap, self.options.sliceDensity()
         opacity, contrast = self.options.volumeOpacity(), self.options.volumeContrast()
         self.prepareDisplay(2, 'Preparing the volume…',
                             lambda density, context: volumeColors(density, colormap, opacity, contrast, sliceDensity),
@@ -416,13 +414,13 @@ class WavefunctionPanels(QObject):
 
     @Slot()
     def plotLattice(self):
-        self.excitonWfWidget.clearLatticeItems()
-        self.excitonWfWidget.clearAtomNamesItems()
-        self.excitonWfWidget.clearLatticeBoundaryItems()
+        self.view.clearLatticeItems()
+        self.view.clearAtomNamesItems()
+        self.view.clearLatticeBoundaryItems()
 
         # Nothing to draw before a SAVE database is loaded, or once it is closed
         if not self.options.hasCell():
-            self.excitonWfWidget.plotBaseLatticeVectors(None)
+            self.view.plotBaseLatticeVectors(None)
             return
 
         ucell = dict(self.calculations.unitCell())
@@ -431,7 +429,7 @@ class WavefunctionPanels(QObject):
             positions = np.asarray(ucell['atomic_positions'], dtype=float)[:len(ucell['atomic_numbers'])]
             ucell['atomic_positions'] = shiftAtoms(ucell['base_lattice_vectors'], positions, shift)
 
-        self.excitonWfWidget.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
+        self.view.plotBaseLatticeVectors(ucell['base_lattice_vectors'])
 
         supercell = self.options.supercell()
 
@@ -439,8 +437,8 @@ class WavefunctionPanels(QObject):
             for j in range(supercell[1]):
                 for k in range(supercell[2]):
                     offset = ucell['base_lattice_vectors'][0] * i + ucell['base_lattice_vectors'][1] * j + ucell['base_lattice_vectors'][2] * k
-                    self.excitonWfWidget.plotUnitCellBoundaries(ucell['base_lattice_vectors'], offset)
-                    self.excitonWfWidget.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset,
+                    self.view.plotUnitCellBoundaries(ucell['base_lattice_vectors'], offset)
+                    self.view.plotUnitCellAtoms(ucell['atomic_numbers'], ucell['atomic_positions'], offset,
                                                            self.options.atomScale())
 
         self.plotBonds(ucell, supercell)
@@ -453,7 +451,7 @@ class WavefunctionPanels(QObject):
         bonds = findBonds(lattice, positions, numbers, self.options.bondTolerance())
         starts, ends, atoms = halfBonds(lattice, positions, bonds, supercell)
         uniformColor = BOND_GREY if self.options.bondColoring() == 1 else None
-        self.excitonWfWidget.plotBonds(starts, ends, numbers[atoms], self.options.bondRadius() * ANGSTROM_TO_BOHR,
+        self.view.plotBonds(starts, ends, numbers[atoms], self.options.bondRadius() * ANGSTROM_TO_BOHR,
                                        uniformColor)
 
     @Slot()
@@ -463,4 +461,4 @@ class WavefunctionPanels(QObject):
         supercell = self.options.supercell()
         crystal = np.asarray(self.options.particlePosition(), dtype=float) + np.asarray(supercell) // 2
         crystal = shiftCrystal(crystal, self.shownShift(), supercell)
-        self.excitonWfWidget.translateFixedParticle(np.asarray(self.options.cell, dtype=float).T @ crystal)
+        self.view.translateFixedParticle(np.asarray(self.options.cell, dtype=float).T @ crystal)

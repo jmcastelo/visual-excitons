@@ -194,7 +194,7 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     w.openDataset(main_window.findDataset(folder))
     w.system.qPathLineEdit.setText('LGZF')
     assert w.system.setBrillouinZone()
-    p3 = w.wavefunction.parameters3DWidget
+    p3 = w.wavefunction.controls
     p3.colormapComboBox.setCurrentText('Magma')
     p3.setSupercell([3, 3, 1])
     injectResults(w)
@@ -205,7 +205,7 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
     style.curveStyle.setCurveColor(QColor('#00c853'))
     style.setApplyToAllCurves(True)
     w.dispersionStyle.curveStyle.setCurveWidth(3)
-    view = w.wavefunction.excitonWfWidget
+    view = w.wavefunction.view
     view.setCameraParams(rotation=QQuaternion.fromAxisAndAngle(QVector3D(0, 1, 0), 33.0), distance=4321.0)
     camera = view.cameraState()
     path = tmp_path / 'setup.vxsession'
@@ -215,18 +215,18 @@ def test_whole_setup_through_a_session_file(newWindow, tmp_path):
 
     w2 = newWindow()
     assert w2.recentSessionsMenu.actions()[0].text() == 'setup'
-    w2.wavefunction.parameters3DWidget.colormapComboBox.setCurrentText('Greys')
+    w2.wavefunction.controls.colormapComboBox.setCurrentText('Greys')
     w2.openSession(str(path))
     c2 = w2.calculations
     assert 'with its results' in w2.statusBar().currentMessage()
     assert w2.options.getPathString() == 'LGZF' and w2.options.supercell() == [3, 3, 1]
-    assert w2.wavefunction.parameters3DWidget.colormapComboBox.currentText() == 'Magma'
+    assert w2.wavefunction.controls.colormapComboBox.currentText() == 'Magma'
     assert c2.selectedExciton == (4, 2, 2.1) and len(c2.excAbsData) == 2 and c2.waveFunction.shape == (54, 54, 18)
     # The styles of the plots, each curve's too (restored after the curves)
     assert w2.absorptionStyle.curveStyle.curvePens[1].color().name() == '#00c853'
     assert w2.absorptionStyle.curveStyle.curvePens[0].color().name() != '#00c853'
     assert all(pen.width() == 3 for pen in w2.dispersionStyle.curveStyle.curvePens)
-    restored = w2.wavefunction.excitonWfWidget.cameraState()
+    restored = w2.wavefunction.view.cameraState()
     np.testing.assert_allclose(restored['rotation'] + restored['center'] + [restored['distance']],
                                camera['rotation'] + camera['center'] + [camera['distance']], atol=1e-5)
 
@@ -284,7 +284,7 @@ def test_unsaved_changes(newWindow, monkeypatch, tmp_path):
     assert not w.isWindowModified() and shownTitle(w).startswith('mine — ')
 
     # A change: marked; undone: not any more
-    p3 = w.wavefunction.parameters3DWidget
+    p3 = w.wavefunction.controls
     original = p3.colormapComboBox.currentText()
     p3.colormapComboBox.setCurrentText('Magma' if original != 'Magma' else 'Inferno')
     w.updateModified()
@@ -352,7 +352,7 @@ def test_starts_empty_with_the_start_page(newWindow, tmp_path):
     w = newWindow()
     page = w.startPage
     assert w.dataset is None and w.options.saveDir == '' and not page.isHidden()
-    assert w.wavefunction.excitonWfWidget.gizmo.isHidden()      # drawn over everything otherwise
+    assert w.wavefunction.view.gizmo.isHidden()      # drawn over everything otherwise
     assert w.windowTitle() == 'Visual Excitons'
     # The recent ones, those missing disabled
     assert [(link.text(), link.isEnabled()) for link in page.sessionLinks] == [('kept', True), ('gone', False)]
@@ -372,18 +372,18 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     w = newWindow()
     w.openDataset(main_window.findDataset(folder))
     assert w.startPage.isHidden() and shownTitle(w) == 'Untitled — BiI3_Bulk_8x8x8 — Visual Excitons'
-    gizmo = w.wavefunction.excitonWfWidget.gizmo
+    gizmo = w.wavefunction.view.gizmo
     assert not gizmo.isHidden()
     w.system.qPathLineEdit.setText('LGZF')
     assert w.system.setBrillouinZone()
-    p3 = w.wavefunction.parameters3DWidget
+    p3 = w.wavefunction.controls
     p3.colormapComboBox.setCurrentText('Magma')            # a preference: kept
     w.updateModified()
     assert not w.isWindowModified()                        # parameters alone: nothing to lose
 
     # Results not saved in a session: marked, and New session asks; Cancel keeps everything
     injectResults(w)
-    w.spectra.inspector.nExcitonsSpinBox.setValue(10)      # a parameter of the dataset
+    w.spectra.controls.nExcitonsSpinBox.setValue(10)      # a parameter of the dataset
     w.updateModified()
     assert w.isWindowModified() and shownTitle(w).startswith('Untitled* — ')
     answers = []
@@ -405,7 +405,7 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     assert not w.startPage.isHidden() and shownTitle(w) == 'Visual Excitons' and w.datasetLabel.text() == 'No dataset'
     assert w.system.saveDirEdit.text() == '' and w.system.hspTable.rowCount() == 0
     assert w.system.qPathLineEdit.text() == '' and not w.system.setPathButton.isEnabled()
-    view = w.wavefunction.excitonWfWidget
+    view = w.wavefunction.view
     assert not view.latticeItems and not view.latticeBoundaryItems and view.cellLattice is None
     assert p3.colormapComboBox.currentText() == 'Magma' and gizmo.isHidden()
     # Nothing to lose now: no question
@@ -475,7 +475,7 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
 
     # Another SAVE directory: another dataset, asked first (the wave function is not saved)
     from PySide6.QtWidgets import QMessageBox
-    w.spectra.inspector.nExcitonsSpinBox.setValue(9)
+    w.spectra.controls.nExcitonsSpinBox.setValue(9)
     bn = datasetPath('BN')
     answers = []
     monkeypatch.setattr(main_window.QMessageBox, 'warning',
@@ -535,7 +535,7 @@ def test_every_control_is_part_of_the_session(newWindow, monkeypatch):
     assert w.system.setBrillouinZone()
     w.sessionPath = 'compared.vxsession'
     w.markSessionSaved()
-    system, spectra, p3 = w.system, w.spectra.inspector, w.wavefunction.parameters3DWidget
+    system, spectra, p3 = w.system, w.spectra.controls, w.wavefunction.controls
     excluded = {
         # Applied with Set Q-path, then saved (the path, its sampling)
         system.qPathLineEdit, system.interpolationComboBox, system.numPointsSpin, system.densitySpin,
@@ -576,7 +576,7 @@ def test_every_control_is_part_of_the_session(newWindow, monkeypatch):
         return True
 
     missing = []
-    for root in (system, spectra, w.wavefunction.inspector, w.appearancePanel, w.compositionPanel):
+    for root in (system, spectra, w.wavefunction.controls, w.appearancePanel, w.compositionPanel):
         for widget in root.findChildren(QWidget):
             if widget in excluded or id(widget) in inDialog:
                 continue
@@ -611,7 +611,7 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     assert w.system.setBrillouinZone()
     injectResults(w)                              # curves to style, a wave function
     w.sessionPath = 'compared.vxsession'
-    panel, p3, view = w.appearancePanel, w.wavefunction.parameters3DWidget, w.wavefunction.excitonWfWidget
+    panel, p3, view = w.appearancePanel, w.wavefunction.controls, w.wavefunction.view
     # Not part of a setup: files and checks, calculations and exports (their results are, see the other tests)
     notSetup = {'Browse…', 'Details…', 'Check all BSE', 'Compute dispersion', 'Add spectrum',
                 'Compute its wave function', 'Compute wave function', 'Export figure…', 'Image…', 'Density…',
@@ -625,7 +625,7 @@ def test_every_button_is_part_of_the_session(newWindow, monkeypatch):
     inDialog = {id(child) for dialog in dialogs for child in dialog.findChildren(QWidget)}
 
     missing = []
-    for root in (w.system, w.spectra.inspector, w.wavefunction.inspector, panel, w.compositionPanel):
+    for root in (w.system, w.spectra.controls, w.wavefunction.controls, panel, w.compositionPanel):
         for button in root.findChildren(QAbstractButton):
             if (button.isCheckable() or id(button) in inDialog or button.text() in notSetup
                     or isinstance(button.parentWidget(), QTabBar)                    # tab scroll arrows
@@ -653,7 +653,7 @@ def test_plane_perpendicular_to_the_view_is_saved(newWindow, tmp_path):
     import visual_excitons.gui.main_window as main_window
     w = newWindow()
     w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
-    p3 = w.wavefunction.parameters3DWidget
+    p3 = w.wavefunction.controls
     p3.setPlaneFromView([0.0, 0.0, 1.0], [0.0, 1.0, 0.0])
     path = tmp_path / 'cut.vxsession'
     w.writeSessionFile(str(path))

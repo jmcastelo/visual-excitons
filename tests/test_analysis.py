@@ -114,8 +114,8 @@ def test_plane_supercell_polygon():
 
 def test_analysis_panel_fits_its_plots(qtbot):
     """The plots fill the panel without scrolling when it is tall enough, and keep a usable height when not."""
-    from visual_excitons.gui.analysis_widget import AnalysisWidget, MIN_PLOT_HEIGHT
-    panel = AnalysisWidget()
+    from visual_excitons.gui.analysis_panel import AnalysisPanel, MIN_PLOT_HEIGHT
+    panel = AnalysisPanel()
     qtbot.addWidget(panel)
     panel.resize(450, 500)
     panel.show()

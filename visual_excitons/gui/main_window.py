@@ -18,7 +18,7 @@ from visual_excitons.core.options import Options
 from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
-from .options_widget import OptionsWidget
+from .system_panel import SystemPanel
 from .start_page import StartPage
 from .composition_panel import CompositionPanel
 from .spectra_panels import SpectraPanels
@@ -91,8 +91,8 @@ class MainWindow(QMainWindow):
         # Parameters kept between sessions (see persistence.py): preferences now,
         # those of a dataset when it is opened
         self.state = StateRegistry()
-        self.state.add('spectra', self.spectra.inspector.persistence)
-        self.state.add('wavefunction', self.wavefunction.inspector.persistence)
+        self.state.add('spectra', self.spectra.controls.persistence)
+        self.state.add('wavefunction', self.wavefunction.controls.persistence)
         # The camera (the name dates from when it was kept with the page layout:
         # kept for the settings and sessions saved then)
         self.state.add('wavefunctionLayout', self.wavefunction.persistence)
@@ -152,18 +152,18 @@ class MainWindow(QMainWindow):
         calc.excitonBandStructureInit.connect(self.bandStructureStyle.applyDefaultStyle)
 
     def createPanels(self):
-        self.system = OptionsWidget(self.options)
+        self.system = SystemPanel(self.options)
         self.spectra = SpectraPanels(self.options, self.calculations, self.dispersionStyle, self.absorptionStyle,
                                      self.bandStructureStyle, parent=self)
         self.wavefunction = WavefunctionPanels(self.options, self.calculations, parent=self)
-        self.spectra.inspector.computeWavefunctionRequested.connect(self.computeSelectedWaveFunction)
-        self.wavefunction.parameters3DWidget.selectedEstimateChanged.connect(self.spectra.inspector.setWaveFunctionEstimate)
+        self.spectra.controls.computeWavefunctionRequested.connect(self.computeSelectedWaveFunction)
+        self.wavefunction.controls.selectedEstimateChanged.connect(self.spectra.controls.setWaveFunctionEstimate)
         self.system.qPathApplied.connect(self.saveQPath)
         self.system.checkAllBSERequested.connect(self.checkAllBSE)
         self.system.directoryChosen.connect(self.onDirectoryChosen)
-        self.spectra.inspector.exportFigureRequested.connect(self.exportFigure)
-        self.wavefunction.parameters3DWidget.exportImageRequested.connect(self.exportImage)
-        self.wavefunction.parameters3DWidget.exportDensityRequested.connect(self.exportDensity)
+        self.spectra.controls.exportFigureRequested.connect(self.exportFigure)
+        self.wavefunction.controls.exportImageRequested.connect(self.exportImage)
+        self.wavefunction.controls.exportDensityRequested.connect(self.exportDensity)
 
         # Where the selected exciton lives in reciprocal space, and what it is made of
         self.compositionPanel = CompositionPanel()
@@ -179,8 +179,8 @@ class MainWindow(QMainWindow):
         self.compositionPanel.exportImageRequested.connect(self.exportCompositionImage)
         self.compositionPanel.exportFigureRequested.connect(lambda: self.exportFigure(
             ['kspace3d' if self.compositionPanel.viewComboBox.currentIndex() == 0 else 'kspace']))
-        self.wavefunction.analysisWidget.exportFigureRequested.connect(lambda: self.exportFigure(
-            ['planeCut' if self.wavefunction.analysisWidget.currentIndex() == 0 else 'distance']))
+        self.wavefunction.analysis.exportFigureRequested.connect(lambda: self.exportFigure(
+            ['planeCut' if self.wavefunction.analysis.currentIndex() == 0 else 'distance']))
         # Symmetry and spin (on request), kept on disk between sessions: the representation matrices
         self.calculations.diskCacheFolder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
         self.compositionPanel.characterRequested.connect(self.calculations.computeCharacter)
@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
         self.calculations.characterReady.connect(self.updateCharacterSummary)
         self.calculations.excitonSelected.connect(self.onCharacterSelection)
         self.compositionPanel.setSelectedExciton(self.calculations.selectedExciton)
-        self.spectra.inspector.showCompositionRequested.connect(lambda: self.showPanel('composition'))
+        self.spectra.controls.showCompositionRequested.connect(lambda: self.showPanel('composition'))
         self.options.databaseFound.connect(lambda found: self.compositionPanel.clear())
         self.system.qPathApplied.connect(lambda state: self.compositionPanel.setQPath(self.qPathCartesian()))
 
@@ -200,24 +200,24 @@ class MainWindow(QMainWindow):
             signal.connect(self.appearancePanel.scheduleRefresh)   # the curves to choose from
 
         self.panels = Panels(self)
-        for inspector in (self.spectra.inspector, self.wavefunction.inspector, self.appearancePanel):
+        for inspector in (self.spectra.controls, self.wavefunction.controls, self.appearancePanel):
             inspector.setMinimumWidth(max(MIN_CONTROLS_WIDTH, inspector.minimumWidth()))
         for key, widget in (('system', scrollable(self.system)),
-                            ('dispersion', self.spectra.dispersionWidget),
-                            ('absorption', self.spectra.absorptionWidget),
+                            ('dispersion', self.spectra.dispersionPlot),
+                            ('absorption', self.spectra.absorptionPlot),
                             ('bands', self.spectra.bandStructurePanel),
-                            ('wavefunction', self.wavefunction.excitonWfWidget),
-                            ('analysis', self.wavefunction.analysisWidget),
+                            ('wavefunction', self.wavefunction.view),
+                            ('analysis', self.wavefunction.analysis),
                             ('composition', self.compositionPanel),
-                            ('spectraControls', self.spectra.inspector),
+                            ('spectraControls', self.spectra.controls),
                             ('appearance', self.appearancePanel),
-                            ('wavefunctionControls', self.wavefunction.inspector)):
+                            ('wavefunctionControls', self.wavefunction.controls)):
             self.panels.add(key, widget)
 
         # Each plot's style, from its panel's title bar and its right-click menu
-        views = {'dispersion': self.spectra.dispersionWidget.getPlotItem().vb,
-                 'absorption': self.spectra.absorptionWidget.absorption.vb,
-                 'bands': self.spectra.bandStructureWidget.getPlotItem().vb}
+        views = {'dispersion': self.spectra.dispersionPlot.getPlotItem().vb,
+                 'absorption': self.spectra.absorptionPlot.absorption.vb,
+                 'bands': self.spectra.bandStructurePlot.getPlotItem().vb}
         self.appearanceActions = {}
         for key, view in views.items():
             action = QAction(appearanceIcon(), 'Appearance…', self)
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
             self.appearanceActions[key] = action
 
         # The analysis checkbox shows and hides its panel, and follows it
-        self.analysisCheckBox = self.wavefunction.parameters3DWidget.showAnalysisCheckBox
+        self.analysisCheckBox = self.wavefunction.controls.showAnalysisCheckBox
         self.analysisCheckBox.toggled.connect(lambda shown: self.panels.setShown('analysis', shown))
         self.panels.panelToggled.connect(self.onPanelToggled)
 
@@ -514,7 +514,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def updateCharacterSummary(self, *args):
         """One line in the Selected exciton section: the symmetry and spin of the selected exciton, if analysed."""
-        note = self.spectra.inspector.characterSummary
+        note = self.spectra.controls.characterSummary
         c = self.calculations.character
         if c is None or not self.calculations.characterMatches():
             note.hide()
@@ -574,7 +574,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def computeSelectedWaveFunction(self):
         """The wave function of the exciton selected in the spectra, shown in its panel."""
-        if self.wavefunction.parameters3DWidget.computeSelected():
+        if self.wavefunction.controls.computeSelected():
             self.showPanel('wavefunction')
 
     @Slot(str, bool)
@@ -699,7 +699,7 @@ class MainWindow(QMainWindow):
     def setStartPageShown(self, shown):
         self.startPage.setVisible(shown)
         # Drawn over every widget of the window (WA_AlwaysStackOnTop): hidden under the start page
-        self.wavefunction.excitonWfWidget.setGizmoSuppressed(shown)
+        self.wavefunction.view.setGizmoSuppressed(shown)
 
     @Slot()
     def newSession(self):
@@ -1126,7 +1126,7 @@ class MainWindow(QMainWindow):
     def onDatasetForExports(self, found):
         # A density belongs to the dataset it was computed on
         self.exportDensityAction.setEnabled(False)
-        self.wavefunction.parameters3DWidget.exportDensityButton.setEnabled(False)
+        self.wavefunction.controls.exportDensityButton.setEnabled(False)
 
     # The export dialogs' choices, as kept in the settings (see the dialogs)
 
@@ -1161,7 +1161,7 @@ class MainWindow(QMainWindow):
         # The view must have been shown to be rendered
         self.showPanel('wavefunction')
         QApplication.processEvents()
-        view = self.wavefunction.excitonWfWidget
+        view = self.wavefunction.view
         dialog = ImageExportDialog(view, self)
         if dialog.exec() != ImageExportDialog.DialogCode.Accepted:
             return
@@ -1185,7 +1185,7 @@ class MainWindow(QMainWindow):
     def exportFigure(self, panels=None):
         """The figure export dialog; `panels`: those to check at first (the panel's own, from its button)."""
         data = figureData(self.calculations, self.compositionPanel.figureData(),
-                          self.wavefunction.analysisWidget.figureData())
+                          self.wavefunction.analysis.figureData())
         if not figures.availablePanels(data):
             QMessageBox.information(self, 'Export figure',
                                     'Nothing to export yet: compute a dispersion, absorption spectra, a band '
@@ -1216,7 +1216,7 @@ class MainWindow(QMainWindow):
             filename += '.xsf' if 'xsf' in chosenFilter else '.cube'
         self.rememberExportFolder(filename)
         # As shown (with the cell origin), or as computed
-        shifted = self.wavefunction.parameters3DWidget.exportShiftedCheckBox.isChecked()
+        shifted = self.wavefunction.controls.exportShiftedCheckBox.isChecked()
         self.calculations.exportDensity(filename, self.wavefunction.shownShift() if shifted else None)
 
     # Misc

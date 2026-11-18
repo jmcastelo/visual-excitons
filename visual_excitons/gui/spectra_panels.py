@@ -8,10 +8,10 @@ from PySide6.QtCore import QObject, Slot, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QColor
 
-from .dispersion_widget import DispersionWidget
-from .band_structure_widget import BandStructureWidget
-from .absorption_widget import AbsorptionWidget
-from .parameters_widget import ParametersWidget
+from .dispersion_plot import DispersionPlot
+from .band_structure_plot import BandStructurePlot
+from .absorption_plot import AbsorptionPlot
+from .spectra_controls import SpectraControls
 from .theme import PLOT_COLORS
 from .inspector import NoteLabel
 
@@ -25,65 +25,64 @@ class SpectraPanels(QObject):
         # Default color of the curves: black (the light theme's foreground)
         self.foreground = PLOT_COLORS[False]['foreground']
 
-        # Dispersion widget
+        # Dispersion plot
 
-        dispersionWidget = DispersionWidget(dispersionStyle)
+        dispersionPlot = DispersionPlot(dispersionStyle)
 
-        calculations.dispersionQPointCountChanged.connect(dispersionWidget.setSingleQPoint)
+        calculations.dispersionQPointCountChanged.connect(dispersionPlot.setSingleQPoint)
 
-        calculations.qPathReady.connect(dispersionWidget.setXAxis)
-        calculations.excitonDispersionRange.connect(dispersionWidget.setXYRange)
-        calculations.excitonDispersionReady.connect(dispersionWidget.plotData)
+        calculations.qPathReady.connect(dispersionPlot.setXAxis)
+        calculations.excitonDispersionRange.connect(dispersionPlot.setXYRange)
+        calculations.excitonDispersionReady.connect(dispersionPlot.plotData)
 
-        dispersionWidget.qPointSelected.connect(calculations.computeQPointAbsorptionSpectrum)
-        dispersionWidget.qPointSelected.connect(calculations.getExcitonBandStructure)
-        dispersionWidget.qPointSelected.connect(calculations.selectDispersionExciton)
-        dispersionWidget.curveClicked.connect(dispersionStyle.setCurrentCurveIndex)
+        dispersionPlot.qPointSelected.connect(calculations.computeQPointAbsorptionSpectrum)
+        dispersionPlot.qPointSelected.connect(calculations.getExcitonBandStructure)
+        dispersionPlot.qPointSelected.connect(calculations.selectDispersionExciton)
+        dispersionPlot.curveClicked.connect(dispersionStyle.setCurrentCurveIndex)
 
-        # Band structure widget
+        # Band structure plot
 
-        bandStructureWidget = BandStructureWidget(bandStructureStyle)
+        bandStructurePlot = BandStructurePlot(bandStructureStyle)
 
-        calculations.qPathReady.connect(bandStructureWidget.setXAxis)
-        calculations.excitonBandStructureReady.connect(bandStructureWidget.plotData)
-        calculations.excitonBandStructureClear.connect(bandStructureWidget.clearData)
+        calculations.qPathReady.connect(bandStructurePlot.setXAxis)
+        calculations.excitonBandStructureReady.connect(bandStructurePlot.plotData)
+        calculations.excitonBandStructureClear.connect(bandStructurePlot.clearData)
         # Its title says the Q-point, its tooltip how to read it
         calculations.excitonBandStructureReady.connect(self.updateBandStructureTitle)
         calculations.excitonBandStructureClear.connect(self.updateBandStructureTitle)
 
-        bandStructureWidget.curveClicked.connect(bandStructureStyle.setCurrentCurveIndex)
+        bandStructurePlot.curveClicked.connect(bandStructureStyle.setCurrentCurveIndex)
 
         bandStructureStyle.weightFactorChanged.connect(calculations.setWeightFactor)
 
-        # Absorption widget
+        # Absorption plot
 
-        absorptionWidget = AbsorptionWidget(absorptionStyle)
+        absorptionPlot = AbsorptionPlot(absorptionStyle)
 
-        calculations.excitonAbsorptionReady.connect(absorptionWidget.plotData)
-        calculations.excitonAbsorptionClear.connect(absorptionWidget.clearData)
+        calculations.excitonAbsorptionReady.connect(absorptionPlot.plotData)
+        calculations.excitonAbsorptionClear.connect(absorptionPlot.clearData)
 
-        absorptionWidget.excitonsSelected.connect(calculations.getExcitonBandStructure)
-        absorptionWidget.excitonsSelected.connect(calculations.selectExciton)
-        absorptionWidget.curveClicked.connect(absorptionStyle.setCurrentCurveIndex)
+        absorptionPlot.excitonsSelected.connect(calculations.getExcitonBandStructure)
+        absorptionPlot.excitonsSelected.connect(calculations.selectExciton)
+        absorptionPlot.curveClicked.connect(absorptionStyle.setCurrentCurveIndex)
 
-        absorptionStyle.legendStyle.textColorChanged.connect(absorptionWidget.setLegendTextColor)
-        absorptionStyle.legendStyle.textSizeChanged.connect(absorptionWidget.setLegendTextSize)
-        absorptionStyle.legendStyle.backgroundColorChanged.connect(absorptionWidget.setLegendBackgroundColor)
-        absorptionStyle.legendStyle.borderPenChanged.connect(absorptionWidget.setLegendBorderPen)
-        absorptionStyle.legendStyle.offsetChanged.connect(absorptionWidget.setLegendOffset)
+        absorptionStyle.legendStyle.textColorChanged.connect(absorptionPlot.setLegendTextColor)
+        absorptionStyle.legendStyle.textSizeChanged.connect(absorptionPlot.setLegendTextSize)
+        absorptionStyle.legendStyle.backgroundColorChanged.connect(absorptionPlot.setLegendBackgroundColor)
+        absorptionStyle.legendStyle.borderPenChanged.connect(absorptionPlot.setLegendBorderPen)
+        absorptionStyle.legendStyle.offsetChanged.connect(absorptionPlot.setLegendOffset)
 
-        # Parameters widget
+        # Spectra controls
 
-        self.parametersWidget = ParametersWidget(options, calculations)
-        self.parametersWidget.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
-        self.parametersWidget.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
-        self.inspector = self.parametersWidget
+        self.controls = SpectraControls(options, calculations)
+        self.controls.calculateDispersionButton.clicked.connect(calculations.getExcitonDispersion)
+        self.controls.showLabelsCheckBox.toggled.connect(calculations.toggleExcitonLabelsVisibility)
 
         # Ring around the selected exciton, kept when the plots are redrawn
         # (connected after the plots, so it is placed on the new data)
-        self.dispersionWidget = dispersionWidget
-        self.absorptionWidget = absorptionWidget
-        self.bandStructureWidget = bandStructureWidget
+        self.dispersionPlot = dispersionPlot
+        self.absorptionPlot = absorptionPlot
+        self.bandStructurePlot = bandStructurePlot
         # Its panel: the plot, with a note below saying what it shows and how to read it
         self.bandStructureNote = NoteLabel()
         self.bandStructureNote.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -93,19 +92,19 @@ class SpectraPanels(QObject):
         layout = QVBoxLayout(self.bandStructurePanel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(bandStructureWidget, 1)
+        layout.addWidget(bandStructurePlot, 1)
         layout.addWidget(self.bandStructureNote)
         for signal in (calculations.excitonSelected, calculations.excitonDispersionReady,
                        calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
             signal.connect(self.updateHighlights)
-        self.parametersWidget.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
+        self.controls.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
 
     @Slot()
     def updateBandStructureTitle(self, *args):
         """The band structure's title (its Q-point) and the note below it (how to read it)."""
         from visual_excitons.gui.composition_panel import fraction
         info = self.calculations.bandStructureInfo if len(self.calculations.k) else None
-        widget = self.bandStructureWidget
+        widget = self.bandStructurePlot
         if not info:
             widget.setQPointTitle('')
             self.bandStructureNote.hide()
@@ -137,12 +136,12 @@ class SpectraPanels(QObject):
     @Slot()
     def updateHighlights(self, *args):
         positions = self.calculations.selectedExcitonPositions()
-        self.dispersionWidget.setHighlight(positions['dispersion'])
-        self.absorptionWidget.setHighlight(positions['absorption'])
+        self.dispersionPlot.setHighlight(positions['dispersion'])
+        self.absorptionPlot.setHighlight(positions['absorption'])
 
     def clearQPath(self):
         """No Q-path on the axes (no dataset)."""
-        for widget in (self.dispersionWidget, self.bandStructureWidget):
+        for widget in (self.dispersionPlot, self.bandStructurePlot):
             widget.getAxis('bottom').setTicks(None)
 
     @Slot(bool)

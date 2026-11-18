@@ -41,7 +41,7 @@ def test_linked_fields(qtbot):
     QSettings('VisualExcitons', 'VisualExcitons').clear()
     window = main_window.MainWindow()
     qtbot.addWidget(window)
-    p3 = window.wavefunction.parameters3DWidget
+    p3 = window.wavefunction.controls
     assert not p3.wfCutoffRlSpinBox.isEnabled()                      # no dataset: no RL
     window.openDataset(main_window.findDataset(datasetPath('WSe2_72x72x1')))
     assert p3.wfCutoffRlSpinBox.isEnabled()

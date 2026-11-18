@@ -19,7 +19,7 @@ from visual_excitons.core.kspace import (planeMap, planeIndices, zonePoints, nea
 from visual_excitons.core.options import tickLabels
 from .persistence import PersistentState, GLOBAL, DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
-from .axes_3d_widget import AxisGizmo
+from .axis_gizmo import AxisGizmo
 from .inspector import NoteLabel
 from .theme import PLOT_COLORS
 from .gl_style import (OPAQUE_STAGE, LABEL_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
@@ -108,7 +108,7 @@ class KSpaceView(gl.GLViewWidget):
         # glClear() respects the depth write mask, which the translucent spheres
         # (drawn last) turn off: without this, the next frame would not clear the
         # depth buffer, and everything would fail the depth test (as in
-        # ExcitonWfWidget.paint)
+        # WavefunctionView.paint)
         from OpenGL import GL
         GL.glDepthMask(GL.GL_TRUE)
         super().paint(**kwargs)

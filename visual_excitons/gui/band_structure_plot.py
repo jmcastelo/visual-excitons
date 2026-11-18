@@ -3,7 +3,7 @@ import pyqtgraph as pg
 from visual_excitons.core.options import tickLabels
 
 
-class BandStructureWidget(pg.PlotWidget):
+class BandStructurePlot(pg.PlotWidget):
     curveClicked = Signal(int)
 
     def __init__(self, style, parent = None):

@@ -93,7 +93,7 @@ def test_composition_panel(window, qtbot, tmp_path):
     select(window, 11, 1)
     assert calc.composition is None
     # Shown (the button of the Selected exciton section): computed for it
-    window.spectra.inspector.showCompositionButton.click()
+    window.spectra.controls.showCompositionButton.click()
     assert window.panels.isShown('composition')
     qtbot.waitUntil(lambda: calc.composition is not None, timeout=60000)
     c = calc.composition
@@ -138,8 +138,8 @@ def test_composition_panel(window, qtbot, tmp_path):
     assert calc.compositionCache.keys() == cached.keys()
     assert calc.composition['states'][0] == 2
     # Each state alone: the setting of the Selected exciton section, shared (its copy follows)
-    window.spectra.inspector.sumDegenerateCheckBox.setChecked(False)
-    assert not window.wavefunction.parameters3DWidget.sumDegenerateCheckBox.isChecked()
+    window.spectra.controls.sumDegenerateCheckBox.setChecked(False)
+    assert not window.wavefunction.controls.sumDegenerateCheckBox.isChecked()
     qtbot.waitUntil(lambda: not calc.composition['degenerate'], timeout=60000)
     assert calc.composition['states'] == [2]
 

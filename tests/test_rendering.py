@@ -6,7 +6,7 @@ import pytest
 
 from visual_excitons.gui.gl_style import cylindersMeshData, spheresMeshData, unitSphere
 from visual_excitons.gui.volume_item import volumeRGBA
-from visual_excitons.gui.axes_3d_widget import cellParameters, reciprocalLattice, cellInfoHtml
+from visual_excitons.gui.axis_gizmo import cellParameters, reciprocalLattice, cellInfoHtml
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 
 

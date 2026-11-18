@@ -337,11 +337,11 @@ def blockedSignals(widget):
 
 def test_points_drawn_in_the_color_of_their_curve(qtbot):
     import pyqtgraph as pg
-    from visual_excitons.gui.dispersion_widget import DispersionWidget
+    from visual_excitons.gui.dispersion_plot import DispersionPlot
     from visual_excitons.core.calculations import PointData
     style = withCurves(DispersionStyle(), 2)
     style.curveStyle.setCurveColor(QColor('#aa0000'))
-    plot = DispersionWidget(style)
+    plot = DispersionPlot(style)
     qtbot.addWidget(plot)
     points = [[[0.0, 2.0], [1.0, 2.1]], [[0.0, 2.3], [1.0, 2.4]]]
     plot.plotData(points, [[PointData(i, j + 1) for i in range(2)] for j in range(2)], [], [])

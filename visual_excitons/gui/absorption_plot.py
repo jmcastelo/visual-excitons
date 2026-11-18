@@ -5,7 +5,7 @@ from .theme import plotForeground
 from .highlight import ExcitonHighlight
 
 
-class AbsorptionWidget(pg.GraphicsLayoutWidget):
+class AbsorptionPlot(pg.GraphicsLayoutWidget):
     excitonsSelected = Signal(list, bool)
     curveClicked = Signal(int)
 

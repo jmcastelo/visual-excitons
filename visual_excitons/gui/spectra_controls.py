@@ -12,7 +12,7 @@ DEGENERATE_TIP = ('Sum the states degenerate with the exciton (within 10 meV): i
         'composition and its band structure. A single state of a degenerate group is an arbitrary\n'
         'mixture of them, without the symmetry of the crystal')
 
-class ParametersWidget(Inspector):
+class SpectraControls(Inspector):
     """Inspector of the spectra page."""
 
     absorptionParametersChanged = Signal()

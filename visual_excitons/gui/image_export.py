@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage, QPainter, QColor, QMatrix4x4, QVector3D
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QComboBox, QCheckBox, QHBoxLayout,
                                QLabel, QVBoxLayout)
 
-from .axes_3d_widget import AxisGizmo
+from .axis_gizmo import AxisGizmo
 from .inspector import NoteLabel
 
 IMAGE_FILTERS = 'PNG image (*.png);;JPEG image (*.jpg *.jpeg);;TIFF image (*.tif *.tiff)'

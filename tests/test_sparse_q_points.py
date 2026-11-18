@@ -21,7 +21,7 @@ def test_computed_q_points_come_from_the_file_numbers(tmp_path):
 
 
 def test_q_point_field_offers_only_computed_ones(qapp):
-    from visual_excitons.gui.parameters_3d_widget import ChoiceSpinBox
+    from visual_excitons.gui.wavefunction_controls import ChoiceSpinBox
     spin = ChoiceSpinBox(minimum=1, maximum=10)
     spin.setValue(7)
     assert spin.value() == 7                                   # no choices: any value
@@ -165,7 +165,7 @@ def test_points_joined_when_not_interpolated(qtbot, monkeypatch, tmp_path):
     quietly(window.calculations.getExcitonDispersion)
     qtbot.waitUntil(lambda: len(window.calculations.dispPoints) > 0, timeout=60000)
     window.showAppearance('dispersion')
-    plot, box = window.spectra.dispersionWidget, window.appearancePanel.linesCheckBox
+    plot, box = window.spectra.dispersionPlot, window.appearancePanel.linesCheckBox
     count = len(window.calculations.dispPoints)
     assert box.isChecked() and len(plot.curveItems) == count       # one line per exciton
 

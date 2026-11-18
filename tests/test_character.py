@@ -119,7 +119,7 @@ def test_summary_in_the_selected_exciton_section(qtbot, tmp_path):
     calc._applyCharacter({'qIndex': 11, 'excIndex': 1, 'states': [1], 'energy': 2.08, 'axis': 'z', 'notes': [],
                           'redQPoint': [0, 0.125, -0.125], 'pointGroup': 'C1', 'operations': 1, 'irreps': 'A',
                           'irrepsError': None, 'spin': {'total': [0.0], 'electron': [0.0], 'hole': [0.0]}})
-    summary = window.spectra.inspector.characterSummary
+    summary = window.spectra.controls.characterSummary
     assert not summary.isHidden() and summary.text().startswith('Symmetry A (C1)')
     # Session round trip
     path = tmp_path / 'character.vxsession'

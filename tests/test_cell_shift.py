@@ -71,13 +71,13 @@ def test_wse2_layer_centred_in_the_window(qtbot, monkeypatch, tmp_path):
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath('WSe2')))
-    p3, panels = window.wavefunction.parameters3DWidget, window.wavefunction
+    p3, panels = window.wavefunction.controls, window.wavefunction
     assert p3.layer == (2, pytest.approx(0.5)) and p3.centreLayerCheckBox.isChecked()
     assert p3.cellShift() == pytest.approx([0, 0, 0.5]) and not p3.originSpinBoxes[2].isEnabled()
     assert window.calculations.kGrid() == [72, 72, 1]
 
     # The atoms drawn are in the middle of the cell along c
-    vertices = np.concatenate([item.opts['meshdata'].vertexes() for item in panels.excitonWfWidget.latticeItems])
+    vertices = np.concatenate([item.opts['meshdata'].vertexes() for item in panels.view.latticeItems])
     heights = vertices[:, 2] / CELL[2, 2]
     assert 0.3 < heights.min() and heights.max() < 0.7
 
@@ -96,12 +96,12 @@ def test_wse2_layer_centred_in_the_window(qtbot, monkeypatch, tmp_path):
     again = main_window.MainWindow()
     qtbot.addWidget(again)
     again.openDataset(again.recentDatasets()[0])
-    assert again.wavefunction.parameters3DWidget.cellShift() == pytest.approx([0.5, 0.5, 0.5])
+    assert again.wavefunction.controls.cellShift() == pytest.approx([0.5, 0.5, 0.5])
 
 
 def test_export_with_and_without_the_shift(window_with_wave_function, tmp_path, qtbot):
     window, calc = window_with_wave_function
-    p3 = window.wavefunction.parameters3DWidget
+    p3 = window.wavefunction.controls
     p3.setCellOrigin([0, 0, 0.5])
     from test_export import readCube
     for shifted, name in ((True, 'shown.cube'), (False, 'computed.cube')):
@@ -137,7 +137,7 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
     window = main_window.MainWindow()
     qtbot.addWidget(window)
     window.openDataset(main_window.findDataset(datasetPath('WSe2')))
-    p3, options = window.wavefunction.parameters3DWidget, window.options
+    p3, options = window.wavefunction.controls, window.options
     form = p3.calculationForm
     shown = lambda: [float(edit.text()) for edit in p3.shownParticleLineEdits]
 
@@ -170,16 +170,16 @@ def test_position_as_shown_and_as_computed(qtbot, monkeypatch, tmp_path):
 def test_analysis_does_not_wrap_where_it_would_show_a_seam(window_with_wave_function, qtbot):
     """Shifted along axes not spanning whole k-grid periods, the analysis keeps the density as computed."""
     window, calc = window_with_wave_function
-    panels, p3 = window.wavefunction, window.wavefunction.parameters3DWidget
+    panels, p3 = window.wavefunction, window.wavefunction.controls
     p3.showAnalysisCheckBox.setChecked(True)
     calc.wfComputed.emit()
-    cut = panels.analysisWidget.image.image.copy()
+    cut = panels.analysis.image.image.copy()
     mean = panels.radialResult['mean']
 
     # No k-point grid known (the fake lattice): no axis is exact, nothing is wrapped for the analysis
     p3.setCellOrigin([0.4, 0.3, 0.2])
     assert panels.analysisShift() == [0.0, 0.0, 0.0] and any(panels.shownShift())
-    np.testing.assert_array_equal(panels.analysisWidget.image.image, cut)
+    np.testing.assert_array_equal(panels.analysis.image.image, cut)
     assert panels.radialResult['mean'] == pytest.approx(mean)
     # The view is shifted all the same
     assert panels.shownDensity() is not calc.probabilityDensity()

@@ -54,7 +54,7 @@ def scrollableTab(plot, *labels):
     return scroll
 
 
-class AnalysisWidget(QTabWidget):
+class AnalysisPanel(QTabWidget):
     exportFigureRequested = Signal()
 
     def __init__(self, parent=None):

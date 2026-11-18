@@ -108,8 +108,8 @@ def test_system_panel_offers_the_qp_databases_and_shows_the_checks(qtbot, monkey
     assert '⚠' in system.checksLabel.text() and system.checksDetailsButton.isEnabled()
     shown = []
     monkeypatch.setattr(main_window.QMessageBox, 'information', lambda *args: shown.append(args[2]))
-    from visual_excitons.gui import options_widget
-    monkeypatch.setattr(options_widget.QMessageBox, 'information', lambda *args: shown.append(args[2]))
+    from visual_excitons.gui import system_panel
+    monkeypatch.setattr(system_panel.QMessageBox, 'information', lambda *args: shown.append(args[2]))
     system.showChecks()
     assert 'ndb.QP_140_146 (bands 140–146) was computed on this SAVE directory' in shown[-1]
 

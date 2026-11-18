@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QLabel
 
 from .sorted_mesh_item import SortedMeshItem
 from .atom_labels_item import AtomLabelsItem
-from .axes_3d_widget import cellInfoHtml
+from .axis_gizmo import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
 from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
                        headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData,
@@ -25,7 +25,7 @@ from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemic
 
 
 
-class ExcitonWfWidget(gl.GLViewWidget):
+class WavefunctionView(gl.GLViewWidget):
     def __init__(self, parent = None):
         gl.GLViewWidget.__init__(self, parent, rotationMethod='quaternion')
 

@@ -139,7 +139,7 @@ def test_title_and_wave_function_note(window, qtbot):
     window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
     window.system.qPathLineEdit.setText('LGZF')
     assert window.system.setBrillouinZone()
-    calc, widget = window.calculations, window.spectra.bandStructureWidget
+    calc, widget = window.calculations, window.spectra.bandStructurePlot
     calc.getExcitonBandStructure([Clicked(11)], None)
     qtbot.waitUntil(lambda: calc.bandStructureInfo is not None, timeout=60000)
     note = window.spectra.bandStructureNote
@@ -149,11 +149,11 @@ def test_title_and_wave_function_note(window, qtbot):
     assert widget.title.endswith('at Q1 = Γ') and 'k−Q' not in note.text()
 
     # A wave function computed with the degenerate states: said, and warned once the setting changes
-    p3 = window.wavefunction.parameters3DWidget
+    p3 = window.wavefunction.controls
     calc.waveFunction, calc.wfExciton, calc.wfStates, calc.wfDegenerate = np.zeros((2, 2, 2)), (0, 2), [2, 3], True
     p3.updateWfStatesNote()                    # as on wfComputed (the rest of a wave function is not needed here)
     assert 'with the degenerate states 2–3' in p3.wfStatesNote.text() and 'again' not in p3.wfStatesNote.text()
-    window.spectra.inspector.sumDegenerateCheckBox.setChecked(False)
+    window.spectra.controls.sumDegenerateCheckBox.setChecked(False)
     assert not p3.sumDegenerateCheckBox.isChecked() and 'compute it again' in p3.wfStatesNote.text()
 
 
@@ -194,9 +194,9 @@ def test_skw_is_kept_where_it_fits(bii3):
 def test_path_axes_have_no_scale_factor(qtbot):
     """The path axes are labelled by their special points: no '(x0.001)' after their title, also after a new path."""
     from visual_excitons.core.style import BandStructureStyle, DispersionStyle
-    from visual_excitons.gui.band_structure_widget import BandStructureWidget
-    from visual_excitons.gui.dispersion_widget import DispersionWidget
-    for widget in (BandStructureWidget(BandStructureStyle()), DispersionWidget(DispersionStyle())):
+    from visual_excitons.gui.band_structure_plot import BandStructurePlot
+    from visual_excitons.gui.dispersion_plot import DispersionPlot
+    for widget in (BandStructurePlot(BandStructureStyle()), DispersionPlot(DispersionStyle())):
         qtbot.addWidget(widget)
         widget.setXAxis([0.0, 0.004, 0.009], ['G', 'K', 'M'])
         axis = widget.getAxis('bottom')

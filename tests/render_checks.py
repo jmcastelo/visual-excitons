@@ -18,8 +18,8 @@ QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 app = QApplication(sys.argv)
 
 import pyqtgraph as pg
-from visual_excitons.gui.exciton_wf_widget import ExcitonWfWidget
-from visual_excitons.gui.axes_3d_widget import AxisGizmo
+from visual_excitons.gui.wavefunction_view import WavefunctionView
+from visual_excitons.gui.axis_gizmo import AxisGizmo
 from visual_excitons.gui.image_export import composeImage, saveImage
 
 LATTICE = np.array([[4.0, 0.0, 0.0], [1.0, 5.0, 0.0], [0.0, 0.5, 6.0]])
@@ -33,7 +33,7 @@ def array(image, premultiplied=False):
     return np.frombuffer(image.constBits(), np.uint8).reshape(image.height(), image.width(), 4).copy()
 
 
-view = ExcitonWfWidget()
+view = WavefunctionView()
 view.attach_gizmo(AxisGizmo(target=view, size=120), 10)
 view.resize(320, 240)
 view.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
