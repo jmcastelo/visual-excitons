@@ -42,17 +42,38 @@ class ResultsCache:
     def path(self, dataset):
         return self.folder / (datasetKey(dataset) + SESSION_SUFFIX)
 
-    def store(self, dataset, meta, arrays, programVersion=''):
-        """Keep the results of `dataset` (as Calculations.resultsSnapshot gives them); none: forget them."""
+    def store(self, dataset, meta, arrays, programVersion='', optional=('waveFunction',)):
+        """
+        Keep the results of `dataset` (as Calculations.resultsSnapshot gives
+        them); none: forget them. An entry larger than the whole limit is
+        written again without the `optional` results (their metadata key and
+        arrays 'key/...'), and not kept if still too large: never written only
+        to be pruned at once. Returns what happened, 'kept', 'reduced' (without
+        the optional results), 'too large' or 'none', and the size (bytes) of
+        what was kept, or of the smallest entry tried when too large.
+        """
         path = self.path(dataset)
         if not meta:
             path.unlink(missing_ok=True)
-            return
+            return 'none', 0
         self.folder.mkdir(parents=True, exist_ok=True)
         dataset = {key: dataset.get(key) for key in DATASET_KEYS}
-        manifest = {'dataset': dataset, 'fingerprint': datasetFingerprint(dataset), 'results': meta}
-        writeSession(path, manifest, arrays, programVersion=programVersion)
+
+        def write(meta, arrays):
+            manifest = {'dataset': dataset, 'fingerprint': datasetFingerprint(dataset), 'results': meta}
+            writeSession(path, manifest, arrays, programVersion=programVersion)
+            return path.stat().st_size
+
+        status, size = 'kept', write(meta, arrays)
+        if size > self.limit and any(key in meta for key in optional):
+            meta = {key: value for key, value in meta.items() if key not in optional}
+            arrays = {name: array for name, array in arrays.items() if name.split('/')[0] not in optional}
+            status, size = 'reduced', write(meta, arrays) if meta else size
+        if size > self.limit or not meta:
+            path.unlink(missing_ok=True)
+            return 'too large', size
         self.prune()
+        return status, size
 
     def load(self, dataset):
         """
@@ -83,6 +104,11 @@ class ResultsCache:
     def size(self):
         return sum(p.stat().st_size for p in self.entries())
 
+    def sizes(self):
+        """The size of each entry, the most recently used first (the order prune keeps them in)."""
+        return [p.stat().st_size for p in self.entries()]
+
+
     def prune(self):
         """Drop the least recently used entries beyond the limit."""
         total = 0
@@ -98,6 +124,16 @@ class ResultsCache:
             freed += path.stat().st_size
             path.unlink(missing_ok=True)
         return freed
+
+
+def droppedBy(sizes, limit):
+    """How many entries (sizes, the most recently used first) pruning to `limit` would drop."""
+    total = 0
+    for i, size in enumerate(sizes):
+        total += size
+        if total > limit:
+            return len(sizes) - i
+    return 0
 
 
 # What is kept in the storage folder (MainWindow.storageFolder): the results between runs, and the

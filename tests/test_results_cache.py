@@ -184,20 +184,36 @@ def test_storage_dialog(qtbot, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     from visual_excitons.gui import storage_dialog
     cleared = []
-    usage = {'results': (5 * 2 ** 20, 3), 'symmetry': 2 ** 30}
+    usage = {'results': [2 * 2 ** 20, 2 * 2 ** 20, 1 * 2 ** 20], 'symmetry': 2 ** 30}
     values = {'storeSessionResults': True, 'keepResults': True, 'cacheLimit': 2 ** 30, 'wavefunctionLimit': 100 * 2 ** 20,
               'folder': str(tmp_path / 'store')}
 
     def clear(kind):
         cleared.append(kind)
-        freed = usage[kind][0] if kind == 'results' else usage[kind]
-        usage[kind] = (0, 0) if kind == 'results' else 0
+        freed = sum(usage[kind]) if kind == 'results' else usage[kind]
+        usage[kind] = [] if kind == 'results' else 0
         return freed
-    dialog = storage_dialog.StorageDialog(values, tmp_path / 'default', lambda: (*usage['results'], usage['symmetry']),
+    dialog = storage_dialog.StorageDialog(values, tmp_path / 'default', lambda: (usage['results'], usage['symmetry']),
                                           lambda: clear('results'), lambda: clear('symmetry'))
     qtbot.addWidget(dialog)
     assert dialog.values() == values
     assert dialog.resultsUsageLabel.text() == 'In use: 5.0 MB for 3 datasets.'
+    # A lower space than what is kept: said before OK
+    assert dialog.shrinkNote.isHidden()
+    dialog.cacheLimitSpinBox.setValue(0.1)
+    assert dialog.shrinkNote.isHidden()                          # 5 MB fit in 0.1 GB
+    usage['results'] = [60 * 2 ** 20, 30 * 2 ** 20, 20 * 2 ** 20]
+    dialog.updateUsage()
+    assert not dialog.shrinkNote.isHidden() and 'the 1 dataset not opened for longest' in dialog.shrinkNote.text()
+    usage['results'] = [200 * 2 ** 20]
+    dialog.updateUsage()
+    assert 'every dataset' in dialog.shrinkNote.text()
+    dialog.keepResultsCheckBox.setChecked(False)
+    assert dialog.shrinkNote.isHidden()
+    dialog.keepResultsCheckBox.setChecked(True)
+    dialog.cacheLimitSpinBox.setValue(1.0)
+    usage['results'] = [2 * 2 ** 20, 2 * 2 ** 20, 1 * 2 ** 20]
+    dialog.updateUsage()
     assert dialog.symmetryUsageLabel.text() == 'In use: 1.00 GB.'
     dialog.clearResultsButton.click()
     assert cleared == ['results'] and 'Cleared 5.0 MB' in dialog.resultsUsageLabel.text()
@@ -241,7 +257,7 @@ def test_storage_settings_through_the_window(newWindow, tmp_path, monkeypatch):
     injectResults(w)
     w.openDataset(bn)
     fill(first, 'symmetry', ['m1.npy'])
-    assert w.storageUsage()[1] == 1 and w.storageUsage()[2] == 1000
+    assert len(w.storageUsage()[0]) == 1 and w.storageUsage()[1] == 1000
 
     # Another folder: what is kept moves there; the results come back from it
     values = {'storeSessionResults': False, 'keepResults': True, 'cacheLimit': 2 ** 30, 'wavefunctionLimit': 2 ** 20,
@@ -261,3 +277,49 @@ def test_storage_settings_through_the_window(newWindow, tmp_path, monkeypatch):
     # Back to the default folder: no folder in the settings
     w.setStorage(dict(values, folder=str(main_window.defaultStorageFolder())))
     assert w.settings.value('cacheFolder') == ''
+
+
+def test_entries_larger_than_the_limit(tmp_path):
+    from visual_excitons.core.results_cache import droppedBy
+    dataset = fakeDataset(tmp_path / 'data')
+    cache = ResultsCache(tmp_path / 'cache')
+    rng = np.random.default_rng(0)
+    meta = {'bands': True, 'waveFunction': {'grid': [8, 8, 8]}}
+    arrays = {'bands/k': np.arange(3.0), 'waveFunction/density': rng.random(200000).astype(np.float32)}
+    status, full = cache.store(dataset, meta, arrays)
+    assert status == 'kept' and full > 500000
+    # Too large with its wave function: kept without it
+    cache.limit = full // 2
+    status, size = cache.store(dataset, meta, arrays)
+    (kept, keptArrays), _ = cache.load(dataset)
+    assert status == 'reduced' and size < cache.limit and 'waveFunction' not in kept
+    assert list(keptArrays) == ['bands/k']
+    # Too large even without it: not kept at all (never written only to be pruned)
+    cache.limit = 10
+    assert cache.store(dataset, meta, arrays)[0] == 'too large' and not cache.path(dataset).exists()
+    # Only a wave function: too large, with its size
+    cache.limit = full // 2
+    status, size = cache.store(dataset, {'waveFunction': {}}, {'waveFunction/density': arrays['waveFunction/density']})
+    assert status == 'too large' and size > cache.limit
+    # How many a limit would drop, the most recent kept first
+    assert droppedBy([3, 2, 1], 10) == 0 and droppedBy([3, 2, 1], 5) == 1 and droppedBy([3, 2, 1], 2) == 3
+
+
+@pytest.mark.data
+def test_the_window_says_when_results_are_not_kept(newWindow):
+    import visual_excitons.gui.main_window as main_window
+    from test_session import injectResults
+    bii3, bn = (main_window.findDataset(datasetPath(name)) for name in ('BiI3_Bulk_8x8x8', 'BN'))
+    w = newWindow()
+    w.openDataset(bii3)
+    injectResults(w)                                       # a 54 x 54 x 18 wave function: random, incompressible
+    w.settings.setValue('cacheLimit', 100 * 1024)          # 100 KB: the rest fits, the wave function does not
+    w.applyStorage()
+    w.openDataset(bn)
+    assert 'kept without their wave function' in w.statusBar().currentMessage()
+    w.openDataset(bii3)
+    assert w.calculations.waveFunction is None and len(w.calculations.dispPoints) == 2
+    w.settings.setValue('cacheLimit', 100)
+    w.applyStorage()
+    w.openDataset(bn)
+    assert 'not kept' in w.statusBar().currentMessage() and w.resultsCache.entries() == []

@@ -741,7 +741,15 @@ class MainWindow(QMainWindow):
             meta, arrays = calc.resultsSnapshot(includeWaveFunction=wf is not None
                                                 and wf.size * 4 <= self.wavefunctionCacheLimit())
             if meta:
-                self.resultsCache.store(self.datasetRecord, meta, arrays, programVersion=__version__)
+                status, size = self.resultsCache.store(self.datasetRecord, meta, arrays, programVersion=__version__)
+                name, mb = datasetName(self.datasetRecord), self.resultsCacheLimit() / 2 ** 20
+                if status == 'reduced':
+                    self.statusBar().showMessage(f'The results of {name} were kept without their wave function: with '
+                                                 f'it they exceed the {mb:.0f} MB for kept results', 10000)
+                elif status == 'too large':
+                    self.statusBar().showMessage(f'The results of {name} take {size / 2 ** 20:.0f} MB, more than the '
+                                                 f'{mb:.0f} MB for kept results: not kept (see File › Results and '
+                                                 'storage)', 10000)
         except Exception as error:
             self.statusBar().showMessage(f'The results could not be kept for the next time: {error}', 8000)
 
@@ -786,8 +794,8 @@ class MainWindow(QMainWindow):
         self.calculations.diskCacheFolder = str(storage)
 
     def storageUsage(self):
-        """For the Results and storage dialog: size and number of kept results, size of the symmetry matrices."""
-        return self.resultsCache.size(), len(self.resultsCache.entries()), folderUsage(self.storageFolder() / 'symmetry')[0]
+        """For the Results and storage dialog: the sizes of the kept results (most recent first), of the symmetry matrices."""
+        return self.resultsCache.sizes(), folderUsage(self.storageFolder() / 'symmetry')[0]
 
     def clearSymmetryCache(self):
         self.calculations.symmetryCache = {}

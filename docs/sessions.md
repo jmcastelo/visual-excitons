@@ -21,7 +21,7 @@ Without saving a session, the results of each dataset are kept for the next time
 
 - They are only shown if the databases did not change since (the same check as for sessions); otherwise they are dropped, and the status bar says so.
 - A session opened with its own results shows those; a session saved without results gets the ones kept for its dataset.
-- They take at most 1 GB in all by default: beyond that, the datasets not opened for longest lose theirs first.
+- They take at most 1 GB in all by default: beyond that, the datasets not opened for longest lose theirs first. The results of a single dataset larger than that space are kept without their wave function, or not at all if still too large; the status bar says so.
 - They are written when a dataset is left (or the program closed): results computed since a dataset was opened are lost if the program crashes.
 - They are kept, one session file per dataset without preferences, in the cache folder of your system by default (on Linux `~/.cache/VisualExcitons/Visual Excitons/results`).
 
@@ -30,7 +30,7 @@ Without saving a session, the results of each dataset are kept for the next time
 `File › Results and storage…` gathers what is stored where:
 
 - **Sessions**: `Store results in session files`.
-- **Results kept between runs**: `Keep results between runs` (on by default; off, an `Untitled` session with results asks to be saved before they are lost), the space they may take in all (0.1 to 100 GB) and the largest wave function kept with them (it cannot exceed the total). What they take now, and `Clear` to forget them all. Lowering the space drops the datasets not opened for longest at once.
+- **Results kept between runs**: `Keep results between runs` (on by default; off, an `Untitled` session with results asks to be saved before they are lost), the space they may take in all (0.1 to 100 GB) and the largest wave function kept with them (it cannot exceed the total). What they take now, and `Clear` to forget them all. Lowering the space drops the datasets not opened for longest at once: when it is less than what is kept, the dialog says, before `OK`, how many datasets would lose their results. A lower limit for wave functions applies to those kept from then on.
 - **Symmetry matrices**: the representation matrices of the symmetry analysis of the Composition panel, kept for each dataset because they take a while to compute (about 12 s per symmetry operation for BiI3 8×8×8). What they take, and `Clear`.
 - **Location**: the folder where both are kept (`Browse…`, or `Default` for the cache folder of your system). Changing it moves what is kept there to the new folder; if that fails (e.g. no space), nothing is moved and the folder in use stays.
 
