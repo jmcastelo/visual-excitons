@@ -98,3 +98,64 @@ class ResultsCache:
             freed += path.stat().st_size
             path.unlink(missing_ok=True)
         return freed
+
+
+# What is kept in the storage folder (MainWindow.storageFolder): the results between runs, and the
+# representation matrices of the symmetry analysis (see calculations.computeCharacter)
+STORAGE_PARTS = ('results', 'symmetry')
+
+
+def folderUsage(folder):
+    """The total size (bytes) and number of the files in `folder` and below (0, 0 if it does not exist)."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return 0, 0
+    files = [p for p in folder.rglob('*') if p.is_file()]
+    return sum(p.stat().st_size for p in files), len(files)
+
+
+def clearFolder(folder):
+    """Delete the files in `folder` and below; the space freed (bytes)."""
+    freed, _ = folderUsage(folder)
+    folder = Path(folder)
+    if folder.is_dir():
+        for path in sorted(folder.rglob('*'), reverse=True):        # files before their folders
+            if path.is_file():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                path.rmdir()
+    return freed
+
+
+def moveStorage(old, new, parts=STORAGE_PARTS):
+    """
+    Move what is kept in the storage folder `old` (its `parts`) to `new`: all
+    copied first, then the originals deleted, so that a failure (e.g. no space)
+    leaves `old` as it was, and what was copied removed again (OSError raised).
+    """
+    import shutil
+    old, new = Path(old).resolve(), Path(new).resolve()
+    if old == new:
+        return
+    for part in parts:
+        if new.is_relative_to(old / part):
+            raise OSError(f'{new} is inside {old / part}, which would be moved into itself')
+    copied = []
+    try:
+        for part in parts:
+            source, target = old / part, new / part
+            if not source.is_dir():
+                continue
+            copied.append((source, target, target.exists()))      # before copying: undone if it fails midway
+            shutil.copytree(source, target, dirs_exist_ok=True)
+    except OSError:
+        for source, target, existed in copied:
+            if existed:
+                for path in source.rglob('*'):
+                    if path.is_file():
+                        (target / path.relative_to(source)).unlink(missing_ok=True)
+            else:
+                shutil.rmtree(target, ignore_errors=True)
+        raise
+    for source, target, existed in copied:
+        shutil.rmtree(source, ignore_errors=True)

@@ -20,7 +20,9 @@ from visual_excitons.core.parameters import SpectraParameters, WavefunctionParam
 from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
-from visual_excitons.core.results_cache import ResultsCache, WAVEFUNCTION_LIMIT
+from visual_excitons.core.results_cache import (ResultsCache, CACHE_LIMIT, WAVEFUNCTION_LIMIT, folderUsage,
+                                               clearFolder, moveStorage)
+from .storage_dialog import StorageDialog
 from .system_panel import SystemPanel
 from .start_page import StartPage
 from .composition_panel import CompositionPanel
@@ -47,12 +49,18 @@ MAX_RECENT_DATASETS = 8
 MIN_CONTROLS_WIDTH = 260
 
 
-def resultsCacheFolder():
-    """Where the results of the datasets are kept between runs (VISUAL_EXCITONS_RESULTS_CACHE overrides it: tests)."""
+def defaultStorageFolder():
+    """The cache folder of the system: where results between runs and symmetry matrices go unless set otherwise."""
+    return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation))
+
+
+def resultsCacheFolder(storage):
+    """
+    Where the results of the datasets are kept between runs, in the storage
+    folder `storage` (VISUAL_EXCITONS_RESULTS_CACHE overrides it: tests).
+    """
     override = os.environ.get('VISUAL_EXCITONS_RESULTS_CACHE')
-    if override:
-        return Path(override)
-    return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)) / 'results'
+    return Path(override) if override else Path(storage) / 'results'
 
 
 class MainWindow(QMainWindow):
@@ -197,8 +205,8 @@ class MainWindow(QMainWindow):
         self.wavefunction.analysis.exportFigureRequested.connect(lambda: self.exportFigure(
             ['planeCut' if self.wavefunction.analysis.currentIndex() == 0 else 'distance']))
         # Symmetry and spin (on request), kept on disk between sessions: the representation matrices
-        self.calculations.diskCacheFolder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
-        self.resultsCache = ResultsCache(resultsCacheFolder())
+        self.resultsCache = ResultsCache(resultsCacheFolder(self.storageFolder()))
+        self.applyStorage()
         self.compositionPanel.characterRequested.connect(self.calculations.computeCharacter)
         self.calculations.characterReady.connect(self.compositionPanel.setCharacter)
         self.calculations.characterReady.connect(self.updateCharacterSummary)
@@ -298,26 +306,11 @@ class MainWindow(QMainWindow):
         saveSessionAsAction.triggered.connect(self.saveSessionAs)
         fileMenu.addAction(saveSessionAsAction)
 
-        self.sessionResultsAction = QAction('Store results in sessions', self)
-        self.sessionResultsAction.setCheckable(True)
-        self.sessionResultsAction.setChecked(self.settings.value('sessionResults', True, type=bool))
-        self.sessionResultsAction.setStatusTip('Store the computed results in session files, so that they are '
-                                               'shown at once when opened (larger files)')
-        self.sessionResultsAction.toggled.connect(lambda store: self.settings.setValue('sessionResults', store))
-        fileMenu.addAction(self.sessionResultsAction)
-        self.keepResultsAction = QAction('Keep results between runs', self)
-        self.keepResultsAction.setCheckable(True)
-        self.keepResultsAction.setChecked(self.settings.value('cacheResults', True, type=bool))
-        self.keepResultsAction.setStatusTip('Keep the results of each dataset when it is left or the program closed, '
-                                            'and show them again when it is opened (if its databases did not change)')
-        self.keepResultsAction.toggled.connect(lambda keep: self.settings.setValue('cacheResults', keep))
-        # The timer is made after the menus: looked up when toggled
-        self.keepResultsAction.toggled.connect(lambda keep: self.modifiedTimer.start())
-        fileMenu.addAction(self.keepResultsAction)
-        clearCacheAction = QAction('Clear kept results', self)
-        clearCacheAction.setStatusTip('Forget the results kept for every dataset between runs')
-        clearCacheAction.triggered.connect(self.clearResultsCache)
-        fileMenu.addAction(clearCacheAction)
+        storageAction = QAction('Results and s&torage…', self)
+        storageAction.setStatusTip('Results in sessions and between runs, the space they may take, the symmetry '
+                                   'matrices kept, and the folder where they are')
+        storageAction.triggered.connect(self.openStorageDialog)
+        fileMenu.addAction(storageAction)
 
         fileMenu.addSeparator()
         exportImageAction = QAction('&Export 3D view as image…', self)
@@ -738,15 +731,15 @@ class MainWindow(QMainWindow):
     # Results kept between runs
 
     def cacheResults(self):
-        """Keep the results of the dataset open (wave functions up to WAVEFUNCTION_LIMIT), for the next time."""
-        if self.datasetRecord is None or not self.keepResultsAction.isChecked():
+        """Keep the results of the dataset open (wave functions up to wavefunctionCacheLimit), for the next time."""
+        if self.datasetRecord is None or not self.keepResults():
             return
         calc = self.calculations
         wf = calc.waveFunction
         # Never in the way of opening another dataset or closing the program: a failure is only reported
         try:
             meta, arrays = calc.resultsSnapshot(includeWaveFunction=wf is not None
-                                                and wf.size * 4 <= WAVEFUNCTION_LIMIT)
+                                                and wf.size * 4 <= self.wavefunctionCacheLimit())
             if meta:
                 self.resultsCache.store(self.datasetRecord, meta, arrays, programVersion=__version__)
         except Exception as error:
@@ -754,7 +747,7 @@ class MainWindow(QMainWindow):
 
     def restoreCachedResults(self):
         """Show the results kept for the dataset just opened, if any; what happened, for the status bar ('' if nothing)."""
-        if self.datasetRecord is None or not self.keepResultsAction.isChecked():
+        if self.datasetRecord is None or not self.keepResults():
             return ''
         cached, reason = self.resultsCache.load(self.datasetRecord)
         if cached is None:
@@ -767,10 +760,68 @@ class MainWindow(QMainWindow):
             return f'The results kept from the last time could not be shown ({error})'
         return 'The results of the last time were restored'
 
+    # Results and storage (settings: sessionResults, cacheResults, cacheLimit, wavefunctionCacheLimit, cacheFolder)
+
+    def storeSessionResults(self):
+        return self.settings.value('sessionResults', True, type=bool)
+
+    def keepResults(self):
+        return self.settings.value('cacheResults', True, type=bool)
+
+    def resultsCacheLimit(self):
+        return int(self.settings.value('cacheLimit', CACHE_LIMIT, type=int))
+
+    def wavefunctionCacheLimit(self):
+        return int(self.settings.value('wavefunctionCacheLimit', WAVEFUNCTION_LIMIT, type=int))
+
+    def storageFolder(self):
+        folder = self.settings.value('cacheFolder', '', type=str)
+        return Path(folder).expanduser() if folder else defaultStorageFolder()
+
+    def applyStorage(self):
+        """Use the storage folder and limits of the settings."""
+        storage = self.storageFolder()
+        self.resultsCache.folder = resultsCacheFolder(storage)
+        self.resultsCache.limit = self.resultsCacheLimit()
+        self.calculations.diskCacheFolder = str(storage)
+
+    def storageUsage(self):
+        """For the Results and storage dialog: size and number of kept results, size of the symmetry matrices."""
+        return self.resultsCache.size(), len(self.resultsCache.entries()), folderUsage(self.storageFolder() / 'symmetry')[0]
+
+    def clearSymmetryCache(self):
+        self.calculations.symmetryCache = {}
+        return clearFolder(self.storageFolder() / 'symmetry')
+
     @Slot()
-    def clearResultsCache(self):
-        freed = self.resultsCache.clear()
-        self.statusBar().showMessage(f'Kept results cleared ({freed / 2 ** 20:.1f} MB)', 6000)
+    def openStorageDialog(self):
+        values = {'storeSessionResults': self.storeSessionResults(), 'keepResults': self.keepResults(),
+                  'cacheLimit': self.resultsCacheLimit(), 'wavefunctionLimit': self.wavefunctionCacheLimit(),
+                  'folder': str(self.storageFolder())}
+        dialog = StorageDialog(values, defaultStorageFolder(), self.storageUsage, self.resultsCache.clear,
+                               self.clearSymmetryCache, parent=self)
+        if dialog.exec():
+            self.setStorage(dialog.values())
+
+    def setStorage(self, values):
+        """Apply the values of the Results and storage dialog; what is kept moves with a new folder."""
+        old, new = self.storageFolder(), Path(values['folder']).expanduser()
+        if new.resolve() != old.resolve():
+            try:
+                moveStorage(old, new)
+            except OSError as error:
+                QMessageBox.warning(self, 'Results and storage', f'What is kept could not be moved to {new}: {error}\n\n'
+                                    f'The folder in use stays {old}.')
+                new = old
+        default = defaultStorageFolder()
+        self.settings.setValue('cacheFolder', '' if new.resolve() == default.resolve() else str(new))
+        self.settings.setValue('sessionResults', bool(values['storeSessionResults']))
+        self.settings.setValue('cacheResults', bool(values['keepResults']))
+        self.settings.setValue('cacheLimit', int(values['cacheLimit']))
+        self.settings.setValue('wavefunctionCacheLimit', int(values['wavefunctionLimit']))
+        self.applyStorage()
+        self.resultsCache.prune()
+        self.modifiedTimer.start()           # whether results are stored or kept changes what counts as unsaved
 
     def setStartPageShown(self, shown):
         self.startPage.setVisible(shown)
@@ -975,7 +1026,7 @@ class MainWindow(QMainWindow):
             'fingerprint': datasetFingerprint(dataset),
             'state': {'global': self.state.values(GLOBAL), 'dataset': self.state.values(DATASET)},
         }
-        meta, arrays = self.calculations.resultsSnapshot() if self.sessionResultsAction.isChecked() else ({}, {})
+        meta, arrays = self.calculations.resultsSnapshot() if self.storeSessionResults() else ({}, {})
         manifest['results'] = meta
         return manifest, arrays
 
@@ -997,7 +1048,7 @@ class MainWindow(QMainWindow):
         self.addRecentSession(path)
         self.updateDatasetLabel()
         self.markSessionSaved()
-        note = '' if manifest['results'] or not self.sessionResultsAction.isChecked() else ' (no results to store)'
+        note = '' if manifest['results'] or not self.storeSessionResults() else ' (no results to store)'
         if self.calculations.isBusy():
             note += '; the calculation still running is not included'
         self.statusBar().showMessage(f'Session saved to {path} ({Path(path).stat().st_size / 2**20:.1f} MB){note}', 8000)
@@ -1067,7 +1118,7 @@ class MainWindow(QMainWindow):
                  if '/section/' not in key and not key.startswith('appearancePanel/')}
         dataset = {key: value for key, value in (self.datasetRecord or {}).items() if key != 'state'}
         results = None
-        if self.sessionResultsAction.isChecked():
+        if self.storeSessionResults():
             results = [self.calculations.resultsVersion, list(self.calculations.selectedExciton or [])]
         return json.dumps([state, dataset, results], sort_keys=True, default=str)
 
@@ -1082,8 +1133,8 @@ class MainWindow(QMainWindow):
         else:
             # Not saved yet: only results would be lost (the parameters stay with the dataset), unless they are
             # kept between runs
-            modified = (self.datasetRecord is not None and self.sessionResultsAction.isChecked()
-                        and not self.keepResultsAction.isChecked() and self.calculations.hasResults())
+            modified = (self.datasetRecord is not None and self.storeSessionResults()
+                        and not self.keepResults() and self.calculations.hasResults())
         if modified != self.isWindowModified():
             self.setWindowModified(modified)
 
