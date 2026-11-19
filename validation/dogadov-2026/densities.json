@@ -1,0 +1,95 @@
+{
+ "cutoff (Ry)": 40.0,
+ "excitons": {
+  "A (Γ)": {
+   "Q": 1,
+   "exciton": 3,
+   "states": [
+    3,
+    4
+   ],
+   "hole": {
+    "shares": {
+     "W": 0.7087,
+     "Se": 0.2913
+    },
+    "W shell <z²/r²>": 0.1608,
+    "weightKept": 0.999,
+    "seconds": 12.7
+   },
+   "electron": {
+    "shares": {
+     "W": 0.8569,
+     "Se": 0.1431
+    },
+    "W shell <z²/r²>": 0.4157,
+    "weightKept": 0.999,
+    "seconds": 6.3
+   }
+  },
+  "lowest, q in the Q valley": {
+   "Q": 323,
+   "exciton": 1,
+   "states": [
+    1
+   ],
+   "hole": {
+    "shares": {
+     "W": 0.7075,
+     "Se": 0.2925
+    },
+    "W shell <z²/r²>": 0.1643,
+    "weightKept": 0.999,
+    "seconds": 8.0
+   },
+   "electron": {
+    "shares": {
+     "W": 0.546,
+     "Se": 0.454
+    },
+    "W shell <z²/r²>": 0.226,
+    "weightKept": 0.999,
+    "seconds": 6.8
+   }
+  },
+  "lowest, q = M": {
+   "Q": 37,
+   "exciton": 1,
+   "states": [
+    1,
+    2
+   ],
+   "hole": {
+    "shares": {
+     "W": 0.7055,
+     "Se": 0.2945
+    },
+    "W shell <z²/r²>": 0.1662,
+    "weightKept": 0.999,
+    "seconds": 7.0
+   },
+   "electron": {
+    "shares": {
+     "W": 0.5311,
+     "Se": 0.4689
+    },
+    "W shell <z²/r²>": 0.2259,
+    "weightKept": 0.999,
+    "seconds": 5.5
+   }
+  }
+ },
+ "grid": [
+  15,
+  15,
+  91
+ ],
+ "overlap": {
+  "h: A (Γ) / lowest, q in the Q valley": 0.9998,
+  "h: A (Γ) / lowest, q = M": 0.9984,
+  "h: lowest, q in the Q valley / lowest, q = M": 0.998,
+  "e: A (Γ) / lowest, q in the Q valley": 0.5677,
+  "e: A (Γ) / lowest, q = M": 0.5651,
+  "e: lowest, q in the Q valley / lowest, q = M": 0.8085
+ }
+}

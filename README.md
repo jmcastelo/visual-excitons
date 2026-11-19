@@ -29,7 +29,11 @@ Using the program:
 - [Appearance of the plots](docs/appearance.md): colors, lines, symbols, axes and legend of the 2D plots.
 - [Wave function](docs/wavefunction.md): computing it, plot types and colormaps, view directions, layers and the cell origin, atoms and bonds, analysis and export.
 - [Sessions](docs/sessions.md): saving and opening whole setups, with their results.
+
+Physics and validation:
+
 - [Where the particles of an exciton are](docs/exciton-densities.md): the physics behind placing the fixed particle: the exciton wave function, the hole and electron densities, nodes on the atoms, natural transition orbitals, and how it was all checked.
+- [Validation: WSe2, Dogadov et al. 2026](docs/validation-dogadov-2026.md): the claims of a published study of monolayer WSe2, checked with the program on its own dataset, with a session for each to open and see for yourself.
 
 Working on the program:
 

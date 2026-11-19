@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDouble
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QTabBar
 import numpy as np
 
-from visual_excitons.core.calculations import Calculations
+from visual_excitons.core.calculations import Calculations, sameStateSum, describeStateSum
 from visual_excitons.core.dataset import Dataset
 from visual_excitons.core.parameters import WavefunctionParameters
 from visual_excitons.core.lattice_info import VIEW_BASES, VIEW_PRESETS, viewVectorToCartesian
@@ -173,7 +173,7 @@ class WavefunctionControls(Inspector):
         self.wfStatesNote = NoteLabel()
         self.wfStatesNote.hide()
         self.calculations.wfComputed.connect(self.updateWfStatesNote)
-        self.calculations.sumDegenerateChanged.connect(self.updateWfStatesNote)
+        self.calculations.stateSumChanged.connect(self.updateWfStatesNote)
 
         form = formLayout()
         form.addRow('Q-point:', self.qPointSpinBox)
@@ -278,7 +278,8 @@ class WavefunctionControls(Inspector):
                        self.xSupercellSpinBox.valueChanged, self.ySupercellSpinBox.valueChanged,
                        self.zSupercellSpinBox.valueChanged, self.calculations.wfComputed,
                        self.particleTypeComboBox.currentIndexChanged,   # named in the selected exciton's estimate
-                       self.dataset.databaseFound, self.dataset.diagoDirChanged):
+                       self.dataset.databaseFound, self.dataset.diagoDirChanged,
+                       self.calculations.stateSumChanged):      # the number of states summed
             signal.connect(self.requestEstimate)
         # The databases may be busy while a calculation runs: estimate once it ends
         self.calculations.busyChanged.connect(lambda busy: None if busy else self.requestEstimate())
@@ -375,7 +376,7 @@ class WavefunctionControls(Inspector):
         for signal in (self.particleTypeComboBox.currentIndexChanged, self.qPointSpinBox.valueChanged,
                        self.excitonIndexSpinBox.valueChanged, self.wfCutoffSpinBox.valueChanged,
                        self.fullCutoffCheckBox.toggled, self.fixedParticlePosChanged,
-                       self.calculations.particleDensityReady, self.calculations.sumDegenerateChanged,
+                       self.calculations.particleDensityReady, self.calculations.stateSumChanged,
                        self.calculations.wfComputed):
             signal.connect(self.updateDensityReadout)
         self.dataset.databaseFound.connect(self.updateDensityReadout)
@@ -386,21 +387,20 @@ class WavefunctionControls(Inspector):
         return ('hole', 'electron') if self.parameters.particle == 'h' else ('electron', 'hole')
 
     def densityRequest(self):
-        """What the density would be computed for now: Q-point, exciton, particle, cutoff, degenerate states."""
-        return (self.qPointIndex(), self.excitonIndexSpinBox.value(), self.parameters.particle, float(self.cutoff()),
-                bool(self.calculations.sumDegenerate))
+        """What the density would be computed for now: Q-point, exciton, particle, cutoff (and states summed, see currentDensity)."""
+        return (self.qPointIndex(), self.excitonIndexSpinBox.value(), self.parameters.particle, float(self.cutoff()))
 
     def currentDensity(self):
         """The particle density computed, if it is the one asked for now; else None."""
         d = self.calculations.particleDensity
         if d is None:
             return None
-        computed = (d['qIndex'], d['excIndex'], d['particle'], float(d['cutoff']), bool(d['degenerate']))
-        return d if computed == self.densityRequest() else None
+        computed = (d['qIndex'], d['excIndex'], d['particle'], float(d['cutoff']))
+        return d if computed == self.densityRequest() and sameStateSum(d, self.calculations.stateSum()) else None
 
     @Slot()
     def computeParticleDensity(self):
-        q, exc, particle, cutoff, _ = self.densityRequest()
+        q, exc, particle, cutoff = self.densityRequest()
         self.calculations.computeParticleDensity(q, exc, particle, cutoff)
 
     @Slot()
@@ -421,7 +421,7 @@ class WavefunctionControls(Inspector):
                 name = 'hole' if old['particle'] == 'h' else 'electron'
                 cutoff = 'all plane waves' if old['cutoff'] < 0 else f'{old["cutoff"]:g} Ry'
                 self.densityReadout.setText(f'Out of date: computed for the {name} of exciton {old["excIndex"]} at '
-                                            f'Q{old["qIndex"] + 1} ({cutoff}{", degenerate states summed" if len(old["states"]) > 1 else ""}). '
+                                            f'Q{old["qIndex"] + 1} ({cutoff}{describeStateSum(old, [old["excIndex"]])}). '
                                             'Compute it again for the settings of now.')
             return
         density = np.asarray(d['density'])
@@ -1340,14 +1340,20 @@ class WavefunctionControls(Inspector):
             return
         qIndex, excIndex = calc.wfExciton
         states = calc.wfStates or [excIndex]
-        text = f'Shown: exciton {excIndex} at Q{qIndex + 1}'
-        if len(states) > 1:
-            text += f', with the degenerate states {states[0]}–{states[-1]}' if states == list(range(states[0], states[-1] + 1)) \
-                else ', with the degenerate states ' + ', '.join(map(str, states))
-        text += '.'
-        if calc.wfDegenerate is not None and calc.wfDegenerate != self.calculations.sumDegenerate:
-            text += (' <span style="color:#d9822b">Computed ' + ('summing' if calc.wfDegenerate else 'without summing')
-                     + ' the degenerate states: compute it again for the setting of now.</span>')
+        # Older results (and sessions) say only whether the degenerate states were summed
+        computedSum = calc.wfStateSum or (None if calc.wfDegenerate is None else
+                                          {'degenerate': bool(calc.wfDegenerate), 'window': 0.0, 'weighting': 'equal'})
+        summed = dict(computedSum or {}, states=states)
+        text = f'Shown: exciton {excIndex} at Q{qIndex + 1}{describeStateSum(summed, [excIndex])}.'
+        now = self.calculations.stateSum()
+        if computedSum is not None and computedSum != now:
+            if computedSum['window'] != now['window'] or computedSum['weighting'] != now['weighting']:
+                other = 'another energy window'
+            else:
+                other = 'summing' if calc.wfDegenerate else 'without summing'
+                other += ' the degenerate states'
+            text += (f' <span style="color:#d9822b">Computed {other}: compute it again for the setting of '
+                     'now.</span>')
         self.wfStatesNote.setText(text)
         self.wfStatesNote.show()
 

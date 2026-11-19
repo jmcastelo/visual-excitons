@@ -55,6 +55,11 @@ class AbsorptionPlot(pg.GraphicsLayoutWidget):
 
         self.curveItems = []
         self.highlight = ExcitonHighlight()
+        # The energy window summed with the selected exciton, shaded (see setWindow)
+        self.windowRegion = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(128, 128, 160, 60),
+                                                pen=pg.mkPen(None))
+        self.windowRegion.setZValue(-10)
+        self.windowRegion.hide()
 
     @Slot()
     def plotData(self, excAbsData, showLabels):
@@ -116,6 +121,15 @@ class AbsorptionPlot(pg.GraphicsLayoutWidget):
         """Ring around the selected exciton, at its points (energy, absorption)."""
         self.highlight.setPositions(positions)
         self.highlight.addTo(self.absorption)
+
+    def setWindow(self, energy=None, halfWidth=0.0):
+        """Shade the energies within `halfWidth` (eV) of `energy`; nothing when None or 0."""
+        if self.windowRegion.scene() is not self.absorption.scene() or self.windowRegion not in self.absorption.items:
+            self.absorption.addItem(self.windowRegion, ignoreBounds=True)      # again after clear()
+        shown = energy is not None and halfWidth > 0
+        if shown:
+            self.windowRegion.setRegion((energy - halfWidth, energy + halfWidth))
+        self.windowRegion.setVisible(shown)
 
     @Slot()
     def clearData(self):

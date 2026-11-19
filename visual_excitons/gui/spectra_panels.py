@@ -14,6 +14,7 @@ from .absorption_plot import AbsorptionPlot
 from .spectra_controls import SpectraControls
 from .theme import PLOT_COLORS
 from .inspector import NoteLabel
+from visual_excitons.core.calculations import describeStateSum
 
 
 class SpectraPanels(QObject):
@@ -95,7 +96,8 @@ class SpectraPanels(QObject):
         layout.addWidget(bandStructurePlot, 1)
         layout.addWidget(self.bandStructureNote)
         for signal in (calculations.excitonSelected, calculations.excitonDispersionReady,
-                       calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear):
+                       calculations.excitonAbsorptionReady, calculations.excitonAbsorptionClear,
+                       calculations.stateSumChanged):
             signal.connect(self.updateHighlights)
         self.controls.absorptionParametersChanged.connect(calculations.recomputeAbsorptionSpectra)
 
@@ -116,7 +118,7 @@ class SpectraPanels(QObject):
         names = (f'{states[0]}–{states[-1]}' if len(states) > 1 and states == list(range(states[0], states[-1] + 1))
                  else ', '.join(map(str, states)))
         lines = [f'<b>Exciton{"s" if len(states) > 1 else ""} {names}</b> at Q{info["qIndex"] + 1} = {where}'
-                 + (', with the degenerate states' if info['degenerate'] and states != info['clicked'] else '')
+                 + describeStateSum(info, info['clicked'])
                  + ('; QP energies' if info.get('gw') else '; DFT energies')
                  + '. The width of each band is the weight of the exciton on it.']
         if not gamma:
@@ -138,6 +140,10 @@ class SpectraPanels(QObject):
         positions = self.calculations.selectedExcitonPositions()
         self.dispersionPlot.setHighlight(positions['dispersion'])
         self.absorptionPlot.setHighlight(positions['absorption'])
+        # The energy window summed with it, on the spectra
+        selected = self.calculations.selectedExciton
+        self.absorptionPlot.setWindow(selected[2] if selected and positions['absorption'] else None,
+                                      self.calculations.energyWindow)
 
     def clearQPath(self):
         """No Q-path on the axes (no dataset)."""

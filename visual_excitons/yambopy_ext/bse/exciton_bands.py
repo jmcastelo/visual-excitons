@@ -52,7 +52,7 @@ from scipy.ndimage import map_coordinates
 from yambopy.lattice import car_red
 from yambopy.tools.skw import SkwInterpolator
 
-from .exciton_kspace import state_weights, kpoint_grid, hole_kpoint_indices
+from .exciton_kspace import summed_states, state_weights, kpoint_grid, hole_kpoint_indices
 
 __all__ = ['band_kpoint_weights', 'interpolate_on_grid', 'band_energies_ibz', 'interpolate_energies',
            'interpolate_exciton_bands']
@@ -215,7 +215,7 @@ def interpolate_energies(lattice, energies_ibz, red_points, lpratio=5, tolerance
 
 
 def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=True, degen_eps=1e-2,
-                              degen_rtol=1e-3, lpratio=5):
+                              degen_rtol=1e-3, lpratio=5, window=0.0, weighting='equal'):
     """
     The excitonic band structure of *states* (1-based) of *excdb* along a path.
 
@@ -223,11 +223,14 @@ def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=
     ----------
     excdb : ``YamboExcitonDB`` loaded with its eigenvectors (any Q)
     red_path : ndarray (np, 3), the path (reduced coordinates of ``excdb.lattice``)
-    states : the states whose weights are shown (summed, divided by their number)
+    states : the states whose weights are shown (averaged: each with the
+        states summed for it, see :func:`summed_states`)
     energies_ibz : ndarray (nk_ibz, nb), the energies of the bands of the BSE
         (``excdb.start_band + 1`` to ``excdb.mband``) on the irreducible k-points
         (see :func:`band_energies_ibz`)
     degenerate : add the states degenerate with each of *states*
+    window, weighting : add the states within *window* (eV) of each of
+        *states*, weighted equally or by oscillator strength (see :func:`summed_states`)
 
     Returns
     -------
@@ -235,16 +238,25 @@ def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=
         ``energies``, ``weights`` : ndarray (np, nb), along the path
         ``energy_interpolation`` : 'SKW' or 'spline' (see :func:`interpolate_energies`)
         ``bands`` : (first, last), the bands (1-based)
-        ``states`` : the states summed
+        ``states`` : the states summed, and ``shares``, the share of each
+        ``weighting`` : the weighting used ('equal' or 'oscillator'; 'mixed'
+            if it differs between the states asked)
         ``red_qpoint`` : Q, reduced
         ``nvbands`` : the valence bands among them
     """
     if excdb.eigenvectors is None:
         raise ValueError('The database has no eigenvectors: load it with Load_WF=True (and run yambo with WRbsWF).')
-    states = sorted({int(s) for s in states})
-    if degenerate:
-        states = sorted({d for s in states for d in excdb.get_degenerate(s, eps=degen_eps, rtol=degen_rtol)
-                         if d <= len(excdb.eigenvectors)})
+    # Each state asked with its own states summed, and their average
+    asked = sorted({int(s) for s in states})
+    total, used = {}, set()
+    for state in asked:
+        group, shares, weighting_used = summed_states(excdb, state, degenerate, degen_eps, degen_rtol, window,
+                                                      weighting)
+        used.add(weighting_used)
+        for s, share in zip(group, shares):
+            total[s] = total.get(s, 0.0) + share / len(asked)
+    states = sorted(total)
+    shares = np.array([total[s] for s in states])
     lattice = excdb.lattice
     first, last = int(excdb.start_band) + 1, int(excdb.mband)
     red_kpoints = np.asarray(lattice.red_kpoints, dtype=float)
@@ -254,11 +266,12 @@ def interpolate_exciton_bands(excdb, red_path, states, energies_ibz, degenerate=
     gamma = np.allclose(red_qpoint - np.round(red_qpoint), 0.0, atol=1e-6)
     holes = None if gamma else hole_kpoint_indices(red_kpoints, red_qpoint)
 
-    weights = band_kpoint_weights(excdb.table, state_weights(excdb.eigenvectors, states), len(red_kpoints),
+    weights = band_kpoint_weights(excdb.table, state_weights(excdb.eigenvectors, states, shares), len(red_kpoints),
                                   first, last, holes)
     energies, method = interpolate_energies(lattice, energies_ibz, red_path, lpratio)
     # Clipped: the spline can dip a hair below zero next to sharp peaks
     return {'energies': energies, 'energy_interpolation': method,
             'weights': np.clip(interpolate_on_grid(red_kpoints, weights, red_path), 0.0, None),
-            'bands': (first, last), 'states': states, 'red_qpoint': red_qpoint,
+            'bands': (first, last), 'states': states, 'shares': [float(x) for x in shares],
+            'weighting': used.pop() if len(used) == 1 else 'mixed', 'red_qpoint': red_qpoint,
             'nvbands': int(len(np.unique(np.asarray(excdb.table)[:, 1])))}

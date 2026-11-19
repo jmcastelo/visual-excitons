@@ -1,6 +1,6 @@
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtWidgets import (QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QVBoxLayout, QSizePolicy, QComboBox,
-                               QHBoxLayout, QWidget)
+                               QHBoxLayout, QWidget, QLabel)
 
 from .inspector import Inspector, formLayout, NoteLabel
 from .persistence import DATASET
@@ -11,6 +11,14 @@ from .persistence import DATASET
 DEGENERATE_TIP = ('Sum the states degenerate with the exciton (within 10 meV): in its wave function, its\n'
         'composition and its band structure. A single state of a degenerate group is an arbitrary\n'
         'mixture of them, without the symmetry of the crystal')
+
+# The energy window summed with the selected exciton
+WINDOW_TIP = ('Also sum every state within this energy of the exciton (in its wave function, particle\n'
+              'density, composition and band structure): an absorption peak made of many close states,\n'
+              'as the C and D peaks of transition-metal dichalcogenides. Select the bright exciton at the\n'
+              'top of the peak; the window is shaded on the absorption spectra')
+WEIGHTINGS = (('By oscillator strength', 'oscillator'), ('Equally', 'equal'))
+
 
 class SpectraControls(Inspector):
     """Inspector of the spectra page."""
@@ -134,6 +142,33 @@ class SpectraControls(Inspector):
         self.sumDegenerateCheckBox.setToolTip(DEGENERATE_TIP)
         self.sumDegenerateCheckBox.toggled.connect(self.calculations.setSumDegenerate)
         self.calculations.sumDegenerateChanged.connect(self.sumDegenerateCheckBox.setChecked)
+        # An energy window around it (Calculations.energyWindow), and how its states are weighted
+        self.windowCheckBox = QCheckBox('Sum an energy window:')
+        self.windowCheckBox.setToolTip(WINDOW_TIP)
+        self.windowSpinBox = QDoubleSpinBox(minimum=1.0, maximum=1000.0, singleStep=5.0, decimals=0, value=25.0,
+                                            prefix='±', suffix=' meV')
+        self.windowSpinBox.setToolTip(WINDOW_TIP)
+        self.weightingComboBox = QComboBox()
+        for label, weighting in WEIGHTINGS:
+            self.weightingComboBox.addItem(label, weighting)
+        self.weightingComboBox.setToolTip('How the states of the window add up: by their oscillator strength, as in\n'
+                                          'the absorption peak (equally where none is bright, e.g. at finite Q),\n'
+                                          'or all the same')
+        self.windowCheckBox.toggled.connect(self.applyWindow)
+        self.windowSpinBox.valueChanged.connect(self.applyWindow)
+        self.weightingComboBox.currentIndexChanged.connect(
+            lambda: self.calculations.setWindowWeighting(self.weightingComboBox.currentData()))
+        windowRow = QHBoxLayout()
+        windowRow.setContentsMargins(0, 0, 0, 0)
+        windowRow.addWidget(self.windowCheckBox)
+        windowRow.addWidget(self.windowSpinBox)
+        windowRow.addStretch(1)
+        weightingRow = QHBoxLayout()
+        weightingRow.setContentsMargins(0, 0, 0, 0)
+        weightingRow.addWidget(QLabel('Weights:'))
+        weightingRow.addWidget(self.weightingComboBox)
+        weightingRow.addStretch(1)
+        self.applyWindow()
         self.computeWavefunctionButton = QPushButton('Compute its wave function')
         self.computeWavefunctionButton.setToolTip('Compute the wave function of this exciton with the settings of the\n'
                                                   'Wave function controls, and show it')
@@ -149,6 +184,8 @@ class SpectraControls(Inspector):
         layout.addWidget(self.selectedExcitonNote)
         layout.addWidget(self.characterSummary)
         layout.addWidget(self.sumDegenerateCheckBox)
+        layout.addLayout(windowRow)
+        layout.addLayout(weightingRow)
         layout.addWidget(self.showCompositionButton)
         layout.addWidget(self.computeWavefunctionButton)
         layout.addWidget(self.wfEstimateNote)
@@ -176,13 +213,22 @@ class SpectraControls(Inspector):
         # depend on its energies), the labels as a preference
         for key, widget in (('excitons', self.nExcitonsSpinBox), ('autoRange', self.autoRangeCheckBox),
                             ('brightThreshold', self.excMinIntensitySpinBox),
-                            ('sumDegenerate', self.sumDegenerateCheckBox)):
+                            ('sumDegenerate', self.sumDegenerateCheckBox), ('energyWindow', self.windowCheckBox),
+                            ('energyWindowWidth', self.windowSpinBox), ('windowWeighting', self.weightingComboBox)):
             self.remember(key, widget, DATASET)
         # The range as a whole: set one bound at a time, it would be clamped by the old other one
         self.remember('energyRange', scope=DATASET,
                       get=lambda: [self.parameters.energyMin, self.parameters.energyMax, self.parameters.energyStep],
                       set=lambda values: self.setEnergyRange(*values))
         self.remember('labels', self.showLabelsCheckBox)
+
+    @Slot()
+    def applyWindow(self, *args):
+        """The energy window as set: its width (eV) when ticked, 0 otherwise."""
+        on = self.windowCheckBox.isChecked()
+        self.windowSpinBox.setEnabled(on)
+        self.weightingComboBox.setEnabled(on)
+        self.calculations.setEnergyWindow(self.windowSpinBox.value() / 1000.0 if on else 0.0)
 
     def _syncEnergies(self):
         """Show the energies as clamped by the parameters."""

@@ -404,3 +404,30 @@ With natural transition orbitals per k-point (the eigenvectors of Σ_states A_k�
 
 **Proposal:** add `exciton_particle_density` (the density on the grid of `ex_wf2Real` at a given cutoff, so that its maxima are fixed positions used as they are), `particle_nto` and `density_maxima` to `yambopy.bse`, e.g. next to `realSpace_excitonwf`; an implementation following YamboPy's conventions is in Visual Excitons (`yambopy_ext/bse/exciton_particle_density.py`).
 
+
+## 22. `YamboBSEAbsorptionSpectra.get_excitons` mixes up energies, intensities and indices when states are degenerate
+
+`get_excitons` takes the energies from `excitondb.get_nondegenerate()` (one per degenerate group) and the intensities from `excitondb.get_intensities()` (one per state), and pairs them by position:
+
+```python
+energies, indices = self.excitondb.get_nondegenerate(eps=eps)
+intensities = self.excitondb.get_intensities()
+for i in range(len(energies)):
+    if energies[i] < max_energy and intensities[i] > min_intensity:
+        excitons.append((energies[i], intensities[i], i))
+```
+
+As soon as a group is degenerate, the two lists have different lengths and every entry after it pairs the energy of one group with the intensity of another state. The third value, `i`, is the position in the list of groups (0-based), not the state's index, although that is what a caller needs to select the exciton (and `indices`, which holds the states, is not used).
+
+For WSe2 at Γ (72×72×1, 10 states): states 1–2 (1.638 and 1.643 eV) are dark, the bright A doublet is states 3–4 (1.6868 eV, intensities 1 and 0.22), then states 5–6 (1.8298 eV, dark). `get_excitons(min_intensity=0.1)` returns `(1.6868, 1.0, 2)` and `(1.8298, 0.22, 3)`: a bright exciton at 1.83 eV that does not exist, and indices that, read as states, are a dark exciton (2) and the second state of A (3, 0-based). Even with no degeneracy at all, the index is 0-based where `YamboExcitonDB` counts states from 1 (e.g. `get_degenerate`).
+
+**Proposal:** return every state, with its own energy, intensity and index (1-based, as yambo):
+
+```python
+energies = self.excitondb.eigenvalues.real
+intensities = self.excitondb.get_intensities()
+excitons = [(e, s, n + 1) for n, (e, s) in enumerate(zip(energies, intensities))
+            if e < max_energy and s > min_intensity]
+```
+
+and, if degenerate groups are wanted as one entry, sum the intensities over each group (as `Degen_Step` tries to do afterwards) and keep the index of its first state. Visual Excitons now builds the list this way (`core/calculations.computeAbsorption`).

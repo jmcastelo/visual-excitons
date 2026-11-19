@@ -1,5 +1,5 @@
 from PySide6.QtCore import QObject, Signal, Slot
-from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboBSEAbsorptionSpectra, YamboQPDB
+from yambopy import YamboLatticeDB, ExcitonDispersion, YamboExcitonDB, YamboQPDB
 from yambopy import YamboElectronsDB, YamboWFDB, ex_wf2Real
 import numpy as np
 from pathlib import Path
@@ -12,7 +12,7 @@ from .memory import PlaneWaves, estimateMemory, chooseBlockSize, availableMemory
 from .export import supercellAtoms, writeDensity
 from .analysis import voxelVectors
 from .atomic_data import BOHR_TO_ANGSTROM
-from visual_excitons.yambopy_ext.bse.exciton_kspace import exciton_kspace
+from visual_excitons.yambopy_ext.bse.exciton_kspace import exciton_kspace, summed_states
 from visual_excitons.yambopy_ext.bse.exciton_bands import interpolate_exciton_bands, band_energies_ibz
 from visual_excitons.yambopy_ext.dbs.qp_energies import qp_energies
 from visual_excitons.yambopy_ext.bse.exciton_particle_density import exciton_particle_density, density_maxima
@@ -20,6 +20,83 @@ from visual_excitons.yambopy_ext.bse.exciton_particle_density import exciton_par
 # States within this energy (eV) of an exciton are degenerate with it (summed with it when
 # Calculations.sumDegenerate: wave function, composition, band structure)
 DEGENERACY_EV = 1e-2
+# The weightings of an energy window (see yambopy_ext.bse.exciton_kspace.summed_states)
+WINDOW_WEIGHTINGS = ('oscillator', 'equal')
+
+
+def stateSum(degenerate=True, window=0.0, weighting='oscillator'):
+    """
+    Which states are summed with an exciton (its wave function, particle
+    density, composition and band structure): those degenerate with it if
+    `degenerate`, and those within `window` eV of it (0: none), weighted by
+    `weighting` (see yambopy_ext.bse.exciton_kspace.summed_states).
+    """
+    window = max(0.0, float(window or 0.0))
+    return {'degenerate': bool(degenerate), 'window': window,
+            'weighting': weighting if window and weighting in WINDOW_WEIGHTINGS else 'equal'}
+
+
+def sameStateSum(result, stateSumAsked):
+    """Whether `result` (a dict with the keys of stateSum; older ones only 'degenerate') sums the states asked."""
+    return stateSum(result.get('degenerate', True), result.get('window', 0.0),
+                    result.get('weighting', 'equal')) == stateSum(**stateSumAsked)
+
+
+def stateNames(states):
+    """States 3, 4, 5 as '3–5'; others as '3, 7'."""
+    states = [int(s) for s in states]
+    if len(states) > 1 and states == list(range(states[0], states[-1] + 1)):
+        return f'{states[0]}–{states[-1]}'
+    return ', '.join(map(str, states))
+
+
+def describeStateSum(result, clicked=()):
+    """
+    What a result (with 'states' and the keys of stateSum, and possibly
+    'weightingUsed') sums besides the excitons `clicked`, as ', with ...'
+    ('' if nothing): for the notes of the panels.
+    """
+    states = [int(s) for s in result.get('states') or []]
+    others = [s for s in states if s not in set(clicked)]
+    if not others:
+        return ''
+    window = float(result.get('window') or 0.0)
+    if window:
+        used = result.get('weightingUsed') or result.get('weighting', 'equal')
+        how = {'oscillator': 'weighted by oscillator strength', 'equal': 'weighted equally',
+               'mixed': 'weighted by oscillator strength where bright'}.get(used, used)
+        if result.get('weighting') == 'oscillator' and used == 'equal':
+            how = 'weighted equally (none is bright)'
+        return (f', with the {len(states)} states within ±{window * 1000:g} meV ({stateNames(states)}), {how}')
+    return f', with the degenerate states {stateNames(states)}'
+
+
+def statesToLoad(lattice, diagoDir, bseFile, excIndex, window=0.0):
+    """
+    How many states of `bseFile` to load for exciton `excIndex` (1-based):
+    up to it plus a margin for those degenerate with it, or, with an energy
+    window (eV), up to the last within it.
+    """
+    neigs = excIndex + 20
+    if window and window > 0:
+        energies = np.real(YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, Load_WF=False,
+                                                       neigs=-1).eigenvalues)
+        if excIndex <= len(energies):
+            neigs = max(neigs, int(np.sum(energies <= energies[excIndex - 1] + window + 1e-9)) + 1)
+    return neigs
+
+
+def weightedAkcv(excitonDB, excIndex, degenerate, window, weighting):
+    """
+    The coefficients of the states summed with exciton `excIndex`, each times
+    the square root of its share (so that densities add up with the shares),
+    the states, their shares and the weighting used.
+    """
+    states, shares, used = summed_states(excitonDB, excIndex, degenerate, DEGENERACY_EV, window=window,
+                                         weighting=weighting)
+    Akcv = excitonDB.get_Akcv()[np.array(states) - 1]
+    Akcv = Akcv * np.sqrt(shares).reshape((-1,) + (1,) * (Akcv.ndim - 1))
+    return Akcv, states, shares, used
 
 
 
@@ -137,8 +214,14 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
     energyRange, epsilon = excitonDB.get_chi(estep=energyStep, emin=energyMin, emax=energyMax,
                                              broad=ABSORPTION_BROADENING)
 
-    excitonAbsorption = YamboBSEAbsorptionSpectra(excitonDB)
-    allExcitons = np.array(excitonAbsorption.get_excitons(min_intensity=0.0, max_energy=energyMax)).real
+    # Every state below the top of the range: energy (eV), intensity relative to the brightest, index
+    # (1-based). Not YamboBSEAbsorptionSpectra.get_excitons, which pairs the energies of the degenerate
+    # groups with the intensities of the states and returns the group's position (0-based) as the index
+    # (docs/yambopy-issues.md)
+    energies = np.real(np.asarray(excitonDB.eigenvalues))
+    states = np.arange(1, len(energies) + 1)
+    keep = energies < energyMax
+    allExcitons = np.column_stack([energies, excitonDB.get_intensities(), states])[keep]
 
     brightExcitons = np.empty((0, 3))
     darkExcitons = np.empty((0, 3))
@@ -158,7 +241,7 @@ def computeAbsorption(lattice, diagoDir, qPointIndex, index, energyStep, energyM
 
 
 def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, excitonIndices, degenerate, qBZ,
-                         gw=False, qpDir=None, qpFile=None):
+                         gw=False, qpDir=None, qpFile=None, window=0.0, weighting='equal'):
     """
     The excitonic band structure of excitons `excitonIndices` (1-based) of
     Q-point `qIndex` (0-based, the file `bseFile`), along the Q-path `qBZ`:
@@ -170,8 +253,8 @@ def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, e
         context.stage('Loading the lattice')
         lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
     context.stage('Loading the databases')
-    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir,
-                                            neigs=max(excitonIndices) + 20)
+    neigs = max(statesToLoad(lattice, diagoDir, bseFile, i, window) for i in excitonIndices)
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=neigs)
     missing = [i for i in excitonIndices if i > len(excitonDB.eigenvalues)]
     if missing:
         raise ValueError(f'Exciton {missing[0]} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
@@ -185,11 +268,13 @@ def computeBandStructure(context, lattice, saveDir, diagoDir, bseFile, qIndex, e
 
     context.stage('Interpolating the bands')
     result = interpolate_exciton_bands(excitonDB, qBZ.kpoints('red'), excitonIndices, energies,
-                                       degenerate=degenerate, degen_eps=DEGENERACY_EV)
+                                       degenerate=degenerate, degen_eps=DEGENERACY_EV, window=window,
+                                       weighting=weighting)
     return {'lattice': lattice, 'k': qBZ.kpoints_distances(), 'bands': np.transpose(result['energies']),
             'weights': np.transpose(result['weights']),
             'info': {'qIndex': int(qIndex), 'states': result['states'], 'clicked': [int(i) for i in excitonIndices],
-                     'degenerate': bool(degenerate), 'redQPoint': [float(x) for x in result['red_qpoint']],
+                     'degenerate': bool(degenerate), 'window': float(window), 'weighting': weighting,
+                     'weightingUsed': result['weighting'], 'shares': result['shares'], 'redQPoint': [float(x) for x in result['red_qpoint']],
                      'bands': list(result['bands']), 'estimatedBands': estimated, 'gw': bool(gw),
                      'energyInterpolation': result['energy_interpolation']}}
 
@@ -347,7 +432,8 @@ def jsonableCharacter(character):
     return {key: character.get(key) for key in keys}
 
 
-def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None):
+def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, degenerate, cache=None,
+                       window=0.0, weighting='equal'):
     """
     Where exciton `excIndex` (1-based) of Q-point `qIndex` (0-based) lives in
     reciprocal space and what it is made of (see yambopy_ext.bse.exciton_kspace),
@@ -359,7 +445,7 @@ def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, exc
     if lattice is None:
         context.stage('Loading the lattice')
         lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
-    neigs = excIndex + 20       # the states degenerate with it, at most a few above
+    neigs = statesToLoad(lattice, diagoDir, bseFile, excIndex, window)
     key = (diagoDir, bseFile)
     cached = cache.get(key) if cache is not None else None
     if cached is not None and cached[1] >= neigs:
@@ -373,13 +459,17 @@ def computeComposition(context, lattice, saveDir, diagoDir, bseFile, qIndex, exc
     if excIndex > len(excitonDB.eigenvalues):
         raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
     # The same degeneracy as the wave function's (computeWaveFunction)
-    result = exciton_kspace(excitonDB, excIndex, degenerate=degenerate, degen_eps=DEGENERACY_EV)
-    result.update(lattice=lattice, qIndex=qIndex, excIndex=excIndex, degenerate=bool(degenerate))
+    result = exciton_kspace(excitonDB, excIndex, degenerate=degenerate, degen_eps=DEGENERACY_EV, window=window,
+                            weighting=weighting)
+    result['weightingUsed'] = result.pop('weighting')
+    result.update(lattice=lattice, qIndex=qIndex, excIndex=excIndex, degenerate=bool(degenerate), window=float(window),
+                  weighting=weighting)
     return result
 
 
 def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index, fixed_particle, fixed_position,
-                        cutoff_ry, supercell, cache=None, block_size=256, bseFile=None, degenerate=True):
+                        cutoff_ry, supercell, cache=None, block_size=256, bseFile=None, degenerate=True,
+                        window=0.0, weighting='equal'):
     """
     Real-space probability density of exciton `exc_index` (1-based) at Q-point
     `q_index` (0-based, the file ndb.BS_diago_Q<q_index + 1>), with the effective
@@ -396,7 +486,8 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
     filename = bseFile or 'ndb.BS_diago_Q%d' % (q_index + 1)
     # Load the states up to the requested one, plus a margin for the states
     # degenerate with it
-    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir, neigs=exc_index + 20)
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=filename, folder=diagoDir,
+                                            neigs=statesToLoad(lattice, diagoDir, filename, exc_index, window))
     numStates = len(excitonDB.eigenvalues)
     if exc_index > numStates:
         raise ValueError(f'Exciton {exc_index} does not exist: {filename} has {numStates} excitons')
@@ -405,10 +496,8 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
     # stages and progress (tqdm hooks)
     wavefunctionDB = loadWavefunctionDB(cache, saveDir, lattice, excitonDB)
 
-    # With the states degenerate with it (their densities summed), or alone
-    states = excitonDB.get_degenerate(exc_index, eps=DEGENERACY_EV) if degenerate else [exc_index]
-    degen_states = np.array(states) - 1
-    Akcv = excitonDB.get_Akcv()[degen_states]
+    # With the states summed with it (their densities added, each with its share), or alone
+    Akcv, states, shares, used = weightedAkcv(excitonDB, exc_index, degenerate, window, weighting)
     Qpt = wavefunctionDB.ydb.lat @ excitonDB.car_qpoint
 
     # ex_wf2Real increases even supercell sizes by 1 (modifying the list in place),
@@ -443,7 +532,11 @@ def computeWaveFunction(context, lattice, saveDir, diagoDir, q_index, exc_index,
         'qIndex': q_index,
         'excIndex': exc_index,
         'states': [int(s) for s in states],
+        'shares': [float(x) for x in shares],
         'degenerate': bool(degenerate),
+        'window': float(window),
+        'weighting': weighting,
+        'weightingUsed': used,
     }
 
 
@@ -454,7 +547,7 @@ PARTICLE_MAXIMA_THRESHOLD = 0.1
 
 
 def computeParticleDensity(context, lattice, saveDir, diagoDir, bseFile, qIndex, excIndex, particle, cutoff_ry,
-                           degenerate=True, cache=None):
+                           degenerate=True, cache=None, window=0.0, weighting='equal'):
     """
     The own density of the hole or of the electron (`particle`, 'h' or 'e') of
     exciton `excIndex` (1-based, with its degenerate states if `degenerate`)
@@ -467,12 +560,12 @@ def computeParticleDensity(context, lattice, saveDir, diagoDir, bseFile, qIndex,
         context.stage('Loading the lattice')
         lattice = YamboLatticeDB.from_db(saveDir + '/ns.db1')
     context.stage('Loading the exciton')
-    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir, neigs=excIndex + 20)
+    excitonDB = YamboExcitonDB.from_db_file(lattice, filename=bseFile, folder=diagoDir,
+                                            neigs=statesToLoad(lattice, diagoDir, bseFile, excIndex, window))
     if excIndex > len(excitonDB.eigenvalues):
         raise ValueError(f'Exciton {excIndex} does not exist: {bseFile} has {len(excitonDB.eigenvalues)} excitons')
     wavefunctionDB = loadWavefunctionDB(cache, saveDir, lattice, excitonDB)
-    states = excitonDB.get_degenerate(excIndex, eps=DEGENERACY_EV) if degenerate else [excIndex]
-    Akcv = excitonDB.get_Akcv()[np.array(states) - 1]
+    Akcv, states, shares, used = weightedAkcv(excitonDB, excIndex, degenerate, window, weighting)
     Qpt = wavefunctionDB.ydb.lat @ excitonDB.car_qpoint
     bands = [int(np.min(excitonDB.table[:, 1])), int(np.max(excitonDB.table[:, 2]))]
     name = 'hole' if particle == 'h' else 'electron'
@@ -482,7 +575,7 @@ def computeParticleDensity(context, lattice, saveDir, diagoDir, bseFile, qIndex,
     indices, values = density_maxima(density, PARTICLE_MAXIMA_THRESHOLD)
     return {'lattice': lattice, 'density': density.astype(np.float32), 'particle': particle, 'qIndex': qIndex,
             'excIndex': excIndex, 'states': [int(x) for x in states], 'degenerate': bool(degenerate),
-            'cutoff': float(cutoff_ry), 'maxima': indices.tolist(), 'weightKept': info['weight_kept'] / info['weight']}
+            'window': float(window), 'weighting': weighting, 'weightingUsed': used, 'shares': [float(x) for x in shares], 'cutoff': float(cutoff_ry), 'maxima': indices.tolist(), 'weightKept': info['weight_kept'] / info['weight']}
 
 
 class Calculations(QObject):
@@ -534,6 +627,9 @@ class Calculations(QObject):
     # Whether the states degenerate with the selected exciton are summed with it
     # (its wave function, composition and band structure)
     sumDegenerateChanged = Signal(bool)
+    # Which states are summed with the selected exciton changed: the degenerate
+    # ones, or the energy window and its weighting (see stateSum)
+    stateSumChanged = Signal()
 
     def __init__(self, dataset=None, spectraParameters=None, synchronous=False):
         """
@@ -547,6 +643,9 @@ class Calculations(QObject):
         self.dataset = dataset if dataset is not None else Dataset()
         self.spectraParameters = spectraParameters if spectraParameters is not None else SpectraParameters()
         self.sumDegenerate = True
+        # The energy window summed with the selected exciton (eV, 0: none), and its weighting
+        self.energyWindow = 0.0
+        self.windowWeighting = 'oscillator'
 
         self.tasks = TaskRunner(synchronous, self)
         self.tasks.started.connect(self.busyStarted)
@@ -603,6 +702,8 @@ class Calculations(QObject):
         self.wfExciton = None  # (q index, exciton index)
         self.wfStates = None   # the states summed (1-based), and whether those degenerate were asked
         self.wfDegenerate = None
+        self.wfStateSum = None    # the states summed asked (stateSum), and their shares
+        self.wfShares = None
         # The band structure: the excitons last clicked (q index, indices), and what is shown
         self.bandStructureSelection = None
         self.bandStructureInfo = None
@@ -693,15 +794,46 @@ class Calculations(QObject):
         if bool(sum) != self.sumDegenerate:
             self.sumDegenerate = bool(sum)
             self.sumDegenerateChanged.emit(self.sumDegenerate)
+            self.stateSumChanged.emit()
 
-    def compositionMatches(self, degenerate):
-        """Whether the composition shown is that of the selected exciton, with `degenerate` as asked."""
+    @Slot(float)
+    def setEnergyWindow(self, window):
+        """The half-width (eV) of the energy window summed with the selected exciton; 0: none."""
+        window = max(0.0, float(window))
+        if window != self.energyWindow:
+            self.energyWindow = window
+            self.stateSumChanged.emit()
+
+    @Slot(str)
+    def setWindowWeighting(self, weighting):
+        """How the states of the energy window are weighted: 'oscillator' (strength) or 'equal'."""
+        if weighting not in WINDOW_WEIGHTINGS:
+            raise ValueError(f'Unknown weighting {weighting!r}')
+        if weighting != self.windowWeighting:
+            self.windowWeighting = weighting
+            if self.energyWindow:
+                self.stateSumChanged.emit()
+
+    def stateSum(self):
+        """The states summed with the selected exciton now (see the module function stateSum)."""
+        return stateSum(self.sumDegenerate, self.energyWindow, self.windowWeighting)
+
+    def compositionMatches(self, degenerate=None):
+        """
+        Whether the composition shown is that of the selected exciton, summing
+        the states of now (or with `degenerate` as asked and no window).
+        """
         c, selected = self.composition, self.selectedExciton
+        asked = self.stateSum() if degenerate is None else stateSum(degenerate)
         return (c is not None and selected is not None and (c['qIndex'], c['excIndex']) == tuple(selected[:2])
-                and c['degenerate'] == bool(degenerate))
+                and sameStateSum(c, asked))
 
-    def computeComposition(self, degenerate=True):
-        """The composition of the selected exciton, in the background (compositionReady when done)."""
+    def computeComposition(self, degenerate=None):
+        """
+        The composition of the selected exciton, summing the states of now (or
+        with `degenerate` as asked and no window), in the background
+        (compositionReady when done).
+        """
         if self.selectedExciton is None:
             if self.composition is not None:
                 self.composition = None
@@ -716,7 +848,8 @@ class Calculations(QObject):
             return self._failComposition(missing)
         o = self.dataset
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
-                         qIndex=qIndex, excIndex=excIndex, degenerate=degenerate, cache=self.compositionCache)
+                         qIndex=qIndex, excIndex=excIndex, cache=self.compositionCache,
+                         **(self.stateSum() if degenerate is None else stateSum(degenerate)))
 
         def compute(context):
             try:
@@ -774,7 +907,7 @@ class Calculations(QObject):
         o = self.dataset
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
                          qIndex=qIndex, excIndex=excIndex, particle=particle, cutoff_ry=cutoff,
-                         degenerate=self.sumDegenerate, cache=self.wavefunctionCache)
+                         cache=self.wavefunctionCache, **self.stateSum())
         self.tasks.submit(message, lambda context: computeParticleDensity(context, **arguments),
                           self._applyParticleDensity, key='particle-density')
 
@@ -1050,8 +1183,8 @@ class Calculations(QObject):
             self._applyBandStructure({'k': [], 'bands': [], 'weights': []})
             return
         arguments = dict(lattice=self.lattice, saveDir=o.saveDir, diagoDir=o.diagoDir, bseFile=o.bseFile(qIndex),
-                         qIndex=qIndex, excitonIndices=indices, degenerate=self.sumDegenerate, qBZ=o.qBZ,
-                         gw=o.gw, qpDir=o.qpDir, qpFile=o.qpFile)
+                         qIndex=qIndex, excitonIndices=indices, qBZ=o.qBZ,
+                         gw=o.gw, qpDir=o.qpDir, qpFile=o.qpFile, **self.stateSum())
         self.tasks.submit('Interpolating the excitonic band structure…',
                           lambda context: computeBandStructure(context, **arguments),
                           self._applyBandStructure, key='band-structure')
@@ -1103,7 +1236,7 @@ class Calculations(QObject):
                          q_index=q_index, exc_index=exc_index, fixed_particle=fixed_particle,
                          fixed_position=list(fixed_position if fixed_position is not None else [0, 0, 0]),
                          cutoff_ry=cutoff_ry, supercell=list(supercell if supercell is not None else [1, 1, 1]),
-                         cache=self.wavefunctionCache, block_size=block_size, degenerate=self.sumDegenerate)
+                         cache=self.wavefunctionCache, block_size=block_size, **self.stateSum())
         self.tasks.submit('Computing the exciton wave function…',
                           lambda context: computeWaveFunction(context, **arguments),
                           self._applyWaveFunction, key='wave-function')
@@ -1121,6 +1254,9 @@ class Calculations(QObject):
         self.wfExciton = (result['qIndex'], result['excIndex'])
         self.wfStates = list(result.get('states') or [result['excIndex']])
         self.wfDegenerate = result.get('degenerate')
+        self.wfStateSum = stateSum(result.get('degenerate', True), result.get('window', 0.0),
+                                   result.get('weighting', 'equal'))
+        self.wfShares = result.get('shares')
         self.wfComputed.emit()
 
     # Results in session files (see session.py)
@@ -1167,6 +1303,7 @@ class Calculations(QObject):
             arrays['particleDensity/density'] = np.asarray(d['density'], dtype=np.float32)
             meta['particleDensity'] = {key: d[key] for key in ('particle', 'qIndex', 'excIndex', 'states',
                                                                 'degenerate', 'cutoff', 'maxima', 'weightKept')}
+            meta['particleDensity'].update({key: d[key] for key in ('window', 'weighting', 'weightingUsed', 'shares') if key in d})
 
         if self.composition is not None:
             c = self.composition
@@ -1178,6 +1315,7 @@ class Calculations(QObject):
                                    'pairs': [list(p) for p in c['pairs']],
                                    'valence': [[b, w] for b, w in c['valence'].items()],
                                    'conduction': [[b, w] for b, w in c['conduction'].items()]}
+            meta['composition'].update({key: c[key] for key in ('window', 'weighting', 'weightingUsed', 'shares') if key in c})
 
         if includeWaveFunction and self.waveFunction is not None:
             # Single precision: plenty for a density relative to its maximum, half the size
@@ -1187,7 +1325,10 @@ class Calculations(QObject):
             meta['waveFunction'] = {'fixedParticle': self.wfFixedParticle, 'supercell': list(self.wfSupercell),
                                     'grid': list(self.wfGrid), 'fixedPosition': list(self.wfFixedPosition),
                                     'exciton': list(self.wfExciton),
-                                    'states': list(self.wfStates or []), 'degenerate': self.wfDegenerate}
+                                    'states': list(self.wfStates or []), 'degenerate': self.wfDegenerate,
+                                    'window': (self.wfStateSum or {}).get('window', 0.0),
+                                    'weighting': (self.wfStateSum or {}).get('weighting', 'equal'),
+                                    'shares': self.wfShares}
         return meta, arrays
 
     def restoreResults(self, meta, arrays):
@@ -1249,6 +1390,7 @@ class Calculations(QObject):
                 'fixedParticle': wf['fixedParticle'], 'supercell': list(wf['supercell']), 'grid': list(wf['grid']),
                 'fixedPosition': list(wf['fixedPosition']), 'qIndex': wf['exciton'][0], 'excIndex': wf['exciton'][1],
                 'states': wf.get('states') or None, 'degenerate': wf.get('degenerate'),
+                'window': wf.get('window', 0.0), 'weighting': wf.get('weighting', 'equal'), 'shares': wf.get('shares'),
             })
 
         if 'character' in meta and isinstance(meta['character'], dict):
@@ -1269,6 +1411,7 @@ class Calculations(QObject):
                 'pairs': [(int(v), int(cb), float(w)) for v, cb, w in c['pairs']],
                 'valence': {int(b): float(w) for b, w in c['valence']},
                 'conduction': {int(b): float(w) for b, w in c['conduction']},
+                **{key: c[key] for key in ('window', 'weighting', 'weightingUsed', 'shares') if key in c},
             })
 
         if 'selectedExciton' in meta:
@@ -1296,17 +1439,20 @@ class Calculations(QObject):
                 self.lattice = YamboLatticeDB.from_db(self.dataset.saveDir + '/ns.db1')
             if self.planeWaves is None:
                 self.planeWaves = PlaneWaves(self.dataset.saveDir, self.lattice)
-            key = (self.dataset.diagoDir, q_index, exc_index)
+            key = (self.dataset.diagoDir, q_index, exc_index, self.sumDegenerate, self.energyWindow)
             if key not in self.excitonSizes:
                 filename = self.dataset.bseFile(q_index)
-                excitonDB = YamboExcitonDB.from_db_file(self.lattice, filename=filename, folder=self.dataset.diagoDir,
-                                                        neigs=exc_index + 20)
+                window = self.energyWindow
+                excitonDB = YamboExcitonDB.from_db_file(
+                    self.lattice, filename=filename, folder=self.dataset.diagoDir,
+                    neigs=statesToLoad(self.lattice, self.dataset.diagoDir, filename, exc_index, window))
                 if exc_index > len(excitonDB.eigenvalues):
                     raise ValueError(f'Exciton {exc_index} does not exist: {filename} has '
                                      f'{len(excitonDB.eigenvalues)} excitons')
                 bands = int(np.max(excitonDB.table[:, 2])) - (int(np.min(excitonDB.table[:, 1])) - 1)
                 self.excitonSizes[key] = {
-                    'states': len(excitonDB.get_degenerate(exc_index, eps=DEGENERACY_EV)),
+                    'states': len(summed_states(excitonDB, exc_index, self.sumDegenerate, DEGENERACY_EV,
+                                                window=window)[0]),
                     'bands': bands,
                     # Coefficients: (states, ..., k-points, conduction, valence)
                     'kpoints': excitonDB.get_Akcv().shape[-3],
@@ -1317,8 +1463,6 @@ class Calculations(QObject):
             DATABASE_LOCK.release()
 
         size = dict(self.excitonSizes[key])
-        if not self.sumDegenerate:
-            size['states'] = 1          # the exciton alone
         fftBox = self.planeWaves.fftBox(cutoff_ry)
         supercell = [s + 1 - s % 2 for s in supercell]   # odd, as computed
         # A snapshot of the keys: the worker thread may be changing the cache

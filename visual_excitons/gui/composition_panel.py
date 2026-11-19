@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QL
 from visual_excitons.core.kspace import (planeMap, planeIndices, zonePoints, nearestSpecialPoint, planeBasis,
                                          TO_INVERSE_ANGSTROM)
 from visual_excitons.core.lattice_info import tickLabels
+from visual_excitons.core.calculations import describeStateSum
 from .persistence import PersistentState, GLOBAL, DATASET
 from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormapIcon
 from .axis_gizmo import AxisGizmo
@@ -580,13 +581,7 @@ class CompositionPanel(QWidget):
         if c is None:
             self.infoLabel.setText('Select an exciton in a spectrum.')
             return
-        states = c['states']
-        if len(states) > 1:
-            group = f'states {states[0]}–{states[-1]}' if states == list(range(states[0], states[-1] + 1)) \
-                else 'states ' + ', '.join(map(str, states))
-            summed = f', with the degenerate {group}'
-        else:
-            summed = ''
+        summed = describeStateSum(c, [c['excIndex']])
         q = np.asarray(c['red_qpoint'], dtype=float)
         atGamma = np.allclose(q - np.round(q), 0.0, atol=1e-6)
         where = 'Γ' if atGamma else '(' + ', '.join(fraction(x) for x in q) + ')'
