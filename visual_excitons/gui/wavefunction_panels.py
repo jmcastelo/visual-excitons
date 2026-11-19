@@ -93,6 +93,9 @@ class WavefunctionPanels(QObject):
         self.controls.showAxisLabelsChanged.connect(gizmo.setShowLabels)
         self.controls.showCellInfoChanged.connect(self.view.setShowCellInfo)
         self.controls.showCaptionChanged.connect(self.view.setShowCaption)
+        # The maxima selected in the placing list, marked in the view as the fixed particle is drawn
+        self.markedMaxima = []
+        self.controls.maximaMarkersChanged.connect(self.markMaxima)
         self.calculations.wfComputed.connect(self.updateCaption)
 
         # Initial view from the view widgets' default state
@@ -196,6 +199,7 @@ class WavefunctionPanels(QObject):
         self.view.clearWfItems()
         self.view.setCutPlane(None)
         self.view.setCaption(None)
+        self.markMaxima([])
         self.radialResult = None
         self.displayCache.clear()
         self.analysis.clear()
@@ -473,7 +477,22 @@ class WavefunctionPanels(QObject):
                                        uniformColor)
 
     @Slot()
+    def markMaxima(self, positions):
+        """Mark maxima of the particle density (crystal coordinates of the unit cell) where the particle would be."""
+        self.markedMaxima = list(positions)
+        self.updateMarkers()
+
+    def updateMarkers(self):
+        if not self.markedMaxima or not self.dataset.hasCell():
+            self.view.setMarkers([])
+            return
+        supercell, shift = self.parameters.supercell, self.shownShift()
+        cell = np.asarray(self.dataset.cell, dtype=float)
+        self.view.setMarkers([cell.T @ shiftCrystal(np.asarray(p, dtype=float) + np.asarray(supercell) // 2, shift,
+                                                    supercell) for p in self.markedMaxima])
+
     def translateFixedParticle(self):
+        self.updateMarkers()
         if not self.dataset.hasCell():
             return
         supercell = self.parameters.supercell

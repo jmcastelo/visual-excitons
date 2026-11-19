@@ -38,6 +38,11 @@ TRANSLUCENT_GL_OPTIONS = {
     'glBlendFuncSeparate': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA, GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA),
 }
 
+# Markers that must stay visible through the scene (e.g. maxima inside or behind atoms): drawn
+# last, over everything, translucent
+MARKER_STAGE = 2
+MARKER_GL_OPTIONS = {**TRANSLUCENT_GL_OPTIONS, GL.GL_DEPTH_TEST: False}
+
 # Multisample antialiasing for the 3D widgets
 MSAA_SAMPLES = 4
 

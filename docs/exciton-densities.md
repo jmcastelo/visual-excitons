@@ -225,7 +225,7 @@ The maximum did not move on the grid in any of them. The NTOs of a degenerate gr
 ## 10. In the program
 
 - `visual_excitons/yambopy_ext/bse/exciton_particle_density.py`: `particle_nto` (the NTOs of section 6), `wavefunction_grid` (the plane waves and grid of section 7), `exciton_particle_density` (the density on that grid), `density_maxima` (section 8). Written in YamboPy's conventions, to be contributed to it ([YamboPy issue 21](yambopy-issues.md)).
-- `Calculations.computeParticleDensity` runs it in the background for the exciton, cutoff and degenerate setting of the wave function; the [Placing the fixed particle](wavefunction.md#placing-the-fixed-particle) section of the Wave function controls shows the density at the fixed position, as a share of its largest, and places the particle at the maximum.
+- `Calculations.computeParticleDensity` runs it in the background for the exciton, cutoff and degenerate setting of the wave function; the [Placing the fixed particle](wavefunction.md#placing-the-fixed-particle) section of the Wave function controls shows the density at the fixed position, as a share of its largest, and lists its distinct maxima to place the particle at; with `Fix the particle at its density maximum` (on by default), each new exciton is computed with the particle at its largest maximum. The maxima are grouped in `core/placement.py` (`distinctMaxima`).
 - The developer's view: [Placing the fixed particle: particle densities](architecture.md#placing-the-fixed-particle-particle-densities) in the architecture guide. The checks of section 9 are in `tests/test_particle_density.py` (the identity against `ex_wf2Real` over one period, both particles) and the synthetic tests above.
 
 ## 11. Approximations and limits

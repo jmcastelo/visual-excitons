@@ -17,7 +17,8 @@ from .sorted_mesh_item import SortedMeshItem
 from .atom_labels_item import AtomLabelsItem
 from .axis_gizmo import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
-from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS,
+from .gl_style import (OPAQUE_STAGE, TRANSLUCENT_STAGE, OPAQUE_GL_OPTIONS, TRANSLUCENT_GL_OPTIONS, MARKER_STAGE,
+                       MARKER_GL_OPTIONS,
                        headlightShader, litEdgesShader, enableMultisampling, spheresMeshData, cylindersMeshData,
                        MSAA_SAMPLES, PrecomputedNormalsMeshData)
 from visual_excitons.core.atomic_data import covalent_radii, jmol_colors, chemical_symbols, ANGSTROM_TO_BOHR
@@ -388,6 +389,23 @@ class WavefunctionView(gl.GLViewWidget):
         self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=headlightShader,
                                                glOptions=OPAQUE_GL_OPTIONS, drawEdges=False)
         self.addItem(self.fixedParticleItem)
+
+    def setMarkers(self, positions):
+        """
+        Markers at `positions` (Cartesian, Bohr): maxima of the particle density; [] to remove them. Drawn
+        over the scene, translucent: maxima lie close to atoms, often inside or behind their spheres.
+        """
+        if getattr(self, 'markersItem', None) is not None:
+            self.removeItem(self.markersItem)
+            self.markersItem = None
+        if not len(positions):
+            return
+        n = len(positions)
+        meshData = spheresMeshData(np.asarray(positions, dtype=float), [0.6] * n, [[1.0, 0.55, 0.0, 0.75]] * n)
+        self.markersItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=headlightShader,
+                                         glOptions=MARKER_GL_OPTIONS, drawEdges=False)
+        self.markersItem.setDepthValue(MARKER_STAGE)
+        self.addItem(self.markersItem)
 
     def translateFixedParticle(self, position):
         self.fixedParticleItem.resetTransform()

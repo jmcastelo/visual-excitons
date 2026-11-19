@@ -65,12 +65,17 @@ def window(qtbot):
     themeManager().setMode('System')
 
 
+def gridPoint(position, shape):
+    return tuple(int(i) for i in np.rint(np.asarray(position) * np.asarray(shape)).astype(int) % np.asarray(shape))
+
+
 @pytest.mark.data
 def test_placing_the_fixed_particle(window, qtbot, tmp_path):
     import visual_excitons.gui.main_window as main_window
     window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
     controls, calc = window.wavefunction.controls, window.calculations
-    assert controls.densityReadout.text() == 'Not computed yet.' and not controls.placeAtMaximumButton.isEnabled()
+    assert controls.densityReadout.text() == 'Not computed yet.'
+    assert controls.maximaTable.isHidden() and controls.placeHereButton.isHidden()
     assert controls.computeDensityButton.text() == 'Compute the hole density'
     controls.fullCutoffCheckBox.setChecked(False)
     controls.wfCutoffSpinBox.setValue(5.0)
@@ -79,18 +84,30 @@ def test_placing_the_fixed_particle(window, qtbot, tmp_path):
     qtbot.waitUntil(lambda: calc.particleDensity is not None, timeout=120000)
     d = calc.particleDensity
     assert d['particle'] == 'h' and d['cutoff'] == 5.0 and d['density'].shape == (13, 13, 13)
-    assert 'Hole density here' in controls.densityReadout.text() and 'from I' in controls.densityReadout.text()
+    assert 'Hole density here' in controls.densityReadout.text()
 
-    # At the maximum: a grid point of the density, 100 %
-    controls.placeAtMaximumButton.click()
-    expected = np.array(d['maxima'][0]) / 13
-    assert np.allclose(window.wfParameters.position(), np.round(expected, 4))
-    assert '<b>100 %</b>' in controls.densityReadout.text()
+    # The distinct maxima: the largest first, near the iodine atoms, equivalent ones once
+    groups, table = controls.maximaGroups, controls.maximaTable
+    assert not table.isHidden() and table.rowCount() == len(groups) >= 2
+    assert table.item(0, 1).text() == '100 %' and table.item(0, 2).text() == 'I'
+    assert sum(len(g['members']) for g in groups) <= len(d['maxima'])
+    # Selecting one marks its copies in the view; placing puts the particle at one of them
+    with qtbot.waitSignal(controls.maximaMarkersChanged) as marked:
+        table.selectRow(1)
+    assert len(marked.args[0]) == len(groups[1]['members'])
+    assert window.wavefunction.markedMaxima == marked.args[0] and controls.placeHereButton.isEnabled()
+    controls.placeHereButton.click()
+    assert gridPoint(window.wfParameters.position(), (13, 13, 13)) in groups[1]['members']
+    assert table.item(1, 0).text() == '●' and table.item(0, 0).text() == ''
+    share = round(100 * groups[1]['share'])
+    assert f'<b>{share} %</b>' in controls.densityReadout.text()
+    controls.placeAtMaximum()
+    assert '<b>100 %</b>' in controls.densityReadout.text() and table.item(0, 0).text() == '●'
 
     # The electron: another density, not computed
     controls.particleTypeComboBox.setCurrentIndex(1)
     assert controls.computeDensityButton.text() == 'Compute the electron density'
-    assert controls.densityReadout.text().startswith('Out of date') and not controls.placeAtMaximumButton.isEnabled()
+    assert controls.densityReadout.text().startswith('Out of date') and controls.maximaTable.isHidden()
     controls.particleTypeComboBox.setCurrentIndex(0)
     assert '<b>100 %</b>' in controls.densityReadout.text()
 
@@ -100,6 +117,48 @@ def test_placing_the_fixed_particle(window, qtbot, tmp_path):
     window.openSession(str(path))
     assert calc.particleDensity is not None and calc.particleDensity['maxima'][0] == d['maxima'][0]
     assert '<b>100 %</b>' in controls.densityReadout.text()
+
+
+@pytest.mark.data
+def test_wave_function_at_the_density_maximum(window, qtbot):
+    """
+    With 'Fix the particle at its density maximum' (on by default), a new exciton
+    is computed with the particle at its maximum; a position chosen afterwards,
+    while that density is current, is kept; unticked, the position is used as it is.
+    """
+    import visual_excitons.gui.main_window as main_window
+    window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    controls, calc = window.wavefunction.controls, window.calculations
+    assert controls.atMaximumCheckBox.isChecked()
+    controls.fullCutoffCheckBox.setChecked(False)
+    controls.wfCutoffSpinBox.setValue(5.0)
+    controls.setSupercell([1, 1, 1])
+    controls.excitonIndexSpinBox.setValue(1)
+    window.wfParameters.setPosition([0.0, 0.0, 0.0])
+    assert controls.computeWf()
+    qtbot.waitUntil(lambda: calc.waveFunction is not None, timeout=180000)
+    d = calc.particleDensity
+    assert d is not None and (d['excIndex'], d['cutoff']) == (1, 5.0)
+    groups = controls.maximaGroups
+    assert gridPoint(calc.wfFixedPosition, (13, 13, 13)) in groups[0]['members']        # at the largest maximum
+
+    # Another site, chosen while the density is current: kept
+    controls.maximaTable.selectRow(1)
+    controls.placeAtSelected()
+    chosen = window.wfParameters.position()
+    calc.waveFunction = None
+    assert controls.computeWf()
+    qtbot.waitUntil(lambda: calc.waveFunction is not None, timeout=180000)
+    assert calc.particleDensity is d and np.allclose(calc.wfFixedPosition, chosen, atol=1e-4)
+
+    # Unticked: a new exciton at the position as it is
+    controls.atMaximumCheckBox.setChecked(False)
+    controls.excitonIndexSpinBox.setValue(2)
+    window.wfParameters.setPosition([0.5, 0.5, 0.5])
+    calc.waveFunction = None
+    assert controls.computeWf()
+    qtbot.waitUntil(lambda: calc.waveFunction is not None, timeout=180000)
+    assert calc.particleDensity is d and gridPoint(calc.wfFixedPosition, (13, 13, 13)) == gridPoint([0.5] * 3, (13,) * 3)
 
 
 @pytest.mark.data

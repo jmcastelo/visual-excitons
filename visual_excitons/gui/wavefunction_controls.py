@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer
 from PySide6.QtGui import QDoubleValidator, QValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
@@ -14,7 +15,8 @@ from .colormaps import COLORMAP_GROUPS, DEFAULT_COLORMAP, makeColormap, colormap
 from visual_excitons.core.cellshift import wrapShift
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
 from visual_excitons.core.memory import availableMemory, formatBytes
-from visual_excitons.core.placement import densityShare, nearestAtom, gridPosition
+from visual_excitons.core.placement import (densityShare, gridIndex, gridPosition, distinctMaxima, groupOf,
+                                            directionText, nearestMember)
 from visual_excitons.core.atomic_data import chemical_symbols
 
 # Warn when a calculation would use more than this fraction of the available memory
@@ -95,6 +97,8 @@ class WavefunctionControls(Inspector):
     showAxisLabelsChanged = Signal(bool)
     showCellInfoChanged = Signal(bool)
     showCaptionChanged = Signal(bool)
+    # The maxima of the particle density selected in the list (crystal coordinates of the unit cell), to mark
+    maximaMarkersChanged = Signal(list)
     isoSetStyleChanged = Signal(int)
     exportImageRequested = Signal()
     colormapChanged = Signal(object)   # pyqtgraph ColorMap
@@ -293,9 +297,18 @@ class WavefunctionControls(Inspector):
         form.addRow(self.particleGridLabel)
         form.addRow('Supercell:', supercellLayout)
         form.addRow('Cutoff:', cutoffLayout)
+        self.atMaximumCheckBox = QCheckBox('Fix the particle at its density maximum')
+        self.atMaximumCheckBox.setChecked(True)
+        self.atMaximumCheckBox.setToolTip('For a new exciton (or particle, cutoff, degenerate setting), compute the '
+                                          'density of the fixed particle first and put it at its largest maximum.\n'
+                                          'A position chosen afterwards, while that density stays current, is kept')
+        form.addRow(self.atMaximumCheckBox)
         form.addRow(computeWfButton)
         form.addRow(self.estimateNote)
         self.addSection('Calculation', form)
+        self.remember('atMaximum', self.atMaximumCheckBox)
+        # Waiting for the particle density to compute the wave function at its maximum (see computeWf)
+        self.pendingWaveFunction = False
 
         # Both positions, before the particle type that shows one of them
         def positionSetter(particle):
@@ -314,22 +327,42 @@ class WavefunctionControls(Inspector):
         """The own density of the fixed particle: how good its position is, and where it is largest."""
         self.computeDensityButton = QPushButton()
         self.computeDensityButton.clicked.connect(self.computeParticleDensity)
-        self.placeAtMaximumButton = QPushButton('Place at the maximum')
-        self.placeAtMaximumButton.setToolTip('Put the fixed particle where its own density is largest (a point of the '
-                                             'grid of the wave function at this cutoff)')
-        self.placeAtMaximumButton.clicked.connect(self.placeAtMaximum)
+        self.placeHereButton = QPushButton('Place here')
+        self.placeHereButton.setToolTip('Put the fixed particle at the maximum selected in the list (of its copies, the '
+                                        'one nearest its position): a point of the grid of the wave function')
+        self.placeHereButton.clicked.connect(self.placeAtSelected)
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.addWidget(self.computeDensityButton)
-        buttons.addWidget(self.placeAtMaximumButton)
+        buttons.addWidget(self.placeHereButton)
         buttons.addStretch(1)
         self.densityExplanation = NoteLabel()
         self.densityReadout = NoteLabel()
+        # The distinct maxima of the density (equivalent ones once), the largest first
+        self.maximaTable = QTableWidget(0, 6)
+        self.maximaTable.setHorizontalHeaderLabels(['', 'Density', 'Near', 'Distance', 'Direction from the atom',
+                                                    'Copies'])
+        self.maximaTable.verticalHeader().hide()
+        self.maximaTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.maximaTable.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.maximaTable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.maximaTable.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.maximaTable.horizontalHeader().setStretchLastSection(True)
+        self.maximaTable.setToolTip('The maxima of the density, equivalent ones (by symmetry) counted once. Select one to '
+                                    'see its copies in the 3D view; double-click it, or Place here, to put the particle '
+                                    'there. ● marks the one the particle is at')
+        self.maximaTable.itemSelectionChanged.connect(self.onMaximumSelected)
+        self.maximaTable.cellDoubleClicked.connect(lambda row, column: self.placeAtSelected())
+        self.maximaGroups, self.maximaDensity = [], None
         form = formLayout()
         form.addRow(self.densityExplanation)
         form.addRow(buttons)
         form.addRow(self.densityReadout)
+        form.addRow(self.maximaTable)
         self.addSection('Placing the fixed particle', form)
+        self.calculations.particleDensityReady.connect(self.onDensityForWaveFunction)
+        self.calculations.errorOccurred.connect(self.dropPendingWaveFunction)
+        self.calculations.taskCancelled.connect(self.dropPendingWaveFunction)
         # Whatever changes the density asked for, or the position it is read at
         for signal in (self.particleTypeComboBox.currentIndexChanged, self.qPointSpinBox.valueChanged,
                        self.excitonIndexSpinBox.valueChanged, self.wfCutoffSpinBox.valueChanged,
@@ -371,7 +404,7 @@ class WavefunctionControls(Inspector):
             f'The {fixed} density: where the {fixed} is, wherever the {other} is. Where it is small, the {other}\'s '
             f'density computed is weak and noisy; for bands of p or d character it vanishes on the atoms.')
         d = self.currentDensity()
-        self.placeAtMaximumButton.setEnabled(d is not None)
+        self.updateMaximaTable(d)
         if d is None:
             old = self.calculations.particleDensity
             if old is None:
@@ -386,24 +419,91 @@ class WavefunctionControls(Inspector):
         density = np.asarray(d['density'])
         share = densityShare(density, self.parameters.position())
         text = f'{fixed.capitalize()} density here: <b>{100 * share:.0f} %</b> of its largest'
-        if d['maxima'] and self.dataset.hasCell() and len(self.dataset.atomicNumbers):
-            maximum = gridPosition(d['maxima'][0], density.shape)
-            i, distance = nearestAtom(maximum, self.dataset.cell, self.dataset.atomicPositions)
-            text += f' (largest {distance:.2f} Å from {chemical_symbols[self.dataset.atomicNumbers[i]]})'
         if len(d['states']) > 1:
             text += f'; states {d["states"][0]}–{d["states"][-1]} summed'
         self.densityReadout.setText(text + '.')
 
+    def updateMaximaTable(self, d):
+        """The distinct maxima of the density `d` (None: not current), and which one the particle is at."""
+        density = None if d is None else np.asarray(d['density'])
+        if density is not self.maximaDensity:
+            self.maximaDensity = density
+            self.maximaGroups = []
+            if density is not None and self.dataset.hasCell():
+                layer = self.layer[0] if getattr(self, 'layer', None) is not None else None
+                self.maximaGroups = distinctMaxima(density, d['maxima'], self.dataset.cell,
+                                                   self.dataset.atomicPositions, self.dataset.atomicNumbers, layer)
+            self.maximaTable.blockSignals(True)
+            self.maximaTable.clearSelection()
+            self.maximaTable.setRowCount(len(self.maximaGroups))
+            for row, g in enumerate(self.maximaGroups):
+                cells = ['', f'{100 * g["share"]:.0f} %', chemical_symbols[g['element']], f'{g["distance"]:.2f} Å',
+                         directionText(g, chemical_symbols), f'×{len(g["members"])}']
+                for column, text in enumerate(cells):
+                    item = QTableWidgetItem(text)
+                    if column in (1, 3, 5):
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    self.maximaTable.setItem(row, column, item)
+            self.maximaTable.blockSignals(False)
+            self.onMaximumSelected()
+        self.maximaTable.setVisible(bool(self.maximaGroups))
+        self.placeHereButton.setVisible(bool(self.maximaGroups))
+        self.placeHereButton.setEnabled(bool(self.maximaTable.selectedItems()))
+        if self.maximaGroups:
+            here = groupOf(self.maximaGroups, gridIndex(self.parameters.position(), density.shape))
+            for row in range(self.maximaTable.rowCount()):
+                self.maximaTable.item(row, 0).setText('●' if row == here else '')
+            self.maximaTable.setFixedHeight(self.maximaTable.horizontalHeader().height()
+                                            + sum(self.maximaTable.rowHeight(r) for r in range(min(6, len(self.maximaGroups))))
+                                            + 2 * self.maximaTable.frameWidth())
+
+    def selectedMaximum(self):
+        rows = {item.row() for item in self.maximaTable.selectedItems()}
+        return self.maximaGroups[rows.pop()] if len(rows) == 1 and self.maximaGroups else None
+
     @Slot()
-    def placeAtMaximum(self):
-        d = self.currentDensity()
-        if d is None or not d['maxima']:
-            return
-        position = gridPosition(d['maxima'][0], np.asarray(d['density']).shape)
+    def onMaximumSelected(self):
+        g = self.selectedMaximum()
+        self.placeHereButton.setEnabled(g is not None)
+        shape = None if self.maximaDensity is None else self.maximaDensity.shape
+        self.maximaMarkersChanged.emit([] if g is None else [gridPosition(i, shape) for i in g['members']])
+
+    def placeAt(self, group):
+        """Put the particle at the copy of the maximum `group` nearest its position."""
+        index = nearestMember(group, self.parameters.position(), self.maximaDensity.shape, self.dataset.cell)
         for lineEdit, value in zip((self.xParticlePosLineEdit, self.yParticlePosLineEdit, self.zParticlePosLineEdit),
-                                   position):
+                                   gridPosition(index, self.maximaDensity.shape)):
             lineEdit.setText(f'{value + 0.0:.4f}')
         self.particlePositionChanged()
+
+    @Slot()
+    def placeAtSelected(self):
+        g = self.selectedMaximum()
+        if g is not None and self.currentDensity() is not None:
+            self.placeAt(g)
+
+    @Slot()
+    def placeAtMaximum(self):
+        """Put the particle at the largest maximum of its density (if current)."""
+        d = self.currentDensity()
+        self.updateMaximaTable(d)
+        if d is not None and self.maximaGroups:
+            self.placeAt(self.maximaGroups[0])
+
+    @Slot()
+    def onDensityForWaveFunction(self, *args):
+        """The density asked for by computeWf: the particle at its maximum, then the wave function."""
+        if not self.pendingWaveFunction:
+            return
+        self.pendingWaveFunction = False
+        if self.currentDensity() is None:          # the settings changed meanwhile
+            return
+        self.placeAtMaximum()
+        self.computeWf()
+
+    @Slot()
+    def dropPendingWaveFunction(self, *args):
+        self.pendingWaveFunction = False
 
     def buildDisplaySection(self):
         self.plotTypeComboBox = QComboBox()
@@ -1139,6 +1239,17 @@ class WavefunctionControls(Inspector):
 
     @Slot()
     def computeWf(self):
+        """
+        Compute the wave function; whether it started. With 'Fix the particle at
+        its density maximum', for a density not computed yet (a new exciton,
+        particle, cutoff or degenerate setting), the density first: the particle
+        then goes to its maximum (onDensityForWaveFunction).
+        """
+        if (self.atMaximumCheckBox.isChecked() and self.currentDensity() is None and self.dataset.saveDir
+                and self.dataset.diagoDir):
+            self.pendingWaveFunction = True
+            self.computeParticleDensity()
+            return True
         q_index = self.qPointIndex()
         exc_index = self.excitonIndexSpinBox.value()
         fixed_particle = self.parameters.particle
