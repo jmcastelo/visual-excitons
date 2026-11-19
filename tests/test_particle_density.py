@@ -278,3 +278,49 @@ def test_particle_density_is_drawn_over_the_supercell(window):
     # Another dataset: gone
     window.openDataset(main_window.findDataset(datasetPath('BN')))
     assert layers['particle'].meshSet is None and layers['particle'].mesh is None
+
+
+@pytest.mark.data
+def test_plane_cut_and_export_of_the_particle_density(window, qtbot, tmp_path, monkeypatch):
+    import visual_excitons.gui.main_window as main_window
+    window.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
+    panels, c, calc, analysis = window.wavefunction, window.wavefunction.controls, window.calculations, \
+        window.wavefunction.analysis
+    c.setSupercell([3, 1, 1])
+    c.showAnalysisCheckBox.setChecked(True)
+    c.cutDensityComboBox.setCurrentIndex(1)
+    assert 'Compute the particle' in analysis.cutNote.text()         # nothing to cut yet
+    assert not c.exportDensityButton.isEnabled()
+    fakeParticleDensity(calc)
+    assert c.cutDensityComboBox.itemText(1) == 'Hole density' and c.exportDensityComboBox.itemText(1) == 'Hole density'
+
+    # The plane cut: through the hole as set, with no wave function; the distances wait for one
+    cut, atoms, label, offset = analysis.lastCut
+    assert label == 'hole' and analysis.lastRadial is None and 'compute one' in analysis.statistics.text()
+    assert panels.view.cutPlaneItems                                  # the plane drawn in 3D
+    first = np.asarray(cut['values']).copy()
+    window.wfParameters.setPosition([0.1, 0.2, 0.3])
+    c.fixedParticlePosChanged.emit()                                  # another plane through the hole
+    assert not np.allclose(np.asarray(analysis.lastCut[0]['values']), first, equal_nan=True)
+    # In the particle density's colormap, whatever the wave function's
+    c.displayTabBar.setCurrentIndex(0)
+    c.colormapComboBox.setCurrentText('Magma')
+    assert analysis.colormap.name == window.wavefunction.controls.colormap('particle').name
+
+    # Exported over the supercell drawn
+    c.exportDensityComboBox.setCurrentIndex(1)
+    assert c.exportDensityButton.isEnabled()
+    target = tmp_path / 'hole.cube'
+    monkeypatch.setattr(main_window.QFileDialog, 'getSaveFileName', lambda *args, **kwargs: (str(target), ''))
+    with qtbot.waitSignal(calc.densityExported, timeout=30000):
+        window.exportDensity()
+    lines = target.read_text().splitlines()
+    assert 'Hole density of exciton 1 at Q-point 1' in lines[1] and 'supercell 3x1x1' in lines[1]
+    assert [int(line.split()[0]) for line in lines[3:6]] == [36, 12, 12]
+    # The wave function's: none yet
+    c.exportDensityComboBox.setCurrentIndex(0)
+    assert not c.exportDensityButton.isEnabled()
+
+    # Both choices kept between sessions
+    values = window.state.values(main_window.GLOBAL)
+    assert values['wavefunction/cutDensity'] == 'particle' and values['wavefunction/exportDensity'] == 'wf'

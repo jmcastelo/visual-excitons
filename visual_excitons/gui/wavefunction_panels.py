@@ -11,6 +11,7 @@ from .wavefunction_controls import WavefunctionControls
 from .axis_gizmo import AxisGizmo
 from .analysis_panel import AnalysisPanel
 from visual_excitons.core.analysis import (planeCut, atomsNearPlane, radialDistribution, planeSupercellPolygon,
+                                           voxelVectors,
                                            upsampleDensity)
 from visual_excitons.core.tasks import TaskContext
 from .wf_geometry import isoMesh, isoSetMesh, volumeColors
@@ -255,7 +256,12 @@ class WavefunctionPanels(QObject):
         self.calculations.wfComputed.connect(self.onWfComputedForAnalysis)
         self.controls.analysisChanged.connect(self.updateAnalysis)
         self.controls.planeFromViewRequested.connect(self.setPlaneFromView)
-        self.controls.colormapChanged.connect(self.analysis.setColormap)
+        # The colormap of the density cut
+        self.controls.colormapChanged.connect(self.updateCutColormap)
+        # A cut of the particle density follows it, and the particle as set
+        self.calculations.particleDensityReady.connect(lambda density: self.updateAnalysisOf('particle'))
+        self.controls.fixedParticlePosChanged.connect(lambda: self.updateAnalysisOf('particle'))
+        self.controls.supercellResized.connect(lambda: self.updateAnalysisOf('particle'))
 
         self.persistence = PersistentState()
         # The camera, with each dataset: restored after its lattice is drawn and
@@ -281,8 +287,19 @@ class WavefunctionPanels(QObject):
         self.controls.setPlaneFromView(toViewer, up)
 
     @Slot()
+    @Slot()
+    def updateCutColormap(self, *args):
+        self.analysis.setColormap(self.controls.colormap(self.controls.cutLayer()))
+
+    def updateAnalysisOf(self, layer):
+        """Update the analysis if its plane cut shows the density `layer`."""
+        if self.controls.cutLayer() == layer:
+            self.updateAnalysis()
+
     def updateAnalysis(self):
         """Update the analysis panel, if shown, and the plane in 3D."""
+        if self.controls.cutLayer() == 'particle':
+            return self.updateParticleCut()
         parameters, calc = self.controls, self.calculations
         shown = parameters.showAnalysisCheckBox.isChecked()
 
@@ -327,11 +344,61 @@ class WavefunctionPanels(QObject):
         polygon = planeSupercellPolygon(supercellVectors, shownPoint, normal) if plane['show3D'] else None
         self.view.setCutPlane(polygon)
 
+    def updateParticleCut(self):
+        """
+        The plane cut of the fixed particle's own density: through the particle
+        as set (it may not have a wave function yet), over the supercell drawn;
+        the distances stay those of the wave function, if there is one.
+        """
+        controls, calc = self.controls, self.calculations
+        d = calc.particleDensity
+        source = self.particleDisplay.source()
+        if not controls.showAnalysisCheckBox.isChecked() or source is None:
+            self.view.setCutPlane(None)
+            if d is None:
+                self.analysis.clear('Compute the particle\'s density (Placing the fixed particle) to see it on the plane.')
+            return
+        try:
+            plane = controls.planeSettings()
+        except ValueError as error:
+            controls.showPlaneStatus(str(error))
+            return
+        controls.showPlaneStatus('')
+        density, transform = source
+        lattice = np.asarray(self.dataset.cell, dtype=float)
+        supercell = [int(n) for n in self.parameters.supercell]
+        shift = snapShift(controls.cellShift(), d['density'].shape)
+        crystal = shiftCrystal(np.asarray(self.parameters.position(), dtype=float) + np.asarray(supercell) // 2, shift,
+                               supercell)
+        particle = lattice.T @ crystal
+        normal = plane['normal'] / np.linalg.norm(plane['normal'])
+        point = particle + plane['offset'] * normal
+        cut = planeCut(density, voxelVectors(lattice, supercell, density.shape), point, normal, inPlane=plane['up'],
+                       latticeVectors=lattice)
+        cell = calc.unitCell()
+        positions = np.asarray(cell['atomic_positions'], dtype=float)[:len(cell['atomic_numbers'])]
+        numbers, atoms = supercellAtoms(lattice, shiftAtoms(lattice, positions, shift), cell['atomic_numbers'], supercell)
+        near = atomsNearPlane(atoms, numbers, point, (cut['u'], cut['v'], cut['n']), plane['atoms'])
+        self.analysis.setColormap(controls.colormap('particle'))
+        self.analysis.showCut(cut, near, 'hole' if d['particle'] == 'h' else 'electron', plane['offset'])
+        if calc.probabilityDensity() is not None and calc.wfSupercell is not None:
+            if self.radialResult is None:
+                self.radialResult = radialDistribution(self.shiftedDensity(self.analysisShift()), calc.wfVoxels(),
+                                                       self.shownFixedCartesian(self.analysisShift()),
+                                                       periodic=periodicAxes(calc.wfSupercell, calc.kGrid()))
+            self.analysis.showRadial(self.radialResult, 'hole' if calc.wfFixedParticle == 'h' else 'electron')
+        else:
+            self.analysis.clearDistances('The distances are those of the wave function: compute one to see them.')
+        polygon = planeSupercellPolygon(lattice * np.asarray(supercell)[:, None], point, normal) if plane['show3D'] else None
+        self.view.setCutPlane(polygon)
+
     @Slot(str, str)
     def onDisplayChanged(self, layer, key):
         """A display setting changed: the particle density's go to it; the wave function's own signals do the rest."""
         if layer == 'particle':
             self.particleDisplay.onSettingChanged(key)
+            if key in ('colormap', 'colormapReversed') and self.controls.cutLayer() == 'particle':
+                self.updateCutColormap()
         elif key == 'show':
             self.view.layers['wf'].setShown(self.parameters.display['wf'].shown)
         if key == 'show':
@@ -440,6 +507,7 @@ class WavefunctionPanels(QObject):
         self.plotLattice()
         self.translateFixedParticle()
         self.particleDisplay.redraw()
+        self.updateAnalysisOf('particle')
         self.radialResult = None
         if self.calculations.probabilityDensity() is not None:
             self.displayCache.clear()

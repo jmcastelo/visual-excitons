@@ -1360,6 +1360,48 @@ class Calculations(QObject):
         return supercellAtoms(cell['base_lattice_vectors'], cell['atomic_positions'], cell['atomic_numbers'],
                               self.wfSupercell)
 
+    def exportParticleDensity(self, filename, supercell, shift=None):
+        """
+        Save the fixed particle's own density (particleDensity) with the atoms,
+        repeated over `supercell` (format from the extension: .cube or .xsf), in
+        the background; with `shift` (fractions of a, b, c), as shown with that
+        cell origin. Values relative to its largest.
+        """
+        name = 'hole' if self.particleDensity is None or self.particleDensity['particle'] == 'h' else 'electron'
+        message = f'Saving the {name} density…'
+        d = self.particleDensity
+        if d is None:
+            return self._reject(message, 'No particle density: compute one first (Placing the fixed particle).')
+        from .cellshift import snapShift, rollDensity, shiftAtoms
+        lattice = np.asarray(self.unitCell()['base_lattice_vectors'], dtype=float)
+        supercell = [int(n) for n in supercell]
+        grid = d['density'].shape
+        density = np.tile(np.asarray(d['density'], dtype=float) / (float(np.max(d['density'])) or 1.0), supercell)
+        cell = self.unitCell()
+        positions = np.asarray(cell['atomic_positions'], dtype=float)[:len(cell['atomic_numbers'])]
+        shift = snapShift(shift, grid) if shift is not None and any(shift) else None
+        if shift is not None:
+            density = rollDensity(density, shift, grid)
+            positions = shiftAtoms(lattice, positions, shift)
+        numbers, atomPositions = supercellAtoms(lattice, positions, cell['atomic_numbers'], supercell)
+        states = d['states']
+        which = f'exciton {d["excIndex"]}' if len(states) == 1 else f'excitons {states[0]}-{states[-1]}'
+        cutoff = 'all plane waves' if d['cutoff'] < 0 else f'{d["cutoff"]:g} Ry'
+        comment = (f'{name.capitalize()} density of {which} at Q-point {d["qIndex"] + 1}: where the {name} is, wherever '
+                   f'the {"electron" if name == "hole" else "hole"} is ({cutoff}); supercell {"x".join(map(str, supercell))};'
+                   f' values relative to the maximum')
+        if shift is not None:
+            comment += f'; cell origin shifted by {" ".join(f"{s:.4f}" for s in shift)} (fractions of a, b, c)'
+        arguments = dict(density=density, lattice=lattice, supercell=supercell, atomicNumbers=numbers,
+                         atomPositions=atomPositions, comment=comment)
+
+        def compute(context):
+            context.stage('Writing ' + str(filename).rsplit('/', 1)[-1])
+            writeDensity(filename, **arguments)
+            return filename
+
+        self.tasks.submit(message, compute, self.densityExported.emit)
+
     def exportDensity(self, filename, shift=None):
         """
         Save the probability density with the atoms of the supercell (format

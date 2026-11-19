@@ -149,6 +149,14 @@ class AnalysisPanel(QTabWidget):
         self.statistics.setText(message)
         self.warning.hide()
 
+    def clearDistances(self, message):
+        """Empty the distance distribution only (e.g. the plane cut shows a density without a wave function)."""
+        self.lastRadial = None
+        self.radialCurve.setData([], [])
+        self.cumulativeCurve.setData([], [])
+        self.statistics.setText(message)
+        self.warning.hide()
+
     def setColormap(self, colormap):
         self.colormap = colormap
         self.colorBar.setColorMap(colormap)

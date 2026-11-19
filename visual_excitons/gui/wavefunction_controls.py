@@ -719,7 +719,11 @@ class WavefunctionControls(Inspector):
         """The particle density's tab, named after its particle; it can be shown once computed."""
         d = self.calculations.particleDensity
         particle = d['particle'] if d is not None else self.parameters.particle
-        self.displayTabBar.setTabText(1, 'Hole density' if particle == 'h' else 'Electron density')
+        name = 'Hole density' if particle == 'h' else 'Electron density'
+        self.displayTabBar.setTabText(1, name)
+        for combo in (getattr(self, 'cutDensityComboBox', None), getattr(self, 'exportDensityComboBox', None)):
+            if combo is not None:
+                combo.setItemText(1, name)
         particleTab = self.displayLayer() == 'particle'
         self.showDensityCheckBox.setEnabled(not particleTab or d is not None)
         self.showDensityCheckBox.setToolTip('Compute it first (Placing the fixed particle)' if particleTab and d is None
@@ -1117,8 +1121,17 @@ class WavefunctionControls(Inspector):
         self.planeStatusLabel.setWordWrap(True)
         self.planeStatusLabel.hide()
 
+        # Which density the plane cut shows (the distance distribution is the wave function's)
+        self.cutDensityComboBox = QComboBox()
+        self.cutDensityComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.cutDensityComboBox.addItems(['Wave function', 'Hole density'])
+        self.cutDensityComboBox.setToolTip('The density on the plane: the wave function\'s, through its fixed particle '
+                                           'as computed; or the fixed particle\'s own, through it as set')
+        self.cutDensityComboBox.currentIndexChanged.connect(self.analysisChanged)
+
         form = formLayout()
         form.addRow(self.showAnalysisCheckBox)
+        form.addRow('Plane cut of:', self.cutDensityComboBox)
         form.addRow('Plane normal in:', self.planeBasisComboBox)
         form.addRow('Normal:', normalLayout)
         form.addRow('', fromViewButton)
@@ -1134,6 +1147,8 @@ class WavefunctionControls(Inspector):
                     lineEdit.setText(str(value))
             return dict(get=lambda: [lineEdit.text() for lineEdit in lineEdits], set=setVector)
         self.remember('showAnalysis', self.showAnalysisCheckBox)
+        self.remember('cutDensity', get=lambda: self.cutLayer(),
+                      set=lambda layer: self.cutDensityComboBox.setCurrentIndex(1 if layer == 'particle' else 0))
         self.remember('planeBasis', self.planeBasisComboBox)
         self.remember('planeNormal', **vector(self.planeNormalLineEdits))
         # The orientation of the cut taken from the view (after the normal, which
@@ -1176,6 +1191,23 @@ class WavefunctionControls(Inspector):
                 'atoms': self.planeAtomsSpinBox.value() * ANGSTROM_TO_BOHR,
                 'show3D': self.showPlaneCheckBox.isChecked()}
 
+    def cutLayer(self):
+        """The density of the plane cut: 'wf' or 'particle'."""
+        return 'particle' if self.cutDensityComboBox.currentIndex() == 1 else 'wf'
+
+    def exportLayer(self):
+        """The density exported: 'wf' or 'particle'."""
+        return 'particle' if self.exportDensityComboBox.currentIndex() == 1 else 'wf'
+
+    @Slot()
+    def updateExportDensity(self, *args):
+        """Density… is enabled when the density chosen exists."""
+        if not hasattr(self, 'exportDensityComboBox'):
+            return
+        calc = self.calculations
+        exists = calc.waveFunction is not None if self.exportLayer() == 'wf' else calc.particleDensity is not None
+        self.exportDensityButton.setEnabled(exists)
+
     def showPlaneStatus(self, message):
         self.planeStatusLabel.setText(message)
         self.planeStatusLabel.setVisible(bool(message))
@@ -1190,7 +1222,16 @@ class WavefunctionControls(Inspector):
                                             'XSF file for VESTA, VMD, XCrySDen, Ovito... (Ctrl+Shift+E)')
         self.exportDensityButton.setEnabled(False)
         self.exportDensityButton.clicked.connect(self.exportDensityRequested)
-        self.calculations.wfComputed.connect(lambda: self.exportDensityButton.setEnabled(True))
+        # Which density: the wave function's, or the fixed particle's own (over the supercell drawn)
+        self.exportDensityComboBox = QComboBox()
+        self.exportDensityComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.exportDensityComboBox.addItems(['Wave function', 'Hole density'])
+        self.exportDensityComboBox.setToolTip('The density saved by Density…: the wave function\'s, or the fixed '
+                                              'particle\'s own, repeated over the supercell drawn')
+        self.exportDensityComboBox.currentIndexChanged.connect(self.updateExportDensity)
+        self.calculations.wfComputed.connect(self.updateExportDensity)
+        self.calculations.particleDensityReady.connect(self.updateExportDensity)
+        self.calculations.resultsChanged.connect(self.updateExportDensity)
 
         layout = QHBoxLayout()
         layout.addWidget(imageButton)
@@ -1201,8 +1242,15 @@ class WavefunctionControls(Inspector):
         self.exportShiftedCheckBox.setChecked(True)
         self.exportShiftedCheckBox.setToolTip('Untick for the cell of the calculation, unshifted')
         self.remember('exportShifted', self.exportShiftedCheckBox)
+        densityRow = QHBoxLayout()
+        densityRow.addWidget(QLabel('Density:'))
+        densityRow.addWidget(self.exportDensityComboBox)
+        densityRow.addStretch(1)
+        self.remember('exportDensity', get=lambda: self.exportLayer(),
+                      set=lambda layer: self.exportDensityComboBox.setCurrentIndex(1 if layer == 'particle' else 0))
         column = QVBoxLayout()
         column.addLayout(layout)
+        column.addLayout(densityRow)
         column.addWidget(self.exportShiftedCheckBox)
         self.addSection('Export', column, expanded=False)
 

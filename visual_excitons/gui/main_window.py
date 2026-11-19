@@ -1347,7 +1347,13 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def exportDensity(self):
-        if self.calculations.waveFunction is None:
+        controls = self.wavefunction.controls
+        particle = controls.exportLayer() == 'particle'
+        if particle and self.calculations.particleDensity is None:
+            QMessageBox.information(self, 'Export probability density',
+                                    'Compute the particle\'s density first (Placing the fixed particle).')
+            return
+        if not particle and self.calculations.waveFunction is None:
             QMessageBox.information(self, 'Export probability density', 'Compute a wave function first.')
             return
         filters = 'Gaussian cube (*.cube);;XCrySDen XSF (*.xsf)'
@@ -1359,8 +1365,12 @@ class MainWindow(QMainWindow):
             filename += '.xsf' if 'xsf' in chosenFilter else '.cube'
         self.rememberExportFolder(filename)
         # As shown (with the cell origin), or as computed
-        shifted = self.wavefunction.controls.exportShiftedCheckBox.isChecked()
-        self.calculations.exportDensity(filename, self.wavefunction.shownShift() if shifted else None)
+        shifted = controls.exportShiftedCheckBox.isChecked()
+        if particle:
+            self.calculations.exportParticleDensity(filename, self.wfParameters.supercell,
+                                                    controls.cellShift() if shifted else None)
+        else:
+            self.calculations.exportDensity(filename, self.wavefunction.shownShift() if shifted else None)
 
     # Misc
 
