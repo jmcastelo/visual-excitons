@@ -370,6 +370,7 @@ def test_new_session(newWindow, monkeypatch, tmp_path):
     from PySide6.QtWidgets import QMessageBox
     folder = datasetPath('BiI3_Bulk_8x8x8')
     w = newWindow()
+    w.keepResultsAction.setChecked(False)      # without results kept between runs: untitled results would be lost
     w.openDataset(main_window.findDataset(folder))
     assert w.startPage.isHidden() and shownTitle(w) == 'Untitled — BiI3_Bulk_8x8x8 — Visual Excitons'
     gizmo = w.wavefunction.view.gizmo
@@ -424,6 +425,7 @@ def test_saving_an_untitled_session_when_asked(newWindow, monkeypatch, tmp_path)
     import visual_excitons.gui.main_window as main_window
     from PySide6.QtWidgets import QMessageBox
     w = newWindow()
+    w.keepResultsAction.setChecked(False)      # without results kept between runs: untitled results would be lost
     w.openDataset(main_window.findDataset(datasetPath('BiI3_Bulk_8x8x8')))
     injectResults(w)
     path = tmp_path / 'asked.vxsession'
@@ -442,6 +444,7 @@ def test_directories_chosen_by_hand(newWindow, monkeypatch, tmp_path):
     import visual_excitons.gui.main_window as main_window
     bii3 = datasetPath('BiI3_Bulk_8x8x8')
     w = newWindow()
+    w.keepResultsAction.setChecked(False)      # without results kept between runs: untitled results would be lost
     w.openDataset(main_window.findDataset(bii3))
     warnings = []
     monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda *args: warnings.append(args[2]))

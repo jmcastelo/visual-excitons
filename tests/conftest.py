@@ -113,6 +113,14 @@ def isolatedSettings(tmp_path_factory):
     yield directory
 
 
+@pytest.fixture(autouse=True)
+def isolatedResultsCache(tmp_path, monkeypatch):
+    """Each test its own cache of results between runs (see MainWindow.resultsCacheFolder): none left by another."""
+    folder = tmp_path / 'results-cache'
+    monkeypatch.setenv('VISUAL_EXCITONS_RESULTS_CACHE', str(folder))
+    return folder
+
+
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_runtest_teardown(item):
     """

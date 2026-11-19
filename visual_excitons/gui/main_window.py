@@ -5,6 +5,7 @@ status bar and persistent settings frame them.
 """
 
 import json
+import os
 
 import numpy as np
 from pathlib import Path
@@ -19,6 +20,7 @@ from visual_excitons.core.parameters import SpectraParameters, WavefunctionParam
 from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
 from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
+from visual_excitons.core.results_cache import ResultsCache, WAVEFUNCTION_LIMIT
 from .system_panel import SystemPanel
 from .start_page import StartPage
 from .composition_panel import CompositionPanel
@@ -43,6 +45,14 @@ MAX_RECENT_DATASETS = 8
 
 # Narrowest width of the control panels
 MIN_CONTROLS_WIDTH = 260
+
+
+def resultsCacheFolder():
+    """Where the results of the datasets are kept between runs (VISUAL_EXCITONS_RESULTS_CACHE overrides it: tests)."""
+    override = os.environ.get('VISUAL_EXCITONS_RESULTS_CACHE')
+    if override:
+        return Path(override)
+    return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)) / 'results'
 
 
 class MainWindow(QMainWindow):
@@ -188,6 +198,7 @@ class MainWindow(QMainWindow):
             ['planeCut' if self.wavefunction.analysis.currentIndex() == 0 else 'distance']))
         # Symmetry and spin (on request), kept on disk between sessions: the representation matrices
         self.calculations.diskCacheFolder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)
+        self.resultsCache = ResultsCache(resultsCacheFolder())
         self.compositionPanel.characterRequested.connect(self.calculations.computeCharacter)
         self.calculations.characterReady.connect(self.compositionPanel.setCharacter)
         self.calculations.characterReady.connect(self.updateCharacterSummary)
@@ -294,6 +305,19 @@ class MainWindow(QMainWindow):
                                                'shown at once when opened (larger files)')
         self.sessionResultsAction.toggled.connect(lambda store: self.settings.setValue('sessionResults', store))
         fileMenu.addAction(self.sessionResultsAction)
+        self.keepResultsAction = QAction('Keep results between runs', self)
+        self.keepResultsAction.setCheckable(True)
+        self.keepResultsAction.setChecked(self.settings.value('cacheResults', True, type=bool))
+        self.keepResultsAction.setStatusTip('Keep the results of each dataset when it is left or the program closed, '
+                                            'and show them again when it is opened (if its databases did not change)')
+        self.keepResultsAction.toggled.connect(lambda keep: self.settings.setValue('cacheResults', keep))
+        # The timer is made after the menus: looked up when toggled
+        self.keepResultsAction.toggled.connect(lambda keep: self.modifiedTimer.start())
+        fileMenu.addAction(self.keepResultsAction)
+        clearCacheAction = QAction('Clear kept results', self)
+        clearCacheAction.setStatusTip('Forget the results kept for every dataset between runs')
+        clearCacheAction.triggered.connect(self.clearResultsCache)
+        fileMenu.addAction(clearCacheAction)
 
         fileMenu.addSeparator()
         exportImageAction = QAction('&Export 3D view as image…', self)
@@ -667,8 +691,14 @@ class MainWindow(QMainWindow):
                                 f'{dataset["save"]}\n\nYou can choose it in the System panel.')
         self.openDataset(dataset)
 
-    def openDataset(self, dataset):
-        # Keep the parameters of the dataset being left
+    def openDataset(self, dataset, restoreCached=True):
+        """
+        Open `dataset` (dict of its directories, QP file, GW; Q-path and state if
+        saved), with the results kept for it from the last time if
+        `restoreCached` (and Keep results between runs).
+        """
+        # Keep the results and the parameters of the dataset being left
+        self.cacheResults()
         self.storeDatasetState()
         # Saving now must not overwrite the session of another setup
         self.sessionPath = None
@@ -700,6 +730,47 @@ class MainWindow(QMainWindow):
         self.addRecentDataset(self.datasetRecord)
         self.updateDatasetLabel()
         self.setStartPageShown(False)
+        if restoreCached:
+            message = self.restoreCachedResults()
+            if message:
+                self.statusBar().showMessage(message, 8000)
+
+    # Results kept between runs
+
+    def cacheResults(self):
+        """Keep the results of the dataset open (wave functions up to WAVEFUNCTION_LIMIT), for the next time."""
+        if self.datasetRecord is None or not self.keepResultsAction.isChecked():
+            return
+        calc = self.calculations
+        wf = calc.waveFunction
+        # Never in the way of opening another dataset or closing the program: a failure is only reported
+        try:
+            meta, arrays = calc.resultsSnapshot(includeWaveFunction=wf is not None
+                                                and wf.size * 4 <= WAVEFUNCTION_LIMIT)
+            if meta:
+                self.resultsCache.store(self.datasetRecord, meta, arrays, programVersion=__version__)
+        except Exception as error:
+            self.statusBar().showMessage(f'The results could not be kept for the next time: {error}', 8000)
+
+    def restoreCachedResults(self):
+        """Show the results kept for the dataset just opened, if any; what happened, for the status bar ('' if nothing)."""
+        if self.datasetRecord is None or not self.keepResultsAction.isChecked():
+            return ''
+        cached, reason = self.resultsCache.load(self.datasetRecord)
+        if cached is None:
+            return reason[:1].upper() + reason[1:] if reason else ''
+        meta, arrays = cached
+        try:
+            self.calculations.restoreResults(meta, arrays)
+        except Exception as error:     # from an incompatible version, or damaged
+            self.resultsCache.path(self.datasetRecord).unlink(missing_ok=True)
+            return f'The results kept from the last time could not be shown ({error})'
+        return 'The results of the last time were restored'
+
+    @Slot()
+    def clearResultsCache(self):
+        freed = self.resultsCache.clear()
+        self.statusBar().showMessage(f'Kept results cleared ({freed / 2 ** 20:.1f} MB)', 6000)
 
     def setStartPageShown(self, shown):
         self.startPage.setVisible(shown)
@@ -712,7 +783,8 @@ class MainWindow(QMainWindow):
         if not self.maybeSaveSession('starting a new session'):
             return
         self.calculations.cancel()
-        # Its parameters stay with it, for when it is opened again
+        # Its results and parameters stay with it, for when it is opened again
+        self.cacheResults()
         self.storeDatasetState()
         self.datasetRecord = None
         self.sessionPath = None
@@ -777,6 +849,8 @@ class MainWindow(QMainWindow):
             self.openDataset({'save': path, 'diago': o.diagoDir or None, 'qp': o.qpDir or None,
                               'qpFile': o.qpFile or None, 'gw': o.gw})
             return
+        # The results of the directories in use, kept with them before they go
+        self.cacheResults()
         if kind == 'diago':
             o.setDiagoDir(path)
             # The excitons may be others: everything computed from them goes
@@ -795,6 +869,7 @@ class MainWindow(QMainWindow):
         """With or without the QP corrections: the energies change, the spectra go."""
         if self.datasetRecord is None or bool(self.datasetRecord.get('gw')) == gw:
             return            # opening a dataset, which sets it
+        self.cacheResults()
         self.datasetRecord['gw'] = gw
         self.calculations.resetSpectra()
         self.addRecentDataset(self.datasetRecord)
@@ -810,6 +885,8 @@ class MainWindow(QMainWindow):
         if self.datasetRecord is None:
             return
         changed = (self.datasetRecord.get('qp'), self.datasetRecord.get('qpFile')) != (self.dataset.qpDir, name)
+        if changed and self.dataset.gw:
+            self.cacheResults()           # those of the QP database in use, before they go
         self.datasetRecord['qp'], self.datasetRecord['qpFile'] = self.dataset.qpDir, name
         if changed and self.dataset.gw and self.calculations.hasResults():
             self.calculations.resetSpectra()
@@ -954,9 +1031,10 @@ class MainWindow(QMainWindow):
         # included) are restored when it is opened, after its lattice is drawn
         self.state.restore(GLOBAL, state.get('global', {}))
         dataset['state'] = state.get('dataset', {})
-        self.openDataset(dataset)
-
         results = manifest.get('results') or {}
+        # The session's own results, if it has them; else those kept from the last time
+        self.openDataset(dataset, restoreCached=not results)
+
         message = f'Session {Path(path).stem} opened'
         if results:
             if fingerprintsMatch(datasetFingerprint(dataset), manifest.get('fingerprint', {}), strict=not relocated):
@@ -1002,9 +1080,10 @@ class MainWindow(QMainWindow):
         if self.sessionPath is not None:
             modified = self.sessionSignature() != self.savedSignature
         else:
-            # Not saved yet: only results would be lost (the parameters stay with the dataset)
+            # Not saved yet: only results would be lost (the parameters stay with the dataset), unless they are
+            # kept between runs
             modified = (self.datasetRecord is not None and self.sessionResultsAction.isChecked()
-                        and self.calculations.hasResults())
+                        and not self.keepResultsAction.isChecked() and self.calculations.hasResults())
         if modified != self.isWindowModified():
             self.setWindowModified(modified)
 
@@ -1238,6 +1317,7 @@ class MainWindow(QMainWindow):
         # Stop the calculations; the running one ends at its next progress check
         self.calculations.cancel()
         self.calculations.tasks.waitForDone(10000)
+        self.cacheResults()
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('panels', self.panels.saveState())
         self.panels.recordHomes()
