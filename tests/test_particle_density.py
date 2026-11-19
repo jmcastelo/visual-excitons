@@ -96,6 +96,11 @@ def test_placing_the_fixed_particle(window, qtbot, tmp_path):
         table.selectRow(1)
     assert len(marked.args[0]) == len(groups[1]['members'])
     assert window.wavefunction.markedMaxima == marked.args[0] and controls.placeHereButton.isEnabled()
+    # Marks off and on again
+    controls.showMaximaCheckBox.setChecked(False)
+    assert window.wavefunction.markedMaxima == []
+    controls.showMaximaCheckBox.setChecked(True)
+    assert len(window.wavefunction.markedMaxima) == len(groups[1]['members'])
     controls.placeHereButton.click()
     assert gridPoint(window.wfParameters.position(), (13, 13, 13)) in groups[1]['members']
     assert table.item(1, 0).text() == '●' and table.item(0, 0).text() == ''

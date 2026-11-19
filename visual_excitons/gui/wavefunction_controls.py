@@ -333,8 +333,13 @@ class WavefunctionControls(Inspector):
         self.placeHereButton.clicked.connect(self.placeAtSelected)
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
+        self.showMaximaCheckBox = QCheckBox('Mark in the 3D view')
+        self.showMaximaCheckBox.setChecked(True)
+        self.showMaximaCheckBox.setToolTip('Mark the copies of the maximum selected in the list in the 3D view')
+        self.showMaximaCheckBox.toggled.connect(self.onMaximumSelected)
         buttons.addWidget(self.computeDensityButton)
         buttons.addWidget(self.placeHereButton)
+        buttons.addWidget(self.showMaximaCheckBox)
         buttons.addStretch(1)
         self.densityExplanation = NoteLabel()
         self.densityReadout = NoteLabel()
@@ -360,6 +365,7 @@ class WavefunctionControls(Inspector):
         form.addRow(self.densityReadout)
         form.addRow(self.maximaTable)
         self.addSection('Placing the fixed particle', form)
+        self.remember('showMaxima', self.showMaximaCheckBox)
         self.calculations.particleDensityReady.connect(self.onDensityForWaveFunction)
         self.calculations.errorOccurred.connect(self.dropPendingWaveFunction)
         self.calculations.taskCancelled.connect(self.dropPendingWaveFunction)
@@ -448,6 +454,7 @@ class WavefunctionControls(Inspector):
             self.onMaximumSelected()
         self.maximaTable.setVisible(bool(self.maximaGroups))
         self.placeHereButton.setVisible(bool(self.maximaGroups))
+        self.showMaximaCheckBox.setVisible(bool(self.maximaGroups))
         self.placeHereButton.setEnabled(bool(self.maximaTable.selectedItems()))
         if self.maximaGroups:
             here = groupOf(self.maximaGroups, gridIndex(self.parameters.position(), density.shape))
@@ -466,7 +473,8 @@ class WavefunctionControls(Inspector):
         g = self.selectedMaximum()
         self.placeHereButton.setEnabled(g is not None)
         shape = None if self.maximaDensity is None else self.maximaDensity.shape
-        self.maximaMarkersChanged.emit([] if g is None else [gridPosition(i, shape) for i in g['members']])
+        marked = g is not None and self.showMaximaCheckBox.isChecked()
+        self.maximaMarkersChanged.emit([gridPosition(i, shape) for i in g['members']] if marked else [])
 
     def placeAt(self, group):
         """Put the particle at the copy of the maximum `group` nearest its position."""

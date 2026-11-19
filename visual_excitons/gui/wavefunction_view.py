@@ -384,8 +384,11 @@ class WavefunctionView(gl.GLViewWidget):
         self.bondsItem.setVisible(self.latticeVisible and self.bondsVisible)
         self.addItem(self.bondsItem)
 
+    # Radius of the fixed particle's sphere, and of the markers of the places it could go (Bohr)
+    FIXED_PARTICLE_RADIUS = 0.3
+
     def plotFixedParticle(self):
-        meshData = spheresMeshData([[0.0, 0.0, 0.0]], [0.3], [[1.0, 1.0, 1.0, 1.0]])
+        meshData = spheresMeshData([[0.0, 0.0, 0.0]], [self.FIXED_PARTICLE_RADIUS], [[1.0, 1.0, 1.0, 1.0]])
         self.fixedParticleItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=headlightShader,
                                                glOptions=OPAQUE_GL_OPTIONS, drawEdges=False)
         self.addItem(self.fixedParticleItem)
@@ -401,7 +404,8 @@ class WavefunctionView(gl.GLViewWidget):
         if not len(positions):
             return
         n = len(positions)
-        meshData = spheresMeshData(np.asarray(positions, dtype=float), [0.6] * n, [[1.0, 0.55, 0.0, 0.75]] * n)
+        meshData = spheresMeshData(np.asarray(positions, dtype=float), [self.FIXED_PARTICLE_RADIUS] * n,
+                                   [[1.0, 0.55, 0.0, 0.75]] * n)
         self.markersItem = gl.GLMeshItem(meshdata=meshData, smooth=True, shader=headlightShader,
                                          glOptions=MARKER_GL_OPTIONS, drawEdges=False)
         self.markersItem.setDepthValue(MARKER_STAGE)
