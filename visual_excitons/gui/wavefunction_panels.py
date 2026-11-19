@@ -27,9 +27,149 @@ from visual_excitons.core.cellshift import (detectLayer, shiftAtoms, shiftCrysta
                                             periodicAxes, seamAxes)
 from visual_excitons.core.export import supercellAtoms
 from visual_excitons.core.atomic_data import ANGSTROM_TO_BOHR
+from .colormaps import makeColormap
 
 # Color of the bonds in uniform coloring mode
 BOND_GREY = (0.6, 0.6, 0.6)
+
+
+class ParticleDensityDisplay:
+    """
+    The fixed particle's own density in the 3D view (Calculations.particleDensity,
+    on the unit-cell grid of the wave function), relative to its largest value:
+    repeated exactly over the supercell drawn (it is periodic with the lattice),
+    shifted with the cell origin, and drawn in its own layer with its own
+    settings (WavefunctionParameters.display['particle']).
+    """
+
+    def __init__(self, panels):
+        self.panels = panels
+        self.sourceKey, self.sourceDensity = None, None
+        self.upsampled = {}
+        self.request = None
+
+    @property
+    def settings(self):
+        return self.panels.parameters.display['particle']
+
+    @property
+    def layer(self):
+        return self.panels.view.layers['particle']
+
+    def source(self):
+        """The density over the supercell drawn, shifted, and its grid-to-space transform; None if there is none."""
+        panels = self.panels
+        d = panels.calculations.particleDensity
+        if d is None or not panels.dataset.hasCell():
+            return None
+        density = d['density']
+        grid = density.shape
+        supercell = [int(n) for n in panels.parameters.supercell]
+        shift = snapShift(panels.controls.cellShift(), grid)
+        key = (id(density), tuple(supercell), tuple(round(s * g) for s, g in zip(shift, grid)))
+        if key != self.sourceKey:
+            top = float(np.max(density)) or 1.0
+            tiled = np.tile(np.asarray(density, dtype=float) / top, supercell)
+            if any(shift):
+                tiled = rollDensity(tiled, shift, grid)
+            self.sourceKey, self.sourceDensity = key, tiled
+            self.upsampled = {}
+        transform = np.eye(4)
+        transform[:3, :3] = np.asarray(panels.dataset.cell, dtype=float).T * np.asarray(supercell) / np.asarray(
+            self.sourceDensity.shape)
+        return self.sourceDensity, transform
+
+    def plot(self, onlyIfMissing=False):
+        """Draw the plot type set (the others are drawn again when chosen); nothing while switched off."""
+        source = self.source()
+        if source is None:
+            self.layer.clear()
+            return
+        s = self.settings
+        self.layer.setShown(s.shown)
+        if not s.shown:
+            return
+        plotType = s.plotType
+        if onlyIfMissing and self.layer.itemExists(plotType):
+            self.layer.showItem(plotType)
+            return
+        density, transform = source
+        colormap = makeColormap(s.colormap, s.reversed)
+        self.layer.colormap = colormap
+        if plotType == 0:
+            level = s.isoLevel
+            make, work, message = (lambda d, c: isoMesh(d, level)), density.size, 'Preparing the isosurface…'
+        elif plotType == 1:
+            levels, opacity = s.numIsoLevels, s.isoSetOpacity
+            make = lambda d, c: isoSetMesh(d, levels, colormap, opacity, c)
+            work, message = density.size * levels, 'Preparing the isosurfaces…'
+        else:
+            opacity, contrast, slices = s.volumeOpacity, s.volumeContrast, s.sliceDensity
+            make = lambda d, c: volumeColors(d, colormap, opacity, contrast, slices)
+            work, message = density.size, 'Preparing the volume…'
+        factor = s.smoothing
+        transform = transform.copy()
+        transform[:3, :3] /= factor
+        cached = density if factor == 1 else self.upsampled.get(factor)
+        request = self.request = object()
+
+        def compute(context):
+            displayed = cached
+            if displayed is None:
+                context.stage('Smoothing the density')
+                displayed = upsampleDensity(density, factor)
+            return displayed, make(displayed, context)
+
+        def apply(result):
+            if self.request is not request or self.sourceDensity is not density:
+                return                       # outdated: a newer request, or another density
+            displayed, geometry = result
+            if factor > 1:
+                self.upsampled = {factor: displayed}
+            for index, clear in enumerate((self.layer.clearMesh, self.layer.clearMeshSet, self.layer.clearVolume)):
+                if index != plotType:
+                    clear()
+            matrix = transform.tolist()
+            if plotType == 0:
+                self.layer.showIsoMesh(geometry, s.isoLevel, matrix, s.isoOpacity)
+            elif plotType == 1:
+                self.layer.setIsoSetStyle(s.isoSetStyle)
+                self.layer.showIsoSetMesh(geometry, matrix)
+            else:
+                self.layer.showVolume(geometry, s.sliceDensity, matrix)
+            self.layer.showItem(plotType)
+
+        tasks = self.panels.calculations.tasks
+        if cached is not None and work * factor ** 3 <= INLINE_DISPLAY_WORK:
+            tasks.dropPending('display-particle')
+            apply(compute(TaskContext()))
+        else:
+            tasks.submit(message, compute, apply, key='display-particle')
+
+    def onSettingChanged(self, key):
+        """A display setting of the particle density changed: what it affects, drawn again."""
+        s, layer = self.settings, self.layer
+        if key == 'show':
+            if s.shown:
+                self.plot(onlyIfMissing=True)
+            else:
+                layer.setShown(False)
+        elif key == 'plotType':
+            self.plot(onlyIfMissing=True)
+        elif key == 'isoOpacity':
+            layer.setIsoOpacity(s.isoOpacity, s.isoLevel)
+        elif key == 'isoSetOpacity':
+            layer.setIsoSetOpacity(s.isoSetOpacity)
+        elif key == 'isoSetStyle':
+            layer.setIsoSetStyle(s.isoSetStyle)
+        else:                                 # colormap, smoothing, levels, volume: everything drawn again
+            layer.clear()
+            self.plot()
+
+    def redraw(self):
+        """The density, supercell or cell origin changed."""
+        self.layer.clear()
+        self.plot()
 
 
 class WavefunctionPanels(QObject):
@@ -97,6 +237,13 @@ class WavefunctionPanels(QObject):
         self.markedMaxima = []
         self.controls.maximaMarkersChanged.connect(self.markMaxima)
         self.calculations.wfComputed.connect(self.updateCaption)
+
+        # The fixed particle's own density, drawn in its own layer (see ParticleDensityDisplay)
+        self.particleDisplay = ParticleDensityDisplay(self)
+        self.controls.displayChanged.connect(self.onDisplayChanged)
+        self.calculations.particleDensityReady.connect(lambda density: self.particleDisplay.redraw())
+        self.calculations.particleDensityReady.connect(self.updateCaption)
+        self.controls.supercellResized.connect(self.particleDisplay.redraw)
 
         # Initial view from the view widgets' default state
         self.controls.applyView()
@@ -180,23 +327,40 @@ class WavefunctionPanels(QObject):
         polygon = planeSupercellPolygon(supercellVectors, shownPoint, normal) if plane['show3D'] else None
         self.view.setCutPlane(polygon)
 
+    @Slot(str, str)
+    def onDisplayChanged(self, layer, key):
+        """A display setting changed: the particle density's go to it; the wave function's own signals do the rest."""
+        if layer == 'particle':
+            self.particleDisplay.onSettingChanged(key)
+        elif key == 'show':
+            self.view.layers['wf'].setShown(self.parameters.display['wf'].shown)
+        if key == 'show':
+            self.updateCaption()
+
     @Slot(bool)
-    def updateCaption(self):
+    def updateCaption(self, *args):
         """Say in the view what it shows: the density of which particle, of which exciton, the other fixed where."""
-        calc = self.calculations
-        if calc.waveFunction is None:
-            self.view.setCaption(None)
-            return
-        fixed, free = ('hole', 'Electron') if calc.wfFixedParticle == 'h' else ('electron', 'Hole')
-        q, exc = calc.wfExciton
-        states = calc.wfStates or [exc]
-        which = f'exciton {exc}' if len(states) == 1 else f'excitons {states[0]}–{states[-1]}'
-        position = ', '.join(f'{float(x) % 1.0 + 0.0:.4f}' for x in calc.wfFixedPosition)
-        self.view.setCaption(f'{free} density of {which} at Q{q + 1}<br>{fixed} fixed at ({position})')
+        calc, display = self.calculations, self.parameters.display
+
+        def which(exc, states):
+            states = states or [exc]
+            return f'exciton {exc}' if len(states) == 1 else f'excitons {states[0]}–{states[-1]}'
+        lines = []
+        if calc.waveFunction is not None and display['wf'].shown:
+            fixed, free = ('hole', 'Electron') if calc.wfFixedParticle == 'h' else ('electron', 'Hole')
+            q, exc = calc.wfExciton
+            position = ', '.join(f'{float(x) % 1.0 + 0.0:.4f}' for x in calc.wfFixedPosition)
+            lines.append(f'{free} density of {which(exc, calc.wfStates)} at Q{q + 1}<br>{fixed} fixed at ({position})')
+        d = calc.particleDensity
+        if d is not None and display['particle'].shown:
+            name = 'Hole' if d['particle'] == 'h' else 'Electron'
+            lines.append(f'{name} density of {which(d["excIndex"], d["states"])} at Q{d["qIndex"] + 1}')
+        self.view.setCaption('<br>'.join(lines) or None)
 
     def onDatasetChanged(self, found: bool):
         """Drop the wave function of the previous dataset and draw the new lattice."""
         self.view.clearWfItems()
+        self.view.layers['particle'].clear()
         self.view.setCutPlane(None)
         self.view.setCaption(None)
         self.markMaxima([])
@@ -275,6 +439,7 @@ class WavefunctionPanels(QObject):
             return
         self.plotLattice()
         self.translateFixedParticle()
+        self.particleDisplay.redraw()
         self.radialResult = None
         if self.calculations.probabilityDensity() is not None:
             self.displayCache.clear()

@@ -710,7 +710,10 @@ def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window,
     p3.smoothingComboBox.setCurrentIndex(0)
     calc.wfComputed.emit()                        # 36^3 x 10 levels: inline
     assert not calc.isBusy() and view.wfMeshItemSet is not None
-    small = len(view.wfIsoFacesSet)
+
+    def faces():
+        return view.layers['wf'].meshDataSet.faceCount()
+    small = faces()
 
     # Smoothing 3x: upsampled in the background
     p3.smoothingComboBox.setCurrentIndex(2)
@@ -719,12 +722,12 @@ def test_display_is_prepared_in_the_background_and_only_the_latest_shown(window,
     p3.smoothingComboBox.setCurrentIndex(0)
     qtbot.waitUntil(lambda: not calc.isBusy(), timeout=20000)
     qtbot.wait(50)
-    assert len(view.wfIsoFacesSet) == small
+    assert faces() == small
 
     p3.smoothingComboBox.setCurrentIndex(1)
     qtbot.waitUntil(lambda: not calc.isBusy(), timeout=20000)
     qtbot.wait(50)
-    assert len(view.wfIsoFacesSet) > 2 * small
+    assert faces() > 2 * small
     p3.smoothingComboBox.setCurrentIndex(0)
     calc.waveFunction = None
 

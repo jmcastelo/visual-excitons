@@ -14,6 +14,7 @@ import numpy as np
 from PySide6.QtWidgets import QLabel
 
 from .sorted_mesh_item import SortedMeshItem
+from .density_layer import DensityLayer
 from .atom_labels_item import AtomLabelsItem
 from .axis_gizmo import cellInfoHtml
 from .volume_item import volumeRGBA, FloatVolumeItem
@@ -29,28 +30,15 @@ class WavefunctionView(gl.GLViewWidget):
     def __init__(self, parent = None):
         gl.GLViewWidget.__init__(self, parent, rotationMethod='quaternion')
 
-        self.colormap = pg.colormap.get('viridis')
+        # The densities drawn: the wave function's and the fixed particle's own (see DensityLayer)
+        self.layers = {'wf': DensityLayer(self), 'particle': DensityLayer(self)}
 
         # Smooth edges of atoms, lines and surfaces
         enableMultisampling(self)
 
-        # Shader of the isosurface set (see setIsoSetStyle)
-        self.isoSetShader = litEdgesShader
-
         self.setCameraPosition(distance=75)
         self.setBackgroundColor((255, 255, 255, 255))
         self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.NoPartialUpdate)
-
-        self.wfIsoMeshData = None
-
-        self.wfIsoVerticesSet = np.empty((0, 3), dtype=float)
-        self.wfIsoFacesSet = np.empty((0, 3), dtype=int)
-        self.wfIsoColorsSet = np.empty((0, 4), dtype=float)
-        self.wfIsoMeshDataSet = None
-
-        self.wfMeshItem = None
-        self.wfMeshItemSet = None
-        self.wfVolItem = None
 
         self.latticeBoundaryItems = []
         self.latticeItems = []
@@ -115,64 +103,51 @@ class WavefunctionView(gl.GLViewWidget):
         x = m
         self.gizmo.move(x, y)
 
-    def itemExists(self, index: int):
-        if index == 0:
-            return self.wfMeshItem is not None
-        elif index == 1:
-            return self.wfMeshItemSet is not None
-            # return len(self.wfMeshItemSet) > 0
-        elif index == 2:
-            return self.wfVolItem is not None
-        else:
-            return False
+    # The wave function's density (layer 'wf'), as the rest of the program has always used it; the particle
+    # density through its layer, self.layers['particle']
+
+    @property
+    def colormap(self):
+        return self.layers['wf'].colormap
+
+    @colormap.setter
+    def colormap(self, colormap):
+        self.layers['wf'].colormap = colormap
+
+    @property
+    def isoSetShader(self):
+        return self.layers['wf'].isoSetShader
+
+    @property
+    def wfMeshItem(self):
+        return self.layers['wf'].mesh
+
+    @property
+    def wfMeshItemSet(self):
+        return self.layers['wf'].meshSet
+
+    @property
+    def wfVolItem(self):
+        return self.layers['wf'].volume
+
+    def itemExists(self, index: int, layer='wf'):
+        return self.layers[layer].itemExists(index)
 
     @Slot(int)
-    def showItem(self, index: int):
-        if self.wfMeshItem is not None:
-            self.wfMeshItem.setVisible(index == 0)
-
-        # if len(self.wfMeshItemSet) > 0:
-        #     for item in self.wfMeshItemSet:
-        #         item.setVisible(index == 1)
-
-        if self.wfMeshItemSet is not None:
-            self.wfMeshItemSet.setVisible(index == 1)
-
-        if self.wfVolItem is not None:
-            self.wfVolItem.setVisible(index == 2)
+    def showItem(self, index: int, layer='wf'):
+        self.layers[layer].showItem(index)
 
     def clearWfItems(self):
-        self.clearWfVolItem()
-        self.clearWfMeshItem()
-        self.clearWfMeshItemSet()
+        self.layers['wf'].clear()
 
     def clearWfVolItem(self):
-        if self.wfVolItem is not None:
-            self.removeItem(self.wfVolItem)
-            self.wfVolItem = None
+        self.layers['wf'].clearVolume()
 
     def clearWfMeshItem(self):
-        if self.wfMeshItem is not None:
-            self.removeItem(self.wfMeshItem)
-            self.wfMeshItem = None
+        self.layers['wf'].clearMesh()
 
     def clearWfMeshItemSet(self):
-        if self.wfMeshItemSet is not None:
-            self.removeItem(self.wfMeshItemSet)
-            self.wfMeshItemSet = None
-
-            self.wfIsoVerticesSet = np.empty((0, 3), dtype=float)
-            self.wfIsoFacesSet = np.empty((0, 3), dtype=int)
-            self.wfIsoColorsSet = np.empty((0, 4), dtype=float)
-
-    # def clearWfMeshItemSet(self):
-    #     if len(self.wfMeshItemSet) > 0:
-    #         for item in self.wfMeshItemSet:
-    #             self.removeItem(item)
-    #         self.wfMeshItemSet.clear()
-    #         self.wfIsoVerticesSet.clear()
-    #         self.wfIsoFacesSet.clear()
-    #         self.wfIsoColorsSet.clear()
+        self.layers['wf'].clearMeshSet()
 
     def clearLatticeBoundaryItems(self):
         if len(self.latticeBoundaryItems) > 0:
@@ -198,44 +173,14 @@ class WavefunctionView(gl.GLViewWidget):
     # Probability density: geometry computed by wf_geometry (possibly in the
     # worker thread), uploaded here
 
-    def showIsoMesh(self, mesh, level, transform, opacity):
-        """The isosurface at `level`: `mesh` = (vertices, faces, normals) from wf_geometry.isoMesh."""
-        vertices, faces, normals = mesh
-        color = self.colormap.mapToQColor(level)
-        self.wfIsoMeshData = PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces)
+    def showIsoMesh(self, mesh, level, transform, opacity, layer='wf'):
+        self.layers[layer].showIsoMesh(mesh, level, transform, opacity)
 
-        self.clearWfMeshItem()
-        # Faces are drawn back to front for correct transparency
-        self.wfMeshItem = SortedMeshItem(meshdata=self.wfIsoMeshData, shader=headlightShader, smooth=True)
-        self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
-        self.wfMeshItem.setGLOptions(TRANSLUCENT_GL_OPTIONS)
-        self.wfMeshItem.setDepthValue(TRANSLUCENT_STAGE)
-        self.wfMeshItem.setTransform(pg.Transform3D(transform))
-        self.addItem(self.wfMeshItem)
+    def showIsoSetMesh(self, mesh, transform, layer='wf'):
+        self.layers[layer].showIsoSetMesh(mesh, transform)
 
-    def showIsoSetMesh(self, mesh, transform):
-        """The isosurface set: `mesh` = (vertices, faces, normals, colors) from wf_geometry.isoSetMesh."""
-        vertices, faces, normals, colors = mesh
-        self.clearWfMeshItemSet()
-        self.wfIsoVerticesSet, self.wfIsoFacesSet, self.wfIsoColorsSet = vertices, faces, colors
-        self.wfIsoMeshDataSet = PrecomputedNormalsMeshData(normals, vertexes=vertices, faces=faces, vertexColors=colors)
-
-        # All levels in one mesh, so faces of different levels are sorted together
-        self.wfMeshItemSet = SortedMeshItem(meshdata=self.wfIsoMeshDataSet, shader=self.isoSetShader, smooth=True)
-        self.wfMeshItemSet.setGLOptions(TRANSLUCENT_GL_OPTIONS)
-        self.wfMeshItemSet.setDepthValue(TRANSLUCENT_STAGE)
-        self.wfMeshItemSet.setTransform(pg.Transform3D(transform))
-        self.addItem(self.wfMeshItemSet)
-
-    def showVolume(self, rgba, sliceDensity, transform):
-        """The volume: `rgba` from wf_geometry.volumeColors."""
-        self.clearWfVolItem()
-        # Translucent like the isosurfaces: drawn after opaque items and writing no
-        # depth, otherwise even its invisible slices would hide what is drawn later
-        self.wfVolItem = FloatVolumeItem(data=rgba, sliceDensity=sliceDensity, glOptions=TRANSLUCENT_GL_OPTIONS)
-        self.wfVolItem.setDepthValue(TRANSLUCENT_STAGE)
-        self.wfVolItem.setTransform(pg.Transform3D(transform))
-        self.addItem(self.wfVolItem)
+    def showVolume(self, rgba, sliceDensity, transform, layer='wf'):
+        self.layers[layer].showVolume(rgba, sliceDensity, transform)
 
     def plotBaseLatticeVectors(self, baseVectors):
         # Cartesian axes and lattice vectors are only shown in the axes gizmo
@@ -326,11 +271,9 @@ class WavefunctionView(gl.GLViewWidget):
         self.updateCellInfo()
 
     @Slot(int)
-    def setIsoSetStyle(self, index: int):
+    def setIsoSetStyle(self, index: int, layer='wf'):
         """0: lit surfaces with emphasized edges, 1: edges only (x-ray look)."""
-        self.isoSetShader = litEdgesShader if index == 0 else 'balloon'
-        if self.wfMeshItemSet is not None:
-            self.wfMeshItemSet.setShader(self.isoSetShader)
+        self.layers[layer].setIsoSetStyle(index)
 
     def plotUnitCellBoundaries(self, baseVectors, offset):
         a, b, c = (np.asarray(v, dtype=float) for v in baseVectors[:3])
@@ -522,17 +465,12 @@ class WavefunctionView(gl.GLViewWidget):
             self.gizmo.sync()
 
     @Slot(float, float)
-    def setIsoOpacity(self, opacity: float, level: float):
-        if self.wfMeshItem is not None:
-            color = self.colormap.mapToQColor(level)
-            self.wfMeshItem.setColor((color.redF(), color.greenF(), color.blueF(), opacity))
+    def setIsoOpacity(self, opacity: float, level: float, layer='wf'):
+        self.layers[layer].setIsoOpacity(opacity, level)
 
     @Slot(float)
-    def setIsoSetOpacity(self, opacity: float):
-        if self.wfMeshItemSet is not None:
-            self.wfIsoColorsSet[:, 3] = opacity
-            self.wfIsoMeshDataSet.setVertexColors(self.wfIsoColorsSet)
-            self.wfMeshItemSet.setMeshData(meshdata=self.wfIsoMeshDataSet)
+    def setIsoSetOpacity(self, opacity: float, layer='wf'):
+        self.layers[layer].setIsoSetOpacity(opacity)
 
     @Slot()
     def sceneBounds(self):
@@ -548,7 +486,8 @@ class WavefunctionView(gl.GLViewWidget):
                 mapped = transform.map(QVector3D(*map(float, corner)))
                 boxes.append((mapped.x(), mapped.y(), mapped.z()))
 
-        meshes = self.latticeItems + [self.bondsItem, self.wfMeshItem, self.wfMeshItemSet]
+        meshes = self.latticeItems + [self.bondsItem] + [item for layer in self.layers.values()
+                                                         for item in (layer.mesh, layer.meshSet)]
         for item in meshes:
             if item is None or not item.visible():
                 continue
@@ -559,9 +498,9 @@ class WavefunctionView(gl.GLViewWidget):
             if item.visible() and item.pos is not None and len(item.pos):
                 points = np.asarray(item.pos)
                 add(item, points.min(axis=0), points.max(axis=0))
-        if self.wfVolItem is not None and self.wfVolItem.visible():
-            shape = np.asarray(self.wfVolItem.data.shape[:3], dtype=float)
-            add(self.wfVolItem, np.zeros(3), shape)
+        for layer in self.layers.values():
+            if layer.volume is not None and layer.volume.visible():
+                add(layer.volume, np.zeros(3), np.asarray(layer.volume.data.shape[:3], dtype=float))
         if not boxes:
             return None
         points = np.array(boxes)

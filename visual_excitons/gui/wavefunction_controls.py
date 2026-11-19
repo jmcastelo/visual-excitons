@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer
 from PySide6.QtGui import QDoubleValidator, QValidator
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QSpinBox, QLineEdit, QGridLayout
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QCheckBox, QLabel, QDoubleSpinBox, QMessageBox, QWidget, QVBoxLayout
-from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QTabBar
 import numpy as np
 
 from visual_excitons.core.calculations import Calculations
@@ -104,6 +104,8 @@ class WavefunctionControls(Inspector):
     colormapChanged = Signal(object)   # pyqtgraph ColorMap
     analysisChanged = Signal()
     smoothingChanged = Signal(int)   # display upsampling factor
+    # A display setting of a density changed: its layer ('wf' or 'particle') and the setting (DISPLAY_KEYS)
+    displayChanged = Signal(str, str)
     planeFromViewRequested = Signal()
     exportDensityRequested = Signal()
 
@@ -500,69 +502,73 @@ class WavefunctionControls(Inspector):
 
     @Slot()
     def onDensityForWaveFunction(self, *args):
-        """The density asked for by computeWf: the particle at its maximum, then the wave function."""
-        if not self.pendingWaveFunction:
+        """
+        A particle density computed: with 'Fix the particle at its density
+        maximum', the particle goes to its maximum (whichever button computed
+        it; not one restored from a session or the kept results, which comes
+        with its own position), and the wave function asked for by computeWf
+        follows.
+        """
+        pending, self.pendingWaveFunction = self.pendingWaveFunction, False
+        if self.currentDensity() is None:          # not the one asked for now (or the settings changed meanwhile)
             return
-        self.pendingWaveFunction = False
-        if self.currentDensity() is None:          # the settings changed meanwhile
-            return
-        self.placeAtMaximum()
-        self.computeWf()
+        if self.atMaximumCheckBox.isChecked() and not self.calculations.restoringResults:
+            self.placeAtMaximum()
+        if pending:
+            self.computeWf()
 
     @Slot()
     def dropPendingWaveFunction(self, *args):
         self.pendingWaveFunction = False
 
-    def buildDisplaySection(self):
-        self.plotTypeComboBox = QComboBox()
-        self.plotTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.plotTypeComboBox.addItems(['Isosurface', 'Isosurface set', 'Volumetric'])
-        self.plotTypeComboBox.currentIndexChanged.connect(self.plotTypeChanged)
+    # The densities drawn, each with its own settings (DisplaySettings): the Display section shows those of
+    # the tab chosen. Setting keys as kept between sessions (the wave function's unchanged; the particle
+    # density's prefixed with 'particleDisplay/'), and their widgets' values
+    PLOT_TYPES = ['Isosurface', 'Isosurface set', 'Volumetric']
+    SMOOTHINGS = ['None', '2×', '3×']
+    ISO_SET_STYLES = ['Lit, edges emphasized', 'Edges only (x-ray)']
+    LAYERS = ['wf', 'particle']
 
+    def buildDisplaySection(self):
         self.isoLevelTickMax = 1000
         self.opacityTickMax = 1000
 
         def fraction(tickMax):
             return lambda tick: f'{tick / tickMax:.2f}'
 
-        isoLevelSlider = ValueSlider(0, self.isoLevelTickMax, round(self.parameters.isoLevel * self.isoLevelTickMax), fraction(self.isoLevelTickMax))
-        isoLevelSlider.setToolTip('Probability density of the isosurface, relative to its maximum')
-        isoLevelSlider.valueChanged.connect(self.setIsoLevel)
+        self.displayTabBar = QTabBar()
+        self.displayTabBar.addTab('Wave function')
+        self.displayTabBar.addTab('Hole density')
+        self.displayTabBar.setDocumentMode(True)
+        self.displayTabBar.setExpanding(False)
+        self.displayTabBar.setToolTip('The density whose settings are shown: the wave function\'s, or the fixed '
+                                      'particle\'s own (Placing the fixed particle)')
+        self.showDensityCheckBox = QCheckBox('Show in the 3D view')
 
-        numIsoLevelsSpinBox = QSpinBox(minimum=1, maximum=999)
-        numIsoLevelsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        numIsoLevelsSpinBox.setValue(self.parameters.numIsoLevels)
-        numIsoLevelsSpinBox.valueChanged.connect(self.setNumIsoLevels)
+        self.plotTypeComboBox = QComboBox()
+        self.plotTypeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.plotTypeComboBox.addItems(self.PLOT_TYPES)
 
-        isoSetStyleComboBox = QComboBox()
-        isoSetStyleComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        isoSetStyleComboBox.addItems(['Lit, edges emphasized', 'Edges only (x-ray)'])
-        isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
-        isoSetStyleComboBox.currentIndexChanged.connect(self.isoSetStyleChanged)
-
-        isoOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.isoOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
-        isoOpacitySlider.valueChanged.connect(self.setIsoOpacity)
-
-        isoSetOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.isoSetOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
-        isoSetOpacitySlider.valueChanged.connect(self.setIsoSetOpacity)
-
-        volumeOpacitySlider = ValueSlider(0, self.opacityTickMax, round(self.parameters.volumeOpacity * self.opacityTickMax), fraction(self.opacityTickMax))
-        volumeOpacitySlider.setToolTip('Opacity along the densest line of sight through the density')
-        volumeOpacitySlider.valueChanged.connect(self.setVolumeOpacity)
-
-        volumeContrastSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10.0, singleStep=0.1, decimals=2)
-        volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        volumeContrastSpinBox.setValue(self.parameters.volumeContrast)
-        volumeContrastSpinBox.setToolTip('Power applied to the density for the opacity:\n'
-                                         'above 1 fades low densities so the core stands out,\n'
-                                         'below 1 brings out the low-density tails')
-        volumeContrastSpinBox.valueChanged.connect(self.setVolumeContrast)
-
-        sliceDensitySpinBox = QSpinBox(minimum=1, maximum=999)
-        sliceDensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        sliceDensitySpinBox.setValue(self.parameters.sliceDensity)
-        sliceDensitySpinBox.setToolTip('Rendering quality: more slices give a smoother volume')
-        sliceDensitySpinBox.valueChanged.connect(self.setSliceDensity)
+        self.isoLevelSlider = ValueSlider(0, self.isoLevelTickMax, 500, fraction(self.isoLevelTickMax))
+        self.isoLevelSlider.setToolTip('Density of the isosurface, relative to its maximum')
+        self.numIsoLevelsSpinBox = QSpinBox(minimum=1, maximum=999)
+        self.numIsoLevelsSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.isoSetStyleComboBox = QComboBox()
+        self.isoSetStyleComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.isoSetStyleComboBox.addItems(self.ISO_SET_STYLES)
+        self.isoSetStyleComboBox.setToolTip('Shading of the isosurface set')
+        self.isoOpacitySlider = ValueSlider(0, self.opacityTickMax, 300, fraction(self.opacityTickMax))
+        self.isoSetOpacitySlider = ValueSlider(0, self.opacityTickMax, 100, fraction(self.opacityTickMax))
+        self.volumeOpacitySlider = ValueSlider(0, self.opacityTickMax, 800, fraction(self.opacityTickMax))
+        self.volumeOpacitySlider.setToolTip('Opacity along the densest line of sight through the density')
+        self.volumeContrastSpinBox = QDoubleSpinBox(minimum=0.1, maximum=10.0, singleStep=0.1, decimals=2)
+        self.volumeContrastSpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.volumeContrastSpinBox.setToolTip('Power applied to the density for the opacity:\n'
+                                              'above 1 fades low densities so the core stands out,\n'
+                                              'below 1 brings out the low-density tails')
+        self.sliceDensitySpinBox = QSpinBox(minimum=1, maximum=999)
+        self.sliceDensitySpinBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.sliceDensitySpinBox.setToolTip('Rendering quality: more slices give a smoother volume')
 
         # Colormap of the density, for all plot types
         self.colormapComboBox = QComboBox()
@@ -575,82 +581,215 @@ class WavefunctionControls(Inspector):
                 self.colormapComboBox.addItem(label)
                 self.colormapComboBox.setItemData(self.colormapComboBox.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
         self.colormapComboBox.setCurrentText(DEFAULT_COLORMAP)
-        self.colormapComboBox.setToolTip('Colors of the probability density, from low to high')
-
+        self.colormapComboBox.setToolTip('Colors of the density, from low to high')
         self.reverseColormapCheckBox = QCheckBox('Reverse')
         self.reverseColormapCheckBox.setToolTip('High densities in the colors of low ones and vice versa')
-
         colormapLayout = QHBoxLayout()
         colormapLayout.addWidget(self.colormapComboBox)
         colormapLayout.addWidget(self.reverseColormapCheckBox)
         colormapLayout.addStretch(1)
 
-        self.colormapComboBox.currentIndexChanged.connect(self.onColormapChanged)
-        self.reverseColormapCheckBox.toggled.connect(self.onColormapChanged)
-        self.updateColormapIcons()
-
-        form = formLayout()
-        form.addRow('Plot type:', self.plotTypeComboBox)
-        form.addRow('Colormap:', colormapLayout)
         self.smoothingComboBox = QComboBox()
         self.smoothingComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.smoothingComboBox.addItems(['None', '2×', '3×'])
+        self.smoothingComboBox.addItems(self.SMOOTHINGS)
         self.smoothingComboBox.setToolTip('Display the density on a grid 2 or 3 times finer, interpolated smoothly:\n'
                                           'smoother isosurfaces and volume, with no new physical detail\n'
                                           '(that needs a higher cutoff). Analysis and exports use the real grid.')
-        self.smoothingComboBox.currentIndexChanged.connect(lambda index: self.smoothingChanged.emit(index + 1))
-        self.smoothingComboBox.currentIndexChanged.connect(self.requestEstimate)
-        form.addRow('Smoothing:', self.smoothingComboBox)
-        form.addRow('Iso level:', isoLevelSlider)
-        form.addRow('Levels:', numIsoLevelsSpinBox)
-        form.addRow('Style:', isoSetStyleComboBox)
-        form.addRow('Opacity:', isoOpacitySlider)
-        form.addRow('Opacity:', isoSetOpacitySlider)
-        form.addRow('Opacity:', volumeOpacitySlider)
-        form.addRow('Contrast:', volumeContrastSpinBox)
-        form.addRow('Slices per voxel:', sliceDensitySpinBox)
 
-        # Rows shown only for the plot types they apply to
-        # (0: isosurface, 1: isosurface set, 2: volumetric)
+        form = formLayout()
+        form.addRow(self.displayTabBar)
+        form.addRow(self.showDensityCheckBox)
+        form.addRow('Plot type:', self.plotTypeComboBox)
+        form.addRow('Colormap:', colormapLayout)
+        form.addRow('Smoothing:', self.smoothingComboBox)
+        form.addRow('Iso level:', self.isoLevelSlider)
+        form.addRow('Levels:', self.numIsoLevelsSpinBox)
+        form.addRow('Style:', self.isoSetStyleComboBox)
+        form.addRow('Opacity:', self.isoOpacitySlider)
+        form.addRow('Opacity:', self.isoSetOpacitySlider)
+        form.addRow('Opacity:', self.volumeOpacitySlider)
+        form.addRow('Contrast:', self.volumeContrastSpinBox)
+        form.addRow('Slices per voxel:', self.sliceDensitySpinBox)
+
+        # Rows shown only for the plot types they apply to (0: isosurface, 1: isosurface set, 2: volumetric)
         self.plotFormLayout = form
         self.plotTypeRows = [
-            (isoLevelSlider, {0}),
-            (numIsoLevelsSpinBox, {1}),
-            (isoSetStyleComboBox, {1}),
-            (isoOpacitySlider, {0}),
-            (isoSetOpacitySlider, {1}),
-            (volumeOpacitySlider, {2}),
-            (volumeContrastSpinBox, {2}),
-            (sliceDensitySpinBox, {2}),
+            (self.isoLevelSlider, {0}),
+            (self.numIsoLevelsSpinBox, {1}),
+            (self.isoSetStyleComboBox, {1}),
+            (self.isoOpacitySlider, {0}),
+            (self.isoSetOpacitySlider, {1}),
+            (self.volumeOpacitySlider, {2}),
+            (self.volumeContrastSpinBox, {2}),
+            (self.sliceDensitySpinBox, {2}),
         ]
-        self.plotTypeComboBox.currentIndexChanged.connect(self.updatePlotTypeRows)
-        self.updatePlotTypeRows(self.plotTypeComboBox.currentIndex())
-
         self.addSection('Display', form)
-        for key, widget in (('plotType', self.plotTypeComboBox), ('colormap', self.colormapComboBox),
-                            ('colormapReversed', self.reverseColormapCheckBox), ('smoothing', self.smoothingComboBox),
-                            ('isoLevel', isoLevelSlider),
-                            ('isoLevels', numIsoLevelsSpinBox), ('isoSetStyle', isoSetStyleComboBox),
-                            ('isoOpacity', isoOpacitySlider), ('isoSetOpacity', isoSetOpacitySlider),
-                            ('volumeOpacity', volumeOpacitySlider), ('volumeContrast', volumeContrastSpinBox),
-                            ('slicesPerVoxel', sliceDensitySpinBox)):
-            self.remember(key, widget)
 
-    def colormap(self):
-        """The ColorMap chosen."""
-        return makeColormap(self.colormapComboBox.currentText(), self.reverseColormapCheckBox.isChecked())
+        # Each setting: (key, widget, its widget's value from the field, the field from the widget's value)
+        ticks = lambda tickMax: (lambda value: round(value * tickMax), lambda tick: float(tick) / tickMax)
+        self.displaySettings = [
+            ('show', 'shown', self.showDensityCheckBox, bool, bool),
+            ('plotType', 'plotType', self.plotTypeComboBox, lambda i: self.PLOT_TYPES[i], self.PLOT_TYPES.index),
+            ('colormap', 'colormap', self.colormapComboBox, str, str),
+            ('colormapReversed', 'reversed', self.reverseColormapCheckBox, bool, bool),
+            ('smoothing', 'smoothing', self.smoothingComboBox, lambda f: self.SMOOTHINGS[f - 1],
+             lambda text: self.SMOOTHINGS.index(text) + 1),
+            ('isoLevel', 'isoLevel', self.isoLevelSlider, *ticks(self.isoLevelTickMax)),
+            ('isoLevels', 'numIsoLevels', self.numIsoLevelsSpinBox, int, int),
+            ('isoSetStyle', 'isoSetStyle', self.isoSetStyleComboBox, lambda i: self.ISO_SET_STYLES[i],
+             self.ISO_SET_STYLES.index),
+            ('isoOpacity', 'isoOpacity', self.isoOpacitySlider, *ticks(self.opacityTickMax)),
+            ('isoSetOpacity', 'isoSetOpacity', self.isoSetOpacitySlider, *ticks(self.opacityTickMax)),
+            ('volumeOpacity', 'volumeOpacity', self.volumeOpacitySlider, *ticks(self.opacityTickMax)),
+            ('volumeContrast', 'volumeContrast', self.volumeContrastSpinBox, float, float),
+            ('slicesPerVoxel', 'sliceDensity', self.sliceDensitySpinBox, int, int),
+        ]
+        self.loadingDisplay = False
+        for key, name, widget, toWidget, toField in self.displaySettings:
+            self.widgetChangeSignal(widget).connect(lambda *args, key=key: self.onDisplayWidgetChanged(key))
+        self.colormapComboBox.currentIndexChanged.connect(self.updateColormapIcons)
+        self.reverseColormapCheckBox.toggled.connect(self.updateColormapIcons)
+        self.plotTypeComboBox.currentIndexChanged.connect(self.updatePlotTypeRows)
+        self.displayTabBar.currentChanged.connect(lambda index: self.loadDisplayWidgets())
+        self.calculations.particleDensityReady.connect(self.updateDisplayTabs)
+        self.particleTypeComboBox.currentIndexChanged.connect(self.updateDisplayTabs)
+        self.loadDisplayWidgets()
 
-    def updateColormapIcons(self):
+        # Kept between sessions: each density's settings, whichever tab is shown
+        for layer in self.LAYERS:
+            for key, name, widget, toWidget, toField in self.displaySettings:
+                stored = key if layer == 'wf' else f'particleDisplay/{key}'
+                self.remember(stored, get=lambda layer=layer, name=name, toWidget=toWidget:
+                              toWidget(getattr(self.parameters.display[layer], name)),
+                              set=lambda value, layer=layer, key=key: self.setDisplayValue(layer, key, value))
+
+    @staticmethod
+    def widgetChangeSignal(widget):
+        if isinstance(widget, QCheckBox):
+            return widget.toggled
+        if isinstance(widget, QComboBox):
+            return widget.currentIndexChanged
+        if isinstance(widget, ValueSlider):
+            return widget.valueChanged
+        return widget.valueChanged
+
+    @staticmethod
+    def widgetValue(widget):
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        if isinstance(widget, ValueSlider):
+            return widget.slider.value()
+        return widget.value()
+
+    @staticmethod
+    def setWidgetValue(widget, value):
+        if isinstance(widget, QCheckBox):
+            widget.setChecked(bool(value))
+        elif isinstance(widget, QComboBox):
+            if widget.findText(str(value)) >= 0:
+                widget.setCurrentText(str(value))
+        elif isinstance(widget, ValueSlider):
+            widget.slider.setValue(int(value))
+        elif isinstance(widget, QDoubleSpinBox):
+            widget.setValue(float(value))
+        else:
+            widget.setValue(int(value))
+
+    def displayLayer(self):
+        """The density whose settings the Display section shows: 'wf' or 'particle'."""
+        return self.LAYERS[max(0, self.displayTabBar.currentIndex())]
+
+    def loadDisplayWidgets(self):
+        """Show the settings of the density of the tab chosen."""
+        settings = self.parameters.display[self.displayLayer()]
+        self.loadingDisplay = True
+        try:
+            for key, name, widget, toWidget, toField in self.displaySettings:
+                self.setWidgetValue(widget, toWidget(getattr(settings, name)))
+        finally:
+            self.loadingDisplay = False
+        self.updatePlotTypeRows(settings.plotType)
+        self.updateColormapIcons()
+        self.updateDisplayTabs()
+
+    @Slot()
+    def updateDisplayTabs(self, *args):
+        """The particle density's tab, named after its particle; it can be shown once computed."""
+        d = self.calculations.particleDensity
+        particle = d['particle'] if d is not None else self.parameters.particle
+        self.displayTabBar.setTabText(1, 'Hole density' if particle == 'h' else 'Electron density')
+        particleTab = self.displayLayer() == 'particle'
+        self.showDensityCheckBox.setEnabled(not particleTab or d is not None)
+        self.showDensityCheckBox.setToolTip('Compute it first (Placing the fixed particle)' if particleTab and d is None
+                                            else 'Draw this density in the 3D view, with or without the other')
+
+    def onDisplayWidgetChanged(self, key):
+        """A widget of the Display section edited: the setting of the density of the tab chosen."""
+        if self.loadingDisplay:
+            return
+        widget = next(w for k, n, w, tw, tf in self.displaySettings if k == key)
+        self.setDisplayValue(self.displayLayer(), key, self.widgetValue(widget), fromWidget=True)
+
+    def setDisplayValue(self, layer, key, value, fromWidget=False):
+        """Set a display setting of `layer` from its widget's value; its widget follows if its tab is shown."""
+        key, name, widget, toWidget, toField = next(entry for entry in self.displaySettings if entry[0] == key)
+        try:
+            field = toField(value)
+        except (ValueError, TypeError):
+            return                              # e.g. a name no longer offered
+        setattr(self.parameters.display[layer], name, field)
+        if not fromWidget and layer == self.displayLayer():
+            self.loadingDisplay = True
+            try:
+                self.setWidgetValue(widget, value)
+            finally:
+                self.loadingDisplay = False
+            if key == 'plotType':
+                self.updatePlotTypeRows(field)
+            if key in ('colormap', 'colormapReversed'):
+                self.updateColormapIcons()
+        self.displayChanged.emit(layer, key)
+        if layer == 'wf':
+            self.emitWaveFunctionDisplay(key)
+
+    def emitWaveFunctionDisplay(self, key):
+        """The signals of the wave function's display, as before the particle density had its own."""
+        d = self.parameters.display['wf']
+        if key == 'plotType':
+            self.plotTypeChanged.emit(d.plotType)
+        elif key in ('colormap', 'colormapReversed'):
+            self.colormapChanged.emit(self.colormap())
+        elif key == 'smoothing':
+            self.smoothingChanged.emit(d.smoothing)
+            self.requestEstimate()
+        elif key == 'isoLevel':
+            self.isoLevelChanged.emit()
+        elif key == 'isoLevels':
+            self.numIsoLevelsChanged.emit()
+        elif key == 'isoSetStyle':
+            self.isoSetStyleChanged.emit(d.isoSetStyle)
+        elif key == 'isoOpacity':
+            self.isoOpacityChanged.emit(d.isoOpacity, d.isoLevel)
+        elif key == 'isoSetOpacity':
+            self.isoSetOpacityChanged.emit(d.isoSetOpacity)
+        elif key == 'slicesPerVoxel':
+            self.sliceDensityChanged.emit()
+        elif key in ('volumeOpacity', 'volumeContrast'):
+            self.volumeParametersChanged.emit()
+
+    def colormap(self, layer='wf'):
+        """The ColorMap chosen for a density."""
+        settings = self.parameters.display[layer]
+        return makeColormap(settings.colormap, settings.reversed)
+
+    def updateColormapIcons(self, *args):
         reverse = self.reverseColormapCheckBox.isChecked()
         for index in range(self.colormapComboBox.count()):
             label = self.colormapComboBox.itemText(index)
             if label:   # not a separator
                 self.colormapComboBox.setItemIcon(index, colormapIcon(makeColormap(label, reverse)))
-
-    @Slot()
-    def onColormapChanged(self, *args):
-        self.updateColormapIcons()
-        self.colormapChanged.emit(self.colormap())
 
     def buildViewSection(self):
         # View direction: basis, presets and custom direction / up vectors
@@ -1285,7 +1424,7 @@ class WavefunctionControls(Inspector):
         return -1 if self.fullCutoffCheckBox.isChecked() else self.wfCutoffSpinBox.value()
 
     def smoothingFactor(self):
-        return self.smoothingComboBox.currentIndex() + 1
+        return self.parameters.display['wf'].smoothing
 
     # Size of the calculation
 
@@ -1410,41 +1549,6 @@ class WavefunctionControls(Inspector):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         return answer == QMessageBox.StandardButton.Yes
 
-    @Slot(int)
-    def setIsoLevel(self, tick: int):
-        self.parameters.isoLevel = float(tick / self.isoLevelTickMax)
-        self.isoLevelChanged.emit()
-
-    @Slot(int)
-    def setNumIsoLevels(self, numIsoLevels: int):
-        self.parameters.numIsoLevels = numIsoLevels
-        self.numIsoLevelsChanged.emit()
-
-    @Slot(int)
-    def setIsoOpacity(self, tick: int):
-        self.parameters.isoOpacity = float(tick / self.opacityTickMax)
-        self.isoOpacityChanged.emit(self.parameters.isoOpacity, self.parameters.isoLevel)
-
-    @Slot(int)
-    def setIsoSetOpacity(self, tick: int):
-        self.parameters.isoSetOpacity = float(tick / self.opacityTickMax)
-        self.isoSetOpacityChanged.emit(self.parameters.isoSetOpacity)
-
-    @Slot(int)
-    def setSliceDensity(self, density):
-        self.parameters.sliceDensity = density
-        self.sliceDensityChanged.emit()
-
-    @Slot(int)
-    def setVolumeOpacity(self, tick: int):
-        self.parameters.volumeOpacity = tick / self.opacityTickMax
-        self.volumeParametersChanged.emit()
-
-    @Slot(float)
-    def setVolumeContrast(self, contrast: float):
-        self.parameters.volumeContrast = contrast
-        self.volumeParametersChanged.emit()
-
     @Slot(float)
     def setAtomScale(self, scale: float):
         self.parameters.atomScale = scale
@@ -1470,8 +1574,8 @@ class WavefunctionControls(Inspector):
         for widget, plotTypes in self.plotTypeRows:
             self.plotFormLayout.setRowVisible(widget, plotType in plotTypes)
 
-    def plotType(self):
-        return self.plotTypeComboBox.currentIndex()
+    def plotType(self, layer='wf'):
+        return self.parameters.display[layer].plotType
 
     def supercell(self):
         return [self.xSupercellSpinBox.value(), self.ySupercellSpinBox.value(), self.zSupercellSpinBox.value()]
