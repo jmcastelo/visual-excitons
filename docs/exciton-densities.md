@@ -139,7 +139,7 @@ The functions $`\sum_v W^*_{vj}\,\psi^*_v`$ are the **natural transition orbital
 
 - **Fewer functions.** $`A_\mathbf{k}`$ has rank at most $`\min(n_c, n_v)`$, so at most that many weights are non-zero: for BiI3 (4 conduction, 10 valence bands), 4 orbitals per $`\mathbf{k}`$ instead of 10 bands. The density is the same, exactly.
 - **Degenerate groups.** Summing the densities of states $`n`$ sums the matrices, $`M_\mathbf{k} = \sum_n A_\mathbf{k}^{(n)\dagger} A_\mathbf{k}^{(n)}`$: one diagonalisation for the whole group, exact.
-- **Truncation with a known error.** The weights add up to the number of states ($`\sum_j \lambda_{\mathbf{k}j} = \operatorname{tr} M_\mathbf{k}`$). The orbitals are orthonormal combinations of orthonormal functions, so dropping a set $`D`$ of them drops a density that integrates to exactly $`\sum_{j \in D} \lambda_{\mathbf{k}j}`$: a positive density of known total. The program keeps 99.9% of the weight.
+- **Truncation with a known error.** The weights add up to the number of states ($`\sum_j \lambda_{\mathbf{k}j} = \mathrm{tr}\,M_\mathbf{k}`$). The orbitals are orthonormal combinations of orthonormal functions, so dropping a set $`D`$ of them drops a density that integrates to exactly $`\sum_{j \in D} \lambda_{\mathbf{k}j}`$: a positive density of known total. The program keeps 99.9% of the weight.
 
 How concentrated the weight is (BiI3, 512 $`\mathbf{k}`$-points, 20480 transitions):
 
@@ -154,7 +154,7 @@ The weight is spread over most $`\mathbf{k}`$-points, as expected for an exciton
 
 ## 7. Cutoff and grid
 
-`ex_wf2Real` does not use all the plane waves: at a cutoff $`E_\text{cut}`$ (Ry) it keeps those with $`|\mathbf{k}+\mathbf{G}| \lt  \sqrt{E_\text{cut}}`$ (Bohr⁻¹, with $`2\pi`$), and builds a real-space grid of $`N_i`$ points per lattice vector (the span of the $`\mathbf{G}`$-vectors kept, plus 3). It then moves the fixed particle to the nearest grid point, $`\mathbf{r}_0 \to \operatorname{round}(N_i r_{0,i})/N_i`$.
+`ex_wf2Real` does not use all the plane waves: at a cutoff $`E_\text{cut}`$ (Ry) it keeps those with $`|\mathbf{k}+\mathbf{G}| \lt  \sqrt{E_\text{cut}}`$ (Bohr⁻¹, with $`2\pi`$), and builds a real-space grid of $`N_i`$ points per lattice vector (the span of the $`\mathbf{G}`$-vectors kept, plus 3). It then moves the fixed particle to the nearest grid point, $`\mathbf{r}_0 \to \mathrm{round}(N_i r_{0,i})/N_i`$.
 
 The densities are computed **on that same grid, with the same plane waves**:
 
