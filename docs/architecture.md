@@ -47,7 +47,7 @@ It is a regular Python package (`pyproject.toml`, version in `visual_excitons/__
 visual_excitons/
 ├── __init__.py             __version__
 ├── __main__.py             python -m visual_excitons
-├── main.py                 main(): QApplication, OpenGL context sharing, MainWindow (the visual-excitons command)
+├── main.py                 main(): command line (dataset or session to open), QApplication, OpenGL context sharing, MainWindow (the visual-excitons command)
 ├── core/                   No widgets: data, calculations, pure numerics
 │   ├── calculations.py     Calculations: all Yambo calculations, as background tasks
 │   ├── tasks.py            TaskRunner: worker thread, progress, cancellation, DB lock
@@ -216,7 +216,7 @@ Absorption curve bookkeeping: `excAbsData` is a list of dicts, one per curve, wi
 | `export.py` | `writeCube`, `writeXsf`, `writeDensity`, `supercellAtoms` | Vectorized writers; scientific notation |
 | `memory.py` | `PlaneWaves.fftBox(cutoff)`, `estimateMemory`, `chooseBlockSize`, `availableMemory`, `GVectorShells` | Grid as yambopy computes it; memory from array shapes; Ry ↔ RL |
 | `placement.py` | `gridIndex`, `gridPosition`, `densityShare`, `nearestAtom` | The fixed particle on the grid of its density (as `ex_wf2Real` snaps it) |
-| `dataset.py` | `findDataset`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory only (and the `Dataset` class, above) |
+| `dataset.py` | `findDataset`, `datasetFromPaths`, `datasetName`, `datasetExists` | BSE/GW searched next to the SAVE directory, then in the whole folder when it holds a single SAVE directory (a Visual Workflows project); `datasetFromPaths` takes directories one by one, for the command line (and the `Dataset` class, above) |
 | `databases.py` | `identify`, `qpDatabases`, `bseFiles`, `computedQPoints`, `qPointNames` | Databases by their content (see above) |
 | `consistency.py` | `checkDataset`, `summary` | Findings with a level, an area and a text |
 | `lattice_info.py` | `latticeSummary`, `cellParameters`, `tickLabels`, `viewVectorToCartesian` | Space group (spglib), formula, k-grid, layer; lattice identification tables; view bases and presets |

@@ -31,6 +31,25 @@ def test_starts_without_dataset(window):
     assert not window.recentMenu.isEnabled()
 
 
+def test_command_line_requests(window, monkeypatch, tmp_path):
+    """What the command line asks for goes where File › Open dataset and Open session go."""
+    warnings, opened = [], []
+    monkeypatch.setattr(main_window.QMessageBox, 'warning', lambda parent, title, text: warnings.append(text))
+    monkeypatch.setattr(window, 'openDataset', lambda dataset: opened.append(dataset))
+    monkeypatch.setattr(window, 'openSession', lambda path: opened.append(path))
+    # No SAVE directory: said, nothing opened
+    window.openRequested(('dataset', {'save': None, 'diago': None, 'qp': None, 'gw': False}, str(tmp_path)))
+    assert 'No SAVE directory' in warnings[-1] and not opened
+    # No BSE directory: said, opened (it can be chosen in the System panel)
+    (tmp_path / 'SAVE').mkdir()
+    (tmp_path / 'SAVE/ns.db1').touch()
+    dataset = {'save': str(tmp_path / 'SAVE'), 'diago': None, 'qp': None, 'gw': False}
+    window.openRequested(('dataset', dataset, str(tmp_path)))
+    assert 'No BSE directory' in warnings[-1] and opened == [dataset]
+    window.openRequested(('session', 'a.vxsession'))
+    assert opened[-1] == 'a.vxsession'
+
+
 def openPanels(window):
     return {key for key, dock in window.panels.docks.items() if not dock.isClosed()}
 

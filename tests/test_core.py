@@ -6,7 +6,7 @@ import pytest
 
 from visual_excitons.core.parameters import SpectraParameters, WavefunctionParameters
 from visual_excitons.core.calculations import Calculations, PointData
-from visual_excitons.core.dataset import Dataset, findDataset, datasetName, datasetExists
+from visual_excitons.core.dataset import Dataset, findDataset, datasetFromPaths, datasetName, datasetExists
 from visual_excitons.core.style import AbsorptionStyle
 
 
@@ -39,6 +39,75 @@ def test_find_dataset_does_not_mix_systems(tmp_path):
     dataset = findDataset(tmp_path)
     assert dataset['save'].endswith('A_noGW/save') and dataset['diago'].endswith('A_noGW/diagos')
     assert dataset['qp'] is None and dataset['gw'] is False
+
+
+def makeWorkflowsProject(root, name='WSe2'):
+    """A Visual Workflows project after downloading for Visual Excitons: SAVE, GW and BSE in step folders of their own."""
+    from conftest import writeQPDatabase
+    project = root / name
+    for directory, filename in [('01-scf/outputs/WSe2.save', 'data-file-schema.xml'), ('03-p2y/outputs/SAVE', 'ns.db1'),
+                                ('05-bse/outputs/diago', 'ndb.BS_diago_Q1')]:
+        (project / directory).mkdir(parents=True)
+        (project / directory / filename).touch()
+    (project / '04-gw/outputs/gw').mkdir(parents=True)
+    writeQPDatabase(project / '04-gw/outputs/gw/ndb.QP')
+    return project
+
+
+def test_find_dataset_in_a_workflows_project(tmp_path):
+    """With a single SAVE directory, the BSE and GW directories are found anywhere in the folder."""
+    project = makeWorkflowsProject(tmp_path)
+    dataset = findDataset(project)
+    assert dataset == {'save': str(project / '03-p2y/outputs/SAVE'), 'diago': str(project / '05-bse/outputs/diago'),
+                       'qp': str(project / '04-gw/outputs/gw'), 'gw': True, 'qpFile': 'ndb.QP'}
+    assert datasetName(dataset) == 'WSe2'
+
+
+def test_find_dataset_prefers_the_directories_next_to_save(tmp_path):
+    """BSE directories next to the SAVE one come first, even with others elsewhere in the folder."""
+    project = makeWorkflowsProject(tmp_path)
+    (project / '03-p2y/outputs/diago').mkdir()
+    (project / '03-p2y/outputs/diago/ndb.BS_diago_Q1').touch()
+    assert findDataset(project)['diago'] == str(project / '03-p2y/outputs/diago')
+
+
+def test_find_dataset_does_not_search_further_with_several_systems(tmp_path):
+    """With two SAVE directories, the databases of the other system are never taken."""
+    makeDataset(tmp_path, 'A', gw=False)
+    (tmp_path / 'A/diagos/ndb.BS_diago_Q1').unlink()
+    makeDataset(tmp_path, 'B', gw=True)
+    dataset = findDataset(tmp_path)
+    assert dataset['save'].endswith('A/save') and dataset['diago'] is None and dataset['qp'] is None
+
+
+def test_dataset_from_paths(tmp_path):
+    """Directories given one by one take the place of those found."""
+    project = makeWorkflowsProject(tmp_path)
+    (project / '06-bse-q/outputs/diago').mkdir(parents=True)
+    (project / '06-bse-q/outputs/diago/ndb.BS_diago_Q2').touch()
+    dataset = datasetFromPaths(project, bse=project / '06-bse-q/outputs/diago')
+    assert dataset['save'] == str(project / '03-p2y/outputs/SAVE')
+    assert dataset['diago'] == str(project / '06-bse-q/outputs/diago')
+    assert dataset['qp'] == str(project / '04-gw/outputs/gw') and dataset['gw']
+    # Without a folder: only what is given; a QP database by its file, renamed or not
+    (project / '04-gw/outputs/gw/ndb.QP').rename(project / '04-gw/outputs/gw/ndb.QP_59_66')
+    dataset = datasetFromPaths(save=project / '03-p2y/outputs/SAVE', qp=project / '04-gw/outputs/gw/ndb.QP_59_66')
+    assert dataset == {'save': str(project / '03-p2y/outputs/SAVE'), 'diago': None, 'qp': str(project / '04-gw/outputs/gw'),
+                       'qpFile': 'ndb.QP_59_66', 'gw': True}
+    assert datasetFromPaths(qp=project / '04-gw/outputs/gw')['qpFile'] == 'ndb.QP_59_66'
+
+
+@pytest.mark.parametrize('arguments, message', [
+    ({'folder': 'missing'}, 'Not a folder'),
+    ({'save': '05-bse/outputs/diago'}, 'No SAVE directory'),
+    ({'bse': '03-p2y/outputs/SAVE'}, 'No BSE databases'),
+    ({'qp': '05-bse/outputs/diago'}, 'No QP database'),
+    ({'qp': '05-bse/outputs/diago/ndb.BS_diago_Q1'}, 'Not a QP database'),
+])
+def test_dataset_from_paths_refuses_wrong_paths(tmp_path, arguments, message):
+    project = makeWorkflowsProject(tmp_path)
+    with pytest.raises(ValueError, match=message):
+        datasetFromPaths(**{key: project / value for key, value in arguments.items()})
 
 
 def test_find_dataset_without_save(tmp_path):

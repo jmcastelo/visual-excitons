@@ -29,6 +29,7 @@ Each section starts with a hidden comment (`<!-- ... -->`) with its status, when
 | 19 | `compute_exc_rep` fails at Q-points whose little group is trivial (C1) | Not filed |
 | 20 | `ex_wf2Real` silently enlarges even supercells, so the Born–von Kármán supercell cannot be used | Not filed |
 | 21 | No density of the hole or of the electron of an exciton | Not filed (enhancement) |
+| 22 | `YamboBSEAbsorptionSpectra.get_excitons` mixes up energies, intensities and indices when states are degenerate | Not filed |
 
 ---
 
@@ -404,7 +405,9 @@ With natural transition orbitals per k-point (the eigenvectors of Σ_states A_k�
 
 **Proposal:** add `exciton_particle_density` (the density on the grid of `ex_wf2Real` at a given cutoff, so that its maxima are fixed positions used as they are), `particle_nto` and `density_maxima` to `yambopy.bse`, e.g. next to `realSpace_excitonwf`; an implementation following YamboPy's conventions is in Visual Excitons (`yambopy_ext/bse/exciton_particle_density.py`).
 
+---
 
+<!-- Status: not filed. Found 2026-11-19 (WSe2 72x72x1, validating against Dogadov et al. 2026). Worked around in visual_excitons/core/calculations.py (computeAbsorption). -->
 ## 22. `YamboBSEAbsorptionSpectra.get_excitons` mixes up energies, intensities and indices when states are degenerate
 
 `get_excitons` takes the energies from `excitondb.get_nondegenerate()` (one per degenerate group) and the intensities from `excitondb.get_intensities()` (one per state), and pairs them by position:

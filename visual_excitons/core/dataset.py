@@ -5,7 +5,10 @@ dataset open (Dataset).
 A dataset is a SAVE directory (ns.db1), a BSE directory (ndb.BS_diago_Q*)
 and, for GW calculations, a QP directory (ndb.QP, or QP databases of other
 names: they are recognised by their content, see databases.py). They can be
-found inside a common folder, as in data/<system>/{save, diagos, qp}.
+found inside a common folder, as in data/<system>/{save, diagos, qp}, or in
+the step folders of a Visual Workflows project, as in
+<project>/03-p2y/outputs/SAVE and <project>/05-bse/outputs/diago; or given
+one by one (datasetFromPaths, the command line).
 """
 
 import os
@@ -16,7 +19,7 @@ from PySide6.QtCore import QObject, Signal
 from yambopy import get_lattice_data, lattice_data_for_cell, YamboLatticeDB, BrillouinZone
 
 from .tasks import databaseAccess
-from .databases import hasDatabase, qpDatabases, bseFiles, qPointNames, LATTICE, QP, BSE
+from .databases import hasDatabase, qpDatabases, bseFiles, qPointNames, identify, LATTICE, QP, BSE
 from .cellshift import kGrid
 from .lattice_info import (latticeSummary, cellParameters, ibravCandidates, SYMMETRY_TOLERANCES,
                            LATTICE_SYMMETRY)
@@ -48,26 +51,79 @@ def findDataset(folder):
     Directories of the databases inside `folder` (or `folder` itself), as a
     dict with keys 'save', 'diago' and 'qp' (None when not found) and 'gw'
     (whether a QP database was found).
+
+    The SAVE directory is searched first. The BSE and QP directories are then
+    searched next to it, so that a folder with several systems is never
+    mixed up. When there are none there and the folder holds a single SAVE
+    directory, the whole folder is searched: a Visual Workflows project keeps
+    SAVE in the p2y step's folder and the BSE and GW results in steps of their
+    own (<project>/03-p2y/outputs/SAVE, <project>/05-bse/outputs/diago).
     """
     root = Path(folder).expanduser().resolve()
     dataset = {'save': None, 'diago': None, 'qp': None}
 
+    places = [root]
     saves = _directoriesWith(root, LATTICE, SEARCH_DEPTH)
     if saves:
         save = saves[0]
         dataset['save'] = str(save)
-        # The other databases of the same calculation sit next to the SAVE
-        # directory: look only there, so as not to mix different systems
-        root = save if save == root else save.parent
+        nextToSave = save if save == root else save.parent
+        places = [nextToSave] + ([root] if len(saves) == 1 and nextToSave != root else [])
 
     for key, kind in (('diago', BSE), ('qp', QP)):
-        directories = _directoriesWith(root, kind, SEARCH_DEPTH)
-        if directories:
-            dataset[key] = str(directories[0])
+        for place in places:
+            directories = _directoriesWith(place, kind, SEARCH_DEPTH)
+            if directories:
+                dataset[key] = str(directories[0])
+                break
     dataset['gw'] = dataset['qp'] is not None
     if dataset['qp']:
         # The QP database used there, by default (several may be found)
         dataset['qpFile'] = qpDatabases(dataset['qp'])[0]['name']
+    return dataset
+
+
+def datasetFromPaths(folder=None, save=None, bse=None, qp=None):
+    """
+    A dataset (as findDataset's) found in `folder`, if given, with the
+    directories given one by one taking the place of those found: `save` (with
+    ns.db1), `bse` (with BSE databases) and `qp` (a QP database, or a
+    directory with one: the default one is used, see qpDatabases).
+
+    Raises ValueError, saying which, for a path that does not hold what it
+    should. Finding no SAVE directory in `folder` is not an error here (see
+    datasetExists).
+    """
+    if folder is not None:
+        if not Path(folder).expanduser().is_dir():
+            raise ValueError(f'Not a folder: {folder}')
+        dataset = findDataset(folder)
+    else:
+        dataset = {'save': None, 'diago': None, 'qp': None}
+
+    if save is not None:
+        path = Path(save).expanduser().resolve()
+        if not Path(path, 'ns.db1').is_file():
+            raise ValueError(f'No SAVE directory (with ns.db1) at {save}')
+        dataset['save'] = str(path)
+    if bse is not None:
+        path = Path(bse).expanduser().resolve()
+        if not path.is_dir() or not hasDatabase(path, BSE):
+            raise ValueError(f'No BSE databases (ndb.BS_diago_Q*) in {bse}')
+        dataset['diago'] = str(path)
+    if qp is not None:
+        path = Path(qp).expanduser().resolve()
+        if path.is_file():
+            info = identify(path)
+            if info is None or info['kind'] != QP:
+                raise ValueError(f'Not a QP database: {qp}')
+            dataset['qp'], dataset['qpFile'] = str(path.parent), path.name
+        else:
+            found = qpDatabases(path) if path.is_dir() else []
+            if not found:
+                raise ValueError(f'No QP database in {qp}')
+            dataset['qp'], dataset['qpFile'] = str(path), found[0]['name']
+    dataset['gw'] = dataset['qp'] is not None
     return dataset
 
 

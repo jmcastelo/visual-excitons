@@ -675,14 +675,25 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, 'Open dataset', start, QFileDialog.Option.ShowDirsOnly)
         if not folder:
             return
-        dataset = findDataset(folder)
+        self.openFoundDataset(findDataset(folder), folder)
+
+    def openFoundDataset(self, dataset, folder):
+        """Open `dataset`, found in `folder`, saying what was not found; whether it was opened."""
         if not datasetExists(dataset):
             QMessageBox.warning(self, 'Open dataset', f'No SAVE directory (with ns.db1) found in\n{folder}')
-            return
+            return False
         if dataset['diago'] is None:
-            QMessageBox.warning(self, 'Open dataset', 'No BSE directory (with ndb.BS_diago_Q* files) found next to\n'
+            QMessageBox.warning(self, 'Open dataset', 'No BSE directory (with ndb.BS_diago_Q* files) found for\n'
                                 f'{dataset["save"]}\n\nYou can choose it in the System panel.')
         self.openDataset(dataset)
+        return True
+
+    def openRequested(self, request):
+        """Open what the command line asked for (see main.startupRequest)."""
+        if request[0] == 'session':
+            self.openSession(request[1])
+        else:
+            self.openFoundDataset(request[1], request[2])
 
     def openDataset(self, dataset, restoreCached=True):
         """

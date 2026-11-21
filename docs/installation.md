@@ -49,6 +49,6 @@ This installs Visual Excitons and everything it needs, including the YamboPy for
 visual-excitons
 ```
 
-or `python -m visual_excitons`. To update it, run the `pip install` command again with `--upgrade`.
+or `python -m visual_excitons`. A dataset folder or a session file can be given, to open it at once (`visual-excitons WSe2`; see [Datasets](datasets.md)). To update it, run the `pip install` command again with `--upgrade`.
 
 **Why a fork of YamboPy.** Visual Excitons needs the Brillouin-zone tools (Bravais lattices, high-symmetry points, Q-paths) of the `ase-bz` branch of [jmcastelo/yambopy](https://github.com/jmcastelo/yambopy/tree/ase-bz), which the official YamboPy does not have yet. The installation takes it from there.
