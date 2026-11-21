@@ -19,7 +19,8 @@ from visual_excitons.core.dataset import Dataset
 from visual_excitons.core.parameters import SpectraParameters, WavefunctionParameters
 from visual_excitons.core.calculations import Calculations, DMAT_SECONDS_PER_KPOINT
 from visual_excitons.core.style import DispersionStyle, AbsorptionStyle, BandStructureStyle
-from visual_excitons.core.dataset import findDataset, datasetName, datasetExists
+from visual_excitons.core.dataset import findDataset, datasetChoices, datasetName, datasetExists
+from visual_excitons.core.databases import qpDatabases
 from visual_excitons.core.results_cache import (ResultsCache, CACHE_LIMIT, WAVEFUNCTION_LIMIT, folderUsage,
                                                clearFolder, moveStorage)
 from .storage_dialog import StorageDialog
@@ -677,8 +678,16 @@ class MainWindow(QMainWindow):
             return
         self.openFoundDataset(findDataset(folder), folder)
 
-    def openFoundDataset(self, dataset, folder):
-        """Open `dataset`, found in `folder`, saying what was not found; whether it was opened."""
+    def openFoundDataset(self, dataset, folder, fixed=()):
+        """
+        Open `dataset`, found in `folder`, saying what was not found; whether it
+        was opened. In a Visual Workflows project with several directories of a
+        kind (two BSE steps), the user picks one, except for the kinds in `fixed`
+        (given on the command line).
+        """
+        dataset = self.chooseInProject(dataset, folder, fixed)
+        if dataset is None:
+            return False
         if not datasetExists(dataset):
             QMessageBox.warning(self, 'Open dataset', f'No SAVE directory (with ns.db1) found in\n{folder}')
             return False
@@ -688,12 +697,39 @@ class MainWindow(QMainWindow):
         self.openDataset(dataset)
         return True
 
+    def chooseInProject(self, dataset, folder, fixed=()):
+        """
+        `dataset` with, for each kind of which the Visual Workflows project in
+        `folder` has several directories, the one the user picks; None if the
+        user cancels. Unchanged outside projects.
+        """
+        if not folder or not Path(folder).is_dir():
+            return dataset
+        choices = datasetChoices(folder)
+        root = Path(folder).expanduser().resolve()
+        questions = {'save': 'Several steps of the project have a SAVE directory. Which one?',
+                     'diago': 'Several steps of the project have BSE results. Which ones?',
+                     'qp': 'Several steps of the project have GW (QP) databases. Which ones?'}
+        dataset = dict(dataset)
+        for key in ('save', 'diago', 'qp'):
+            if key in fixed or len(choices[key]) < 2:
+                continue
+            labels = [str(Path(path).relative_to(root)) for path in choices[key]]
+            current = labels.index(str(Path(dataset[key]).relative_to(root))) if dataset.get(key) in choices[key] else 0
+            label, ok = QInputDialog.getItem(self, 'Open dataset', questions[key], labels, current, False)
+            if not ok:
+                return None
+            dataset[key] = choices[key][labels.index(label)]
+            if key == 'qp':
+                dataset['qpFile'] = qpDatabases(dataset['qp'])[0]['name']
+        return dataset
+
     def openRequested(self, request):
         """Open what the command line asked for (see main.startupRequest)."""
         if request[0] == 'session':
             self.openSession(request[1])
         else:
-            self.openFoundDataset(request[1], request[2])
+            self.openFoundDataset(request[1], request[2], request[3] if len(request) > 3 else ())
 
     def openDataset(self, dataset, restoreCached=True):
         """

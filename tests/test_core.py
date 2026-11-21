@@ -6,7 +6,8 @@ import pytest
 
 from visual_excitons.core.parameters import SpectraParameters, WavefunctionParameters
 from visual_excitons.core.calculations import Calculations, PointData
-from visual_excitons.core.dataset import Dataset, findDataset, datasetFromPaths, datasetName, datasetExists
+from visual_excitons.core.dataset import (Dataset, findDataset, datasetFromPaths, datasetName, datasetExists,
+                                         datasetChoices, projectSteps)
 from visual_excitons.core.style import AbsorptionStyle
 
 
@@ -41,8 +42,12 @@ def test_find_dataset_does_not_mix_systems(tmp_path):
     assert dataset['qp'] is None and dataset['gw'] is False
 
 
-def makeWorkflowsProject(root, name='WSe2'):
-    """A Visual Workflows project after downloading for Visual Excitons: SAVE, GW and BSE in step folders of their own."""
+def makeWorkflowsProject(root, name='WSe2', projectFile=False):
+    """
+    A Visual Workflows project after downloading for Visual Excitons: SAVE, GW
+    and BSE in step folders of their own; with its project.toml if `projectFile`
+    (without it, as a copy of the folders only).
+    """
     from conftest import writeQPDatabase
     project = root / name
     for directory, filename in [('01-scf/outputs/WSe2.save', 'data-file-schema.xml'), ('03-p2y/outputs/SAVE', 'ns.db1'),
@@ -51,7 +56,56 @@ def makeWorkflowsProject(root, name='WSe2'):
         (project / directory / filename).touch()
     (project / '04-gw/outputs/gw').mkdir(parents=True)
     writeQPDatabase(project / '04-gw/outputs/gw/ndb.QP')
+    if projectFile:
+        (project / 'project.toml').write_text(
+            'format = "workflow-project/1"\nname = "WSe2"\ncluster = "Lynx"\nremote_dir = "WSe2"\n'
+            'steps = ["01-scf", "02-nscf", "03-p2y", "04-gw", "05-bse"]\n')
     return project
+
+
+def test_workflows_project_steps(tmp_path):
+    """A project's steps are read from its project.toml: only their outputs/ folders, in order."""
+    project = makeWorkflowsProject(tmp_path, projectFile=True)
+    assert projectSteps(project) == [project / step / 'outputs' for step in ('01-scf', '03-p2y', '04-gw', '05-bse')]
+    assert projectSteps(tmp_path) is None                       # no project.toml
+    for text in ('format = "cluster-profile/1"\nsteps = ["x"]\n', 'steps = ["x"]\n', 'not toml = = 1\n',
+                 'format = "workflow-project/1"\nsteps = "01-scf"\n'):
+        (project / 'project.toml').write_text(text)
+        assert projectSteps(project) is None, text
+    # Only step folder names: nothing outside the project is searched
+    (project / 'project.toml').write_text('format = "workflow-project/2"\nsteps = ["../x", "/tmp", "..", 3, "05-bse"]\n')
+    assert projectSteps(project) == [project / '05-bse/outputs']
+
+
+def test_find_dataset_deeper_in_project_steps(tmp_path):
+    """In a project, results deeper than 3 levels from its folder are found: 3 levels below each outputs/ folder."""
+    project = makeWorkflowsProject(tmp_path, projectFile=True)
+    (project / '03-p2y/outputs/SAVE').rename(tmp_path / 'SAVE')
+    (project / '03-p2y/outputs/WSe2.save').mkdir()
+    (tmp_path / 'SAVE').rename(project / '03-p2y/outputs/WSe2.save/SAVE')     # p2y run without -O
+    (project / '05-bse/outputs/diago').rename(tmp_path / 'diago')
+    (project / '05-bse/outputs/bse').mkdir()
+    (tmp_path / 'diago').rename(project / '05-bse/outputs/bse/diago')         # -J bse/diago
+    dataset = findDataset(project)
+    assert dataset['save'] == str(project / '03-p2y/outputs/WSe2.save/SAVE')
+    assert dataset['diago'] == str(project / '05-bse/outputs/bse/diago')
+    assert dataset['qp'] == str(project / '04-gw/outputs/gw') and dataset['qpFile'] == 'ndb.QP'
+
+
+def test_dataset_choices_in_a_project(tmp_path):
+    """Several BSE steps: all listed in the project's order, the first taken by default."""
+    project = makeWorkflowsProject(tmp_path, projectFile=True)
+    (project / '06-bse-q/outputs/diago').mkdir(parents=True)
+    (project / '06-bse-q/outputs/diago/ndb.BS_diago_Q1').touch()
+    (project / 'project.toml').write_text((project / 'project.toml').read_text().replace('"05-bse"', '"05-bse", "06-bse-q"'))
+    # Not listed in the project: never searched
+    (project / 'old/outputs/diago').mkdir(parents=True)
+    (project / 'old/outputs/diago/ndb.BS_diago_Q1').touch()
+    choices = datasetChoices(project)
+    assert choices['diago'] == [str(project / '05-bse/outputs/diago'), str(project / '06-bse-q/outputs/diago')]
+    assert choices['save'] == [str(project / '03-p2y/outputs/SAVE')] and len(choices['qp']) == 1
+    assert findDataset(project)['diago'] == str(project / '05-bse/outputs/diago')
+    assert datasetChoices(tmp_path) == {'save': [], 'diago': [], 'qp': []}
 
 
 def test_find_dataset_in_a_workflows_project(tmp_path):

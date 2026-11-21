@@ -25,7 +25,9 @@ The BSE databases with standard names are not opened when a dataset is opened (t
 
 These files must be coherent, i.e. correspond to calculations of the same system.
 
-`File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it, up to three levels down. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. When there are none next to it and the folder holds a single SAVE directory, the whole folder is searched: this opens a [Visual Workflows](https://github.com/jmcastelo/visual-workflows) project, whose steps keep SAVE, the GW results and the BSE results in folders of their own (`WSe2/03-p2y/outputs/SAVE`, `WSe2/04-gw/outputs/gw`, `WSe2/05-bse/outputs/diago`). The calculation type is set from whether a GW directory was found. `File › Open recent` lists the last datasets.
+`File › Open dataset…` (`Ctrl+O`) takes the folder of a calculation and finds these directories inside it, up to three levels down. The SAVE directory is searched first; the BSE and GW directories are then searched next to it, so a folder with several systems is never mixed up. For example, opening `data/BiI3_Bulk_8x8x8` finds its `save`, `diagos` and `qp` subdirectories. When there are none next to it and the folder holds a single SAVE directory, the whole folder is searched. The calculation type is set from whether a GW directory was found.
+
+A [Visual Workflows](https://github.com/jmcastelo/visual-workflows) project is recognised by its `project.toml`. Its steps keep SAVE, the GW results and the BSE results in folders of their own (`WSe2/03-p2y/outputs/SAVE`, `WSe2/04-gw/outputs/gw`, `WSe2/05-bse/outputs/diago`). Only the `outputs` folder of each step listed in the project is searched, three levels down within it, so results deeper in the project are found too (a `SAVE` inside QE's `prefix.save`, a Yambo job such as `bse/diago`). When several steps have results of the same kind (two BSE steps, say, one at finite Q), you are asked which to open; the first, in the project's order, is offered. A copy of the step folders without `project.toml` is searched as any other folder. `File › Open recent` lists the last datasets.
 
 **From the command line.** `visual-excitons FOLDER` opens the dataset found in a folder, as `Open dataset` does, and `visual-excitons SESSION.vxsession` a session. `--save DIR`, `--bse DIR` and `--qp PATH` (a QP database, or the directory with it) give directories one by one, instead of those found in the folder, or without a folder:
 
@@ -35,7 +37,7 @@ visual-excitons WSe2 --bse WSe2/06-bse-dispersion/outputs/diago
 visual-excitons --save run/SAVE --bse run/bse/diago --qp run/gw/ndb.QP_59_66
 ```
 
-A path that does not hold what it should stops the command with a message, before any window opens; `visual-excitons --help` lists the options.
+A path that does not hold what it should stops the command with a message, before any window opens; `visual-excitons --help` lists the options. In a project with several BSE steps, `visual-excitons WSe2` asks which to open, as `Open dataset` does; `--bse` gives it without asking.
 
 The start page lists the recent datasets too, and opening one again restores its Q-path. The Q-path of the `BiI3` test dataset (`data/BiI3_Bulk_8x8x8`, not included in the repository) must be set to `LGZF` instead of the default one, once: it is remembered from then on.
 ## The System panel

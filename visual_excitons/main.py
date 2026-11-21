@@ -38,8 +38,9 @@ def commandLineParser():
 def startupRequest(parser, arguments):
     """
     What to open at startup from the command line: None, ('session', path) or
-    ('dataset', dataset, where it was looked for). Exits through the parser,
-    with a message, when the arguments cannot be used.
+    ('dataset', dataset, where it was looked for, the kinds given explicitly:
+    'save', 'diago', 'qp'). Exits through the parser, with a message, when the
+    arguments cannot be used.
     """
     args = parser.parse_args(arguments)
     explicit = (args.save, args.bse, args.qp)
@@ -55,7 +56,8 @@ def startupRequest(parser, arguments):
         dataset = datasetFromPaths(args.path, *explicit)
     except ValueError as error:
         parser.error(str(error))
-    return ('dataset', dataset, args.path or args.save or args.bse or args.qp)
+    fixed = tuple(key for key, given in zip(('save', 'diago', 'qp'), explicit) if given)
+    return ('dataset', dataset, args.path or args.save or args.bse or args.qp, fixed)
 
 
 def main(argv=None):

@@ -6,12 +6,20 @@ A dataset is a SAVE directory (ns.db1), a BSE directory (ndb.BS_diago_Q*)
 and, for GW calculations, a QP directory (ndb.QP, or QP databases of other
 names: they are recognised by their content, see databases.py). They can be
 found inside a common folder, as in data/<system>/{save, diagos, qp}, or in
-the step folders of a Visual Workflows project, as in
-<project>/03-p2y/outputs/SAVE and <project>/05-bse/outputs/diago; or given
-one by one (datasetFromPaths, the command line).
+the steps of a Visual Workflows project, as in <project>/03-p2y/outputs/SAVE
+and <project>/05-bse/outputs/diago; or given one by one (datasetFromPaths,
+the command line).
+
+A Visual Workflows project is recognised by its project.toml (format
+"workflow-project/<n>"), which lists its steps: each step's outputs/ folder,
+where the project's results are downloaded, is searched SEARCH_DEPTH levels
+deep, so that results deeper in the project (Yambo jobs in subfolders, SAVE
+inside a QE prefix.save) are found too, and nothing else in the project is
+searched. With several candidates (two BSE steps), datasetChoices lists them.
 """
 
 import os
+import tomllib
 from pathlib import Path, PurePath
 
 import numpy as np
@@ -25,8 +33,15 @@ from .lattice_info import (latticeSummary, cellParameters, ibravCandidates, SYMM
                            LATTICE_SYMMETRY)
 
 
-# How deep to look below the chosen folder
+# How deep to look below the chosen folder (or below each outputs/ folder of
+# a Visual Workflows project)
 SEARCH_DEPTH = 3
+
+# Visual Workflows projects: their file, the kind in its format key
+# ("workflow-project/1"), and the folder of each step with its results
+WORKFLOWS_PROJECT_FILE = 'project.toml'
+WORKFLOWS_PROJECT_FORMAT = 'workflow-project'
+WORKFLOWS_OUTPUTS = 'outputs'
 
 
 def _directoriesWith(root: Path, kind: str, depth: int):
@@ -46,22 +61,82 @@ def _directoriesWith(root: Path, kind: str, depth: int):
     return found
 
 
+def projectSteps(folder):
+    """
+    The outputs/ folders of the steps of the Visual Workflows project in
+    `folder`, in the project's order (those that exist), or None if `folder`
+    is not such a project.
+    """
+    root = Path(folder)
+    try:
+        data = tomllib.loads((root / WORKFLOWS_PROJECT_FILE).read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    kind = data.get('format')
+    if not isinstance(kind, str) or kind.partition('/')[0] != WORKFLOWS_PROJECT_FORMAT:
+        return None
+    steps = data.get('steps')
+    if not isinstance(steps, list):
+        return None
+    folders = []
+    for step in steps:
+        # Step ids are folder names in the project: nothing else is searched
+        if isinstance(step, str) and step not in ('', '.', '..') and '/' not in step and '\\' not in step:
+            outputs = root / step / WORKFLOWS_OUTPUTS
+            if outputs.is_dir():
+                folders.append(outputs)
+    return folders
+
+
+def datasetChoices(folder):
+    """
+    Every directory of each kind found in the Visual Workflows project in
+    `folder`, as a dict with keys 'save', 'diago' and 'qp' (lists, in the
+    project's order; findDataset takes the first of each). Empty lists when
+    `folder` is not a project.
+    """
+    root = Path(folder).expanduser().resolve()
+    steps = projectSteps(root)
+    choices = {}
+    for key, kind in (('save', LATTICE), ('diago', BSE), ('qp', QP)):
+        choices[key] = [str(directory) for outputs in steps or []
+                        for directory in _directoriesWith(outputs, kind, SEARCH_DEPTH)]
+    return choices
+
+
+def _datasetFrom(save, diago, qp):
+    dataset = {'save': save, 'diago': diago, 'qp': qp, 'gw': qp is not None}
+    if qp:
+        # The QP database used there, by default (several may be found)
+        dataset['qpFile'] = qpDatabases(qp)[0]['name']
+    return dataset
+
+
 def findDataset(folder):
     """
     Directories of the databases inside `folder` (or `folder` itself), as a
     dict with keys 'save', 'diago' and 'qp' (None when not found) and 'gw'
     (whether a QP database was found).
 
-    The SAVE directory is searched first. The BSE and QP directories are then
-    searched next to it, so that a folder with several systems is never
-    mixed up. When there are none there and the folder holds a single SAVE
-    directory, the whole folder is searched: a Visual Workflows project keeps
-    SAVE in the p2y step's folder and the BSE and GW results in steps of their
-    own (<project>/03-p2y/outputs/SAVE, <project>/05-bse/outputs/diago).
+    In a Visual Workflows project (project.toml), each step's outputs/ folder
+    is searched, and the first directory of each kind, in the project's order,
+    is taken (datasetChoices lists them all).
+
+    Elsewhere, the SAVE directory is searched first. The BSE and QP
+    directories are then searched next to it, so that a folder with several
+    systems is never mixed up. When there are none there and the folder holds
+    a single SAVE directory, the whole folder is searched: a copy of a Visual
+    Workflows project without its project.toml keeps SAVE in the p2y step's
+    folder and the BSE and GW results in steps of their own
+    (<project>/03-p2y/outputs/SAVE, <project>/05-bse/outputs/diago).
     """
     root = Path(folder).expanduser().resolve()
-    dataset = {'save': None, 'diago': None, 'qp': None}
+    if projectSteps(root) is not None:
+        # A Visual Workflows project: its steps' results, the first of each kind
+        choices = datasetChoices(root)
+        return _datasetFrom(*(choices[key][0] if choices[key] else None for key in ('save', 'diago', 'qp')))
 
+    dataset = {'save': None, 'diago': None, 'qp': None}
     places = [root]
     saves = _directoriesWith(root, LATTICE, SEARCH_DEPTH)
     if saves:
@@ -76,11 +151,7 @@ def findDataset(folder):
             if directories:
                 dataset[key] = str(directories[0])
                 break
-    dataset['gw'] = dataset['qp'] is not None
-    if dataset['qp']:
-        # The QP database used there, by default (several may be found)
-        dataset['qpFile'] = qpDatabases(dataset['qp'])[0]['name']
-    return dataset
+    return _datasetFrom(dataset['save'], dataset['diago'], dataset['qp'])
 
 
 def datasetFromPaths(folder=None, save=None, bse=None, qp=None):

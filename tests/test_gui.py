@@ -50,6 +50,33 @@ def test_command_line_requests(window, monkeypatch, tmp_path):
     assert opened[-1] == 'a.vxsession'
 
 
+def test_choosing_among_project_steps(window, monkeypatch, tmp_path):
+    """A project with two BSE steps: the user picks one, unless the command line gave it."""
+    from test_core import makeWorkflowsProject
+    from visual_excitons.core.dataset import findDataset
+    project = makeWorkflowsProject(tmp_path, projectFile=True)
+    (project / '06-bse-q/outputs/diago').mkdir(parents=True)
+    (project / '06-bse-q/outputs/diago/ndb.BS_diago_Q1').touch()
+    (project / 'project.toml').write_text((project / 'project.toml').read_text().replace('"05-bse"', '"05-bse", "06-bse-q"'))
+    asked, opened = [], []
+    monkeypatch.setattr(window, 'openDataset', lambda dataset: opened.append(dataset))
+
+    def pick(parent, title, text, items, current, editable):
+        asked.append((text, list(items), current))
+        return items[1], True
+    monkeypatch.setattr(main_window.QInputDialog, 'getItem', pick)
+    assert window.openFoundDataset(findDataset(project), str(project))
+    assert asked == [('Several steps of the project have BSE results. Which ones?',
+                      ['05-bse/outputs/diago', '06-bse-q/outputs/diago'], 0)]
+    assert opened[-1]['diago'] == str(project / '06-bse-q/outputs/diago')
+    # Given on the command line: not asked
+    window.openRequested(('dataset', findDataset(project), str(project), ('diago',)))
+    assert len(asked) == 1 and opened[-1]['diago'] == str(project / '05-bse/outputs/diago')
+    # Cancelled: nothing opened
+    monkeypatch.setattr(main_window.QInputDialog, 'getItem', lambda *args: ('', False))
+    assert not window.openFoundDataset(findDataset(project), str(project)) and len(opened) == 2
+
+
 def openPanels(window):
     return {key for key, dock in window.panels.docks.items() if not dock.isClosed()}
 

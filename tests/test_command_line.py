@@ -16,8 +16,8 @@ def test_nothing_to_open():
 
 def test_folder(tmp_path):
     project = makeWorkflowsProject(tmp_path)
-    kind, dataset, where = request(project)
-    assert kind == 'dataset' and where == str(project)
+    kind, dataset, where, fixed = request(project)
+    assert kind == 'dataset' and where == str(project) and fixed == ()
     assert dataset['save'] == str(project / '03-p2y/outputs/SAVE') and dataset['diago'] == str(project / '05-bse/outputs/diago')
 
 
@@ -25,10 +25,12 @@ def test_folder_and_directories(tmp_path):
     project = makeWorkflowsProject(tmp_path)
     (project / 'other').mkdir()
     (project / 'other/ndb.BS_diago_Q3').touch()
-    kind, dataset, where = request(project, '--bse', project / 'other')
+    kind, dataset, where, fixed = request(project, '--bse', project / 'other')
     assert dataset['diago'] == str(project / 'other') and dataset['qpFile'] == 'ndb.QP'
-    kind, dataset, where = request('--save', project / '03-p2y/outputs/SAVE', '--bse', project / 'other')
+    assert fixed == ('diago',)          # not asked again when the project has several
+    kind, dataset, where, fixed = request('--save', project / '03-p2y/outputs/SAVE', '--bse', project / 'other')
     assert where == str(project / '03-p2y/outputs/SAVE') and dataset['qp'] is None
+    assert fixed == ('save', 'diago')
 
 
 def test_session(tmp_path):
